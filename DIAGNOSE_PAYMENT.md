@@ -19,7 +19,7 @@ npm run start-server
 -- Check the `apiBaseUrl` value - it must be your deployed backend URL
 
 **If wrong:**
-- Set environment variable: `EXPO_PUBLIC_RORK_API_BASE_URL=https://YOUR_BACKEND_DOMAIN`
+- Set environment variable: `EXPO_PUBLIC_RORK_API_BASE_URL=https://xpass-b66g.onrender.com`
 
 ### 3. Check Browser Console
 
@@ -32,7 +32,7 @@ npm run start-server
 [Payment] API server health check: 200
 [Payment] Step 1: Initiating 3DS authentication...
 [Payment] Mutation state before call: {...}
-[tRPC] Making request to: https://YOUR_BACKEND_DOMAIN/trpc/payments.initiate3ds
+[tRPC] Making request to: https://xpass-b66g.onrender.com/trpc/payments.initiate3ds
 ```
 
 **If you see errors:**
@@ -57,8 +57,8 @@ npm run start-server
 ### 5. Test API Directly
 
 **Open browser and visit:**
-- `https://YOUR_BACKEND_DOMAIN/` - Should show: `{"status":"ok","message":"API is running"}`
-- `https://YOUR_BACKEND_DOMAIN/api` - Should show: `{"status":"ok","message":"API endpoint is accessible"}`
+- `https://xpass-b66g.onrender.com/` - Should show: `{"status":"ok","message":"API is running"}`
+- `https://xpass-b66g.onrender.com/api` - Should show: `{"status":"ok","message":"API endpoint is accessible"}`
 
 **If these don't work:**
 - Server is not running
@@ -101,7 +101,7 @@ npm run start-server
    ```
 
 2. **Verify server is running:**
-   - Visit: `https://YOUR_BACKEND_DOMAIN/`
+   - Visit: `https://xpass-b66g.onrender.com/`
    - Should see JSON response
 
 3. **Start frontend:**

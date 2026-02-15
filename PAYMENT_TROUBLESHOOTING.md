@@ -20,11 +20,11 @@ The payment API requires the backend server to be running separately.
 4. **Keep this terminal running** - don't close it!
 
 5. **In your app build, make sure the API URL is set:**
-   - `EXPO_PUBLIC_RORK_API_BASE_URL=https://YOUR_BACKEND_DOMAIN`
+   - `EXPO_PUBLIC_RORK_API_BASE_URL=https://xpass-b66g.onrender.com`
 
 ### Verify Server is Running
 
-1. Open your browser and visit your backend health endpoint: `https://YOUR_BACKEND_DOMAIN/`
+1. Open your browser and visit your backend health endpoint: `https://xpass-b66g.onrender.com/`
 2. You should see a JSON response indicating the server is running
 
 ### Check Browser/App Console
@@ -44,7 +44,7 @@ The payment API requires the backend server to be running separately.
 #### Issue: "Network error" or "Failed to fetch"
 - **Cause**: Server URL is incorrect or backend is not reachable from the device
 - **Fix**:
-  - Set `EXPO_PUBLIC_RORK_API_BASE_URL=https://YOUR_BACKEND_DOMAIN`
+  - Set `EXPO_PUBLIC_RORK_API_BASE_URL=https://xpass-b66g.onrender.com`
 
 #### Issue: "Payment gateway is not configured"
 - **Cause**: Mastercard gateway credentials missing (but this is already configured)
@@ -90,7 +90,7 @@ The payment API requires the backend server to be running separately.
 ```
 [Payment] Starting payment process...
 [Payment] Step 1: Initiating 3DS authentication...
-[tRPC] Making request to: https://YOUR_BACKEND_DOMAIN/trpc/payments.initiate3ds
+[tRPC] Making request to: https://xpass-b66g.onrender.com/trpc/payments.initiate3ds
 [tRPC] Response status: 200
 [Payment] Initiate response: {...}
 ```

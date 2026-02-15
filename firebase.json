@@ -6,6 +6,7 @@
     "rules": "storage.rules"
   },
   "hosting": {
+    "site": "xpass-rork-1e6ad",
     "public": "dist",
     "ignore": [
       "firebase.json",

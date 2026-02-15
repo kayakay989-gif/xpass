@@ -246,7 +246,7 @@ export async function authenticatePayer(params: {
     amount,
     currency,
     redirectResponseUrl,
-    ipAddress = '127.0.0.1',
+    ipAddress = '0.0.0.0',
     browser = 'MOZILLA',
     browserDetails = defaultBrowserDetails,
   } = params;
