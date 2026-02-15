@@ -1,6 +1,6 @@
 import { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import { initTRPC } from "@trpc/server";
-import superjson from "superjson";
+import superjson from "superjson/dist/index.js";
 import admin from "@/backend/lib/firebase-admin";
 import { adminDb } from "@/backend/lib/firebase-admin";
 import { getGymOwnerSessionByToken } from "@/backend/lib/gym-owner-auth";

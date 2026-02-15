@@ -6,7 +6,8 @@
     "start": "bunx rork start -p iykldg74p6ypeutvj3qf3 --tunnel",
     "start-web": "bunx rork start -p iykldg74p6ypeutvj3qf3 --web --tunnel",
     "start-web-dev": "DEBUG=expo* bunx rork start -p iykldg74p6ypeutvj3qf3 --web --tunnel",
-    "start-server": "ts-node -r tsconfig-paths/register --project tsconfig.server-node.json server-standalone.ts",
+    "build-server": "tsc -p tsconfig.server-node.json",
+    "start-server": "node dist/server-standalone.js",
     "lint": "expo lint",
     "seed-gyms": "bun scripts/seed-gyms.ts"
   },
@@ -63,6 +64,7 @@
     "react-native-webview": "13.12.4",
     "stripe": "^19.2.0",
     "superjson": "^2.2.2",
+    "tsconfig-paths": "^4.2.0",
     "zod": "^4.1.12",
     "zustand": "^5.0.2"
   },
@@ -78,7 +80,6 @@
     "eslint-config-expo": "9.2.0",
     "expo-build-properties": "^1.0.9",
     "ts-node": "^10.9.2",
-    "tsconfig-paths": "^4.2.0",
     "tsx": "^4.20.6",
     "typescript": "~5.9.2"
   },

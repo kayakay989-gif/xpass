@@ -1,8 +1,18 @@
-// Server entry point - uses the original backend/hono.ts
-import { serve } from '@hono/node-server';
-import app from './backend/hono';
-import dotenv from 'dotenv';
+// Server entry point - production Node build
+// Register TS path aliases for compiled JS (so imports like "@/backend/..." resolve under Node).
+// IMPORTANT: do this before requiring any modules that use path aliases.
 import fs from 'fs';
+import { register } from 'tsconfig-paths';
+import dotenv from 'dotenv';
+
+// IMPORTANT: baseUrl must point to the compiled output directory so `@/*` resolves to `dist/*`.
+register({ baseUrl: __dirname, paths: { '@/*': ['*'] } });
+
+// After registering path aliases, load the server.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { serve } = require('@hono/node-server');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const app = require('./backend/hono').default;
 
 // Load local environment variables (not committed)
 // Supported: .env.local (recommended), falls back to .env if present.
@@ -19,7 +29,7 @@ console.log(`[Server] Starting backend server on port ${port}...`);
 serve({
   fetch: app.fetch,
   port,
-}, (info) => {
+}, (info: { port: number }) => {
   console.log(`[Server] ✅ Backend server running (port ${info.port})`);
 });
 

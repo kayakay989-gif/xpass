@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "CommonJS",
     "moduleResolution": "node",
     "lib": ["ES2022"],
     "strict": true,
@@ -11,6 +11,9 @@
     "resolveJsonModule": true,
     "declaration": false,
     "sourceMap": false,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
     }
@@ -25,9 +28,6 @@
   "include": [
     "server-standalone.ts",
     "backend/**/*",
-    "lib/firebase.ts",
-    "lib/firestore.ts",
-    "lib/config.ts",
     "types/**/*"
   ],
   "exclude": [
