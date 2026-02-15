@@ -137,10 +137,8 @@
 
 ### Step 2: Verify Firebase Configuration
 1. Check `lib/firebase.ts`:
-   ```typescript
-   apiKey: "AIzaSyB5Sa5PqdEWbUPI-tyBLyywcLM6DbmTkDc" // ✅ Correct
-   ```
-   NOT: `"AlzaSy..."` ❌
+   - Firebase config must come from `EXPO_PUBLIC_FIREBASE_*` env vars
+   - No Firebase API keys should be hardcoded in the repo
 
 2. Check Firebase Console:
    - Project ID: `xpass-rork-1e6ad`

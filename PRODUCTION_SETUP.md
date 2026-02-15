@@ -101,7 +101,7 @@ service cloud.firestore {
    - ✅ Maps JavaScript API
 
 5. Go to **APIs & Services** → **Credentials**
-6. Click on your API key: `AIzaSyAkJ16NXPlpTqFRUrLtlc80jJiTL-j3Tpg`
+6. Click on your API key (do not commit it into the repo)
 7. Set **API restrictions**:
    - **Android**: Restrict by package name: `app.rork.xpass-multi-gym-fitness-subscription-app`
    - **iOS**: Restrict by bundle ID: `app.rork.xpass-multi-gym-fitness-subscription-app`

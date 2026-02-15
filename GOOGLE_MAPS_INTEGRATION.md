@@ -5,9 +5,8 @@ This app has been integrated with Google Maps API for displaying gym locations o
 ## What's Been Integrated
 
 ### 1. Google Maps API Configuration
-- **API Key**: Configured in `app.json` and `lib/google-maps-config.ts`
-- **Android Configuration**: Google Maps API key added to Android config
-- **iOS Configuration**: Google Maps API key added to iOS config
+- **API Key**: Provided via environment variable `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY`
+- **Android/iOS Configuration**: Injected at build time via `app.config.ts`
 - **Web Configuration**: Google Maps JavaScript API integration
 
 ### 2. MapView Components
@@ -23,35 +22,36 @@ This app has been integrated with Google Maps API for displaying gym locations o
 
 ### API Key Location
 
-The Google Maps API key is configured in:
-- `app.json` - For native builds (Android & iOS)
-- `lib/google-maps-config.ts` - Centralized configuration
+The Google Maps API key is configured via:
+- `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` (EAS secrets / build env)
+- `lib/google-maps-config.ts` (reads the env var)
+- `app.config.ts` (injects into native config at build time)
 
 ```typescript
-export const GOOGLE_MAPS_API_KEY = "AIzaSyAkJ16NXPlpTqFRUrLtlc80jJiTL-j3Tpg";
+export const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 ```
 
 ### App Configuration
 
-**Android** (`app.json`):
+**Android** (injected via `app.config.ts`):
 ```json
 {
   "android": {
     "config": {
       "googleMaps": {
-        "apiKey": "AIzaSyAkJ16NXPlpTqFRUrLtlc80jJiTL-j3Tpg"
+        "apiKey": "REPLACE_ME"
       }
     }
   }
 }
 ```
 
-**iOS** (`app.json`):
+**iOS** (injected via `app.config.ts`):
 ```json
 {
   "ios": {
     "config": {
-      "googleMapsApiKey": "AIzaSyAkJ16NXPlpTqFRUrLtlc80jJiTL-j3Tpg"
+      "googleMapsApiKey": "REPLACE_ME"
     }
   }
 }

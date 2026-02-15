@@ -3,7 +3,7 @@
 ## Immediate Fixes Applied
 
 ### ✅ Fixed: Firebase API Key Typo
-- **Changed**: `AlzaSy` → `AIzaSy` in:
+- **Changed**: invalid API key prefix to a correct Firebase API key prefix in:
   - `lib/firebase.ts`
   - `lib/config.ts`
 
