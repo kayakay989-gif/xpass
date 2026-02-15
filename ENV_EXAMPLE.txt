@@ -1,0 +1,20 @@
+# Copy to `.env.local` (recommended) and fill in values.
+# `.env.local` is ignored by git (see .gitignore).
+
+# Backend base URL for the mobile/web app to call:
+# EXPO_PUBLIC_RORK_API_BASE_URL=https://YOUR_BACKEND_DOMAIN
+
+# Mastercard Payment Gateway (MPGS) configuration
+# Sandbox (MTF)
+# MPG_HOST=test-network.mtf.gateway.mastercard.com
+# MPG_API_VERSION=100
+
+# Production (host varies by region; use the host part only, without /api)
+# Example AP region URL: https://ap-gateway.mastercard.com/api  ->  MPG_HOST=ap-gateway.mastercard.com
+# Example global URL:     https://gateway.mastercard.com/api     ->  MPG_HOST=gateway.mastercard.com
+
+MPG_MERCHANT_ID=
+MPG_API_USERNAME=
+MPG_API_PASSWORD=
+MPG_API_VERSION=100
+

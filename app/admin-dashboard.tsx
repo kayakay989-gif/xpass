@@ -1,0 +1,2218 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl,
+  Modal,
+  Alert,
+  Image,
+  Platform,
+} from 'react-native';
+import { Stack, useRouter } from 'expo-router';
+import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns } from '@/lib/firestore';
+import {
+  Shield,
+  Users,
+  User as UserIcon,
+  Building2,
+  Calendar,
+  DollarSign,
+  Search,
+  TrendingUp,
+  Plus,
+  X,
+  MapPin,
+  Image as ImageIcon,
+  QrCode,
+  Copy,
+  CheckCircle,
+} from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { GymCategory, SubscriptionTier } from '@/types';
+import * as ImagePicker from 'expo-image-picker';
+import * as Crypto from 'expo-crypto';
+import * as Clipboard from 'expo-clipboard';
+import GymLocationPicker from '@/components/GymLocationPicker';
+import { useAuth } from '@/contexts/AuthContext';
+import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
+
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins';
+
+const TIER_COLORS = {
+  silver: '#C0C0C0',
+  gold: '#FFD700',
+  diamond: '#B9F2FF',
+  elite: '#9333EA',
+  none: '#9CA3AF',
+} as const;
+
+export default function AdminDashboardScreen() {
+  const router = useRouter();
+  const { isLoading: isAuthLoading, isCheckingAdmin, isAdmin, isAuthenticated } = useAuth();
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
+  const [editingGymId, setEditingGymId] = useState<string | null>(null);
+  const [editingGymOwnerId, setEditingGymOwnerId] = useState<string | null>(null);
+  const [newGym, setNewGym] = useState({
+    name: '',
+    address: '',
+    city: '',
+    latitude: '',
+    longitude: '',
+    category: 'standard' as GymCategory,
+    amenities: '',
+    hours: '6:00 AM - 10:00 PM',
+    imageUrl: '',
+    allowedTiers: [] as SubscriptionTier[],
+    email: '',
+    ownerName: '',
+  });
+  const [isMapModalVisible, setIsMapModalVisible] = useState(false);
+  const [tempLocation, setTempLocation] = useState({
+    latitude: 31.963158,
+    longitude: 35.930359,
+  });
+  const [isCreatingGym, setIsCreatingGym] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [createdGymData, setCreatedGymData] = useState<{
+    gymId: string;
+    gymName: string;
+    username: string;
+    password: string;
+  } | null>(null);
+
+  // Load data once and keep it warm to avoid reloading on every tab switch
+  const commonQueryOptions = {
+    refetchOnWindowFocus: false,
+    staleTime: 60 * 1000, // 1 minute
+  } as const;
+
+  // Use direct Firestore queries instead of tRPC - no backend server needed
+  const [gyms, setGyms] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [checkIns, setCheckIns] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Load data from Firestore directly
+  const loadData = async () => {
+    try {
+      setIsLoadingData(true);
+      
+      // Load all data in parallel
+      const [gymsData, usersData, checkInsData, subscriptionsData] = await Promise.all([
+        firestoreGyms.getAll(),
+        firestoreUsers.getAll(),
+        firestoreCheckIns.getAll(),
+        firestoreSubscriptions.getAll(),
+      ]);
+
+      setGyms(gymsData);
+      
+      // Enrich users with subscription data
+      const usersWithSubs = usersData.map((user: any) => {
+        const subscription = subscriptionsData.find((sub: any) => sub.userId === user.id && sub.isActive);
+        return {
+          ...user,
+          subscription,
+        };
+      });
+      setUsers(usersWithSubs);
+      
+      setCheckIns(checkInsData);
+
+      // Calculate stats
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayCheckIns = checkInsData.filter((ci: any) => {
+        const ciDate = new Date(ci.timestamp);
+        ciDate.setHours(0, 0, 0, 0);
+        return ciDate.getTime() === today.getTime();
+      });
+
+      const activeSubs = subscriptionsData.filter((sub: any) => sub.isActive);
+
+      // Calculate revenue (sum of all subscription total prices)
+      const totalRevenue = subscriptionsData.reduce((sum: number, sub: any) => sum + (sub.totalPrice || 0), 0);
+
+      setStats({
+        totalUsers: usersData.length,
+        totalGyms: gymsData.length,
+        totalCheckIns: checkInsData.length,
+        todayCheckIns: todayCheckIns.length,
+        activeSubscriptions: activeSubs.length,
+        totalRevenue,
+      });
+    } catch (error) {
+      console.error('[Admin] Error loading data:', error);
+      Alert.alert('Error', 'Failed to load data from Firestore');
+    } finally {
+      setIsLoadingData(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  // Load data on mount and when refreshing
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await loadData();
+  };
+
+  // Enrich check-ins with user and gym names
+  const enrichedCheckIns = useMemo(() => {
+    return checkIns.map((checkIn: any) => {
+      const user = users.find((u: any) => u.id === checkIn.userId);
+      const gym = gyms.find((g: any) => g.id === checkIn.gymId);
+      
+      return {
+        ...checkIn,
+        userName: user?.name || 'Unknown',
+        userEmail: user?.email || '',
+        gymName: gym?.name || 'Unknown Gym',
+        tier: user?.subscription?.tier || 'none',
+      };
+    }).sort((a: any, b: any) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }, [checkIns, users, gyms]);
+
+  // Add stats to gyms
+  const gymsWithStats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return gyms.map((gym: any) => {
+      const gymCheckIns = checkIns.filter((ci: any) => ci.gymId === gym.id);
+      const todayCheckIns = gymCheckIns.filter((ci: any) => {
+        const ciDate = new Date(ci.timestamp);
+        ciDate.setHours(0, 0, 0, 0);
+        return ciDate.getTime() === today.getTime();
+      });
+      
+      return {
+        ...gym,
+        totalCheckIns: gymCheckIns.length,
+        todayCheckIns: todayCheckIns.length,
+      };
+    });
+  }, [gyms, checkIns]);
+
+  const filteredUsers = useMemo(() => {
+    if (!searchQuery) return users;
+    return users.filter(
+      (u: any) =>
+        u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.email.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [users, searchQuery]);
+
+  const filteredGyms = useMemo(() => {
+    if (!searchQuery) return gymsWithStats;
+    return gymsWithStats.filter(
+      (g: any) =>
+        g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        g.address.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [gymsWithStats, searchQuery]);
+
+  const filteredCheckIns = useMemo(() => {
+    if (!searchQuery) return enrichedCheckIns;
+    return enrichedCheckIns.filter(
+      (ci: any) =>
+        ci.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ci.gymName.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [enrichedCheckIns, searchQuery]);
+
+  const generateId = async (): Promise<string> => {
+    if (Platform.OS === 'web' && typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    if (Crypto.randomUUID) {
+      return await Crypto.randomUUID();
+    }
+    return Math.random().toString(36).substring(2, 12);
+  };
+
+  const resetGymForm = () => {
+    setNewGym({
+      name: '',
+      address: '',
+      city: '',
+      latitude: '',
+      longitude: '',
+      category: 'standard',
+      amenities: '',
+      hours: '6:00 AM - 10:00 PM',
+      imageUrl: '',
+      allowedTiers: [],
+      email: '',
+      ownerName: '',
+    });
+    setEditingGymId(null);
+    setEditingGymOwnerId(null);
+    setTempLocation({
+      latitude: 31.963158,
+      longitude: 35.930359,
+    });
+  };
+
+  const confirmAction = async (title: string, message: string): Promise<boolean> => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // eslint-disable-next-line no-alert
+      return window.confirm(`${title}\n\n${message}`);
+    }
+
+    return await new Promise((resolve) => {
+      Alert.alert(title, message, [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'OK', onPress: () => resolve(true) },
+      ]);
+    });
+  };
+
+  const startEditGym = async (gym: any) => {
+    try {
+      setEditingGymId(gym.id);
+      setEditingGymOwnerId(null);
+
+      setNewGym({
+        name: gym.name || '',
+        address: gym.address || '',
+        city: gym.city || '',
+        latitude: typeof gym.latitude === 'number' ? String(gym.latitude) : (gym.latitude || ''),
+        longitude: typeof gym.longitude === 'number' ? String(gym.longitude) : (gym.longitude || ''),
+        category: gym.category || 'standard',
+        amenities: Array.isArray(gym.amenities) ? gym.amenities.join(', ') : (gym.amenities || ''),
+        hours: gym.hours || '6:00 AM - 10:00 PM',
+        imageUrl: gym.imageUrl || '',
+        allowedTiers: Array.isArray(gym.allowedTiers) ? gym.allowedTiers : [],
+        // Prefer values stored on the gym doc (if present), then try gymOwners lookup below.
+        email: gym.ownerEmail || gym.email || '',
+        ownerName: gym.ownerName || '',
+      });
+
+      // Load owner contact info (best-effort)
+      const owner = await firestoreGymOwners.getByGymId(gym.id).catch(() => null);
+      if (owner) {
+        setEditingGymOwnerId(owner.id);
+        setNewGym((prev) => ({
+          ...prev,
+          email: owner.email || '',
+          ownerName: owner.name || '',
+        }));
+      }
+
+      setShowAddGymModal(true);
+    } catch (e) {
+      console.error('[Admin] Failed to start edit gym:', e);
+      Alert.alert('Error', 'Failed to load gym details for editing.');
+    }
+  };
+
+  const handleDeleteGym = async () => {
+    if (!editingGymId) return;
+
+    const ok = await confirmAction(
+      'Delete Gym',
+      'Are you sure you want to delete this gym? This cannot be undone.'
+    );
+    if (!ok) return;
+
+    try {
+      await firestoreGyms.delete(editingGymId);
+      const owner = editingGymOwnerId
+        ? { id: editingGymOwnerId }
+        : await firestoreGymOwners.getByGymId(editingGymId).catch(() => null);
+      if (owner?.id) {
+        await firestoreGymOwners.delete(owner.id);
+      }
+      setShowAddGymModal(false);
+      resetGymForm();
+      await loadData();
+      setActiveTab('gyms');
+    } catch (e: any) {
+      console.error('[Admin] Delete gym failed:', e);
+      Alert.alert('Error', e?.message || 'Failed to delete gym.');
+    }
+  };
+
+  const handleAddGym = async () => {
+    console.log('[Admin] Add gym button clicked');
+    console.log('[Admin] Form data:', newGym);
+    
+    if (!newGym.name || !newGym.address || !newGym.city) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    if (!newGym.latitude || !newGym.longitude) {
+      Alert.alert('Error', 'Please select the gym location on the map');
+      return;
+    }
+
+    const isEditing = !!editingGymId;
+    if (!isEditing && (!newGym.email || !newGym.ownerName)) {
+      Alert.alert('Error', 'Owner name and email are required');
+      return;
+    }
+
+    const latitude = parseFloat(newGym.latitude);
+    const longitude = parseFloat(newGym.longitude);
+
+    if (isNaN(latitude) || isNaN(longitude)) {
+      Alert.alert('Error', 'Please enter valid latitude and longitude');
+      return;
+    }
+
+    const amenities = newGym.amenities
+      ? newGym.amenities.split(',').map((a) => a.trim()).filter((a) => a.length > 0)
+      : [];
+
+    const gymData = {
+      name: newGym.name.trim(),
+      address: newGym.address.trim(),
+      city: newGym.city.trim(),
+      latitude,
+      longitude,
+      category: newGym.category,
+      amenities,
+      hours: newGym.hours || '6:00 AM - 10:00 PM',
+      imageUrl: newGym.imageUrl?.trim() || undefined,
+      allowedTiers: newGym.allowedTiers.length > 0 ? newGym.allowedTiers : undefined,
+      // Owner contact (optional for edit, required for create)
+      email: newGym.email?.trim() || undefined,
+      ownerName: newGym.ownerName?.trim() || undefined,
+    };
+
+    console.log('[Admin] Submitting gym data:', gymData);
+    
+    setIsCreatingGym(true);
+    try {
+      const gymId = isEditing ? editingGymId! : await generateId();
+      const defaultAllowedTiers: SubscriptionTier[] =
+        gymData.category === 'elite'
+          ? ['elite']
+          : gymData.category === 'diamond'
+          ? ['diamond', 'elite']
+          : gymData.category === 'premium'
+          ? ['gold', 'diamond', 'elite']
+          : ['silver', 'gold', 'diamond', 'elite'];
+
+      const gymRecord: any = {
+        id: gymId,
+        name: gymData.name,
+        address: gymData.address,
+        city: gymData.city,
+        latitude: gymData.latitude,
+        longitude: gymData.longitude,
+        category: gymData.category,
+        amenities: gymData.amenities,
+        hours: gymData.hours,
+        imageUrl:
+          gymData.imageUrl ||
+          'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
+        allowedTiers: gymData.allowedTiers || defaultAllowedTiers,
+      };
+      // Persist owner contact on the gym doc for easy editing/display (even if gymOwners doc is missing)
+      if (gymData.email) gymRecord.ownerEmail = gymData.email;
+      if (gymData.ownerName) gymRecord.ownerName = gymData.ownerName;
+
+      if (isEditing) {
+        const { id: _ignoreId, ...gymUpdates } = gymRecord;
+        console.log('[Admin] Updating gym in Firestore:', gymId, gymUpdates);
+        await firestoreGyms.update(gymId, gymUpdates);
+        console.log('[Admin] Gym updated successfully in Firestore with ID:', gymId);
+      } else {
+        console.log('[Admin] Creating gym in Firestore:', gymRecord);
+        await firestoreGyms.create(gymRecord);
+        console.log('[Admin] Gym created successfully in Firestore with ID:', gymId);
+      }
+
+      let username = '';
+      let password = '';
+
+      if (!isEditing) {
+        const sanitizedName = gymData.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '_')
+          .replace(/_+/g, '_')
+          .substring(0, 20);
+        username = `${sanitizedName}_${gymId.substring(0, 6)}`;
+        password = `gym_${gymId.substring(0, 8)}`;
+
+        // Store only a hash in Firestore (never plaintext).
+        // Format: sha256:<salt>:<hexDigest>
+        const salt = (await generateId()).slice(0, 16);
+        const passwordHash = `sha256:${salt}:${await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          `${salt}:${password}`
+        )}`;
+
+        // Try to create gym owner, but don't block the success flow if this fails
+        const ownerId = await generateId();
+        const gymOwnerData = {
+          id: ownerId,
+          gymId,
+          username,
+          passwordHash,
+          email: gymData.email,
+          name: gymData.ownerName,
+          createdAt: new Date(),
+        };
+        console.log('[Admin] Creating gym owner in Firestore:', gymOwnerData);
+        try {
+          await firestoreGymOwners.create(gymOwnerData);
+          console.log('[Admin] Gym owner created successfully in Firestore with ID:', ownerId);
+        } catch (ownerError: any) {
+          console.error('[Admin] failed to create gym owner record:', ownerError);
+          Alert.alert(
+            'Gym Owner Save Warning',
+            'The gym was created, but saving the gym owner record failed. You can still share the credentials shown next, but please contact support to fix owner access.'
+          );
+        }
+      } else {
+        // Update owner contact info if we have an owner record
+        const ownerId =
+          editingGymOwnerId ||
+          (await firestoreGymOwners.getByGymId(gymId).catch(() => null))?.id;
+        if (ownerId && (gymData.email || gymData.ownerName)) {
+          try {
+            await firestoreGymOwners.update(ownerId, {
+              ...(gymData.email ? { email: gymData.email } : {}),
+              ...(gymData.ownerName ? { name: gymData.ownerName } : {}),
+            } as any);
+          } catch (e) {
+            console.warn('[Admin] Failed to update gym owner contact info (non-fatal):', e);
+          }
+        }
+      }
+
+      // Close the add gym modal and show success modal with QR code
+      setShowAddGymModal(false);
+      resetGymForm();
+      if (!isEditing) {
+        setCreatedGymData({
+          gymId,
+          gymName: gymData.name,
+          username,
+          password,
+        });
+        setShowSuccessModal(true);
+      } else {
+        Alert.alert('Saved', 'Gym updated successfully.');
+      }
+      setActiveTab('gyms');
+      loadData(); // Reload data from Firestore
+    } catch (error: any) {
+      console.error('[Admin] create gym error:', error);
+      Alert.alert('Error', error?.message || 'Failed to submit gym. Please try again.');
+    } finally {
+      setIsCreatingGym(false);
+    }
+  };
+
+  const openMapModal = () => {
+    if (newGym.latitude && newGym.longitude) {
+      const lat = parseFloat(newGym.latitude);
+      const lng = parseFloat(newGym.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        setTempLocation({ latitude: lat, longitude: lng });
+      }
+    }
+    setIsMapModalVisible(true);
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await Clipboard.setStringAsync(text);
+      Alert.alert('Copied!', 'Credentials copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  };
+
+  const handleSuccessModalClose = () => {
+    setShowSuccessModal(false);
+    setCreatedGymData(null);
+    // Switch to gyms tab to show the newly added gym
+    setActiveTab('gyms');
+  };
+
+  const handleConfirmLocation = () => {
+    setNewGym({
+      ...newGym,
+      latitude: tempLocation.latitude.toString(),
+      longitude: tempLocation.longitude.toString(),
+    });
+    setIsMapModalVisible(false);
+  };
+
+  const handlePickImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please grant access to your photo library to upload a logo.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.length) {
+      setNewGym({ ...newGym, imageUrl: result.assets[0].uri });
+    }
+  };
+
+  useEffect(() => {
+    if (!isAuthLoading && !isCheckingAdmin) {
+      if (!isAuthenticated || !isAdmin) {
+        router.replace('/admin-login');
+      }
+    }
+  }, [isAuthLoading, isCheckingAdmin, isAuthenticated, isAdmin, router]);
+
+  const guardLoading = isAuthLoading || isCheckingAdmin;
+
+  // Map picker is provided by platform-specific GymLocationPicker component
+
+  const toggleTier = (tier: SubscriptionTier) => {
+    setNewGym((prev) => ({
+      ...prev,
+      allowedTiers: prev.allowedTiers.includes(tier)
+        ? prev.allowedTiers.filter((t) => t !== tier)
+        : [...prev.allowedTiers, tier],
+    }));
+  };
+
+  if (guardLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#DC2626" />
+      </View>
+    );
+  }
+
+  if (isLoadingData && gyms.length === 0 && users.length === 0) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#DC2626" />
+        <Text style={{ marginTop: 16, color: '#6B7280' }}>Loading data...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Stack.Screen
+        options={{
+          headerShown: false,
+        }}
+      />
+
+      <View style={styles.topBar}>
+        <View style={styles.brandRow}>
+          <Image
+            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
+          <Text style={styles.brandText}>XPASS</Text>
+        </View>
+
+        <View style={styles.topBarRight}>
+          <TouchableOpacity style={styles.langPill} activeOpacity={0.8}>
+            <Text style={styles.langText}>EN</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.profilePill} activeOpacity={0.8}>
+            <UserIcon size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {activeTab === 'overview' && (
+          <View style={styles.content}>
+            <Text style={styles.pageTitle}>Admin Console</Text>
+
+            <View style={styles.statsGrid2x2}>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>Active Users</Text>
+                <Text style={styles.statValueMinimal}>{stats?.totalUsers || 0}</Text>
+              </View>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>Check-ins</Text>
+                <Text style={styles.statValueMinimal}>{stats?.totalCheckIns || 0}</Text>
+              </View>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>Payouts Pending</Text>
+                <Text style={styles.statValueMinimal}>0</Text>
+              </View>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>Total Gyms</Text>
+                <Text style={styles.statValueMinimal}>{stats?.totalGyms || 0}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.primaryCta}
+              activeOpacity={0.9}
+              onPress={() => setShowAddGymModal(true)}
+            >
+              <Text style={styles.primaryCtaText}>Add a New Gym</Text>
+            </TouchableOpacity>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Monthly Payouts</Text>
+
+              {(gymsWithStats || []).slice(0, 2).map((g: any) => (
+                <View key={g.id} style={styles.payoutRow}>
+                  <Text style={styles.payoutGymName}>{g.name}</Text>
+                  <Text style={styles.payoutAmount}>JOD 0</Text>
+                </View>
+              ))}
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('gyms')}
+              >
+                <Text style={styles.secondaryButtonText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {activeTab === 'users' && (
+          <View style={styles.content}>
+            <Text style={styles.pageTitle}>Subscribers</Text>
+            <View style={styles.searchContainer}>
+              <Search size={20} color="#9CA3AF" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search users..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholderTextColor="#9CA3AF"
+              />
+            </View>
+
+            {filteredUsers.map((user: any) => (
+              <View key={user.id} style={styles.userCard}>
+                <View style={styles.userHeader}>
+                  <View style={styles.userIcon}>
+                    <Users size={24} color="#DC2626" />
+                  </View>
+                  <View style={styles.userInfo}>
+                    <Text style={styles.userName}>{user.name}</Text>
+                    <Text style={styles.userEmail}>{user.email}</Text>
+                    {user.subscription && (
+                      <View
+                        style={[
+                          styles.tierBadge,
+                          {
+                            backgroundColor:
+                              TIER_COLORS[user.subscription.tier as keyof typeof TIER_COLORS] + '20',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.tierText,
+                            { color: TIER_COLORS[user.subscription.tier as keyof typeof TIER_COLORS] },
+                          ]}
+                        >
+                          {user.subscription.tier.toUpperCase()} - {user.subscription.duration}mo
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                <View style={styles.userStats}>
+                  <View style={styles.userStat}>
+                    <Text style={styles.userStatLabel}>Wallet</Text>
+                    <Text style={styles.userStatValue}>${user.walletBalance || 0}</Text>
+                  </View>
+                  <View style={styles.userStat}>
+                    <Text style={styles.userStatLabel}>Code</Text>
+                    <Text style={styles.userStatValue}>{user.referralCode}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {activeTab === 'gyms' && (
+          <View style={styles.content}>
+            <View style={styles.pageHeaderBlock}>
+              <Text style={styles.pageTitle}>All Gyms</Text>
+              <Text style={styles.pageSubtitle}>Browse every gym partner on XPASS</Text>
+            </View>
+            <View style={styles.searchContainer}>
+              <Search size={20} color="#9CA3AF" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search gyms, areas"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholderTextColor="#9CA3AF"
+              />
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => setShowAddGymModal(true)}
+              >
+                <Plus size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {isLoadingData && filteredGyms.length === 0 && (
+              <View style={styles.loadingCard}>
+                <ActivityIndicator size="large" color="#DC2626" />
+                <Text style={styles.loadingText}>Loading gyms...</Text>
+              </View>
+            )}
+
+            {!isLoadingData && filteredGyms.length === 0 && (
+              <View style={styles.emptyCard}>
+                <Building2 size={48} color="#9CA3AF" />
+                <Text style={styles.emptyText}>No gyms found</Text>
+                <Text style={styles.emptySubtext}>
+                  Click the + button to add your first gym
+                </Text>
+              </View>
+            )}
+
+            <Text style={styles.listCount}>Showing {filteredGyms.length} gyms</Text>
+
+            {filteredGyms.map((gym: any) => (
+              <View key={gym.id} style={styles.gymRowCard}>
+                <Image
+                  source={{ uri: gym.imageUrl || 'https://placehold.co/140x90/png?text=Gym' }}
+                  style={styles.gymThumb}
+                />
+                <View style={styles.gymRowInfo}>
+                  <View style={styles.gymRowTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.gymName}>{gym.name}</Text>
+                      <Text style={styles.gymAddress}>{gym.city || gym.address}</Text>
+                      <View style={styles.amenitiesPills}>
+                        {(gym.amenities || []).slice(0, 3).map((a: string, idx: number) => (
+                          <View key={`${gym.id}-a-${idx}`} style={styles.pill}>
+                            <Text style={styles.pillText}>{a}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.editPill}
+                      activeOpacity={0.9}
+                      onPress={() => startEditGym(gym)}
+                    >
+                      <Text style={styles.editPillText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {activeTab === 'checkins' && (
+          <View style={styles.content}>
+            <Text style={styles.pageTitle}>Check-ins</Text>
+            <View style={styles.searchContainer}>
+              <Search size={20} color="#9CA3AF" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search check-ins..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholderTextColor="#9CA3AF"
+              />
+            </View>
+
+            {filteredCheckIns.map((checkIn: any) => {
+              const checkInDate = new Date(checkIn.timestamp);
+              return (
+                <View key={checkIn.id} style={styles.checkInCard}>
+                  <View style={styles.checkInHeader}>
+                    <View
+                      style={[
+                        styles.tierBadge,
+                        { backgroundColor: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] + '20' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.tierText,
+                          { color: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] },
+                        ]}
+                      >
+                        {checkIn.tier.toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.checkInInfo}>
+                      <Text style={styles.checkInUser}>{checkIn.userName}</Text>
+                      <Text style={styles.checkInGym}>{checkIn.gymName}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.checkInTime}>
+                    {checkInDate.toLocaleDateString()} at {checkInDate.toLocaleTimeString()}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+
+      <View style={styles.bottomTabs}>
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'overview' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('overview')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'overview' && styles.bottomTabIconWrapActive]}>
+            <TrendingUp size={20} color={activeTab === 'overview' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'overview' && styles.bottomTabLabelActive]}>
+            Home
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'gyms' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('gyms')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'gyms' && styles.bottomTabIconWrapActive]}>
+            <Building2 size={20} color={activeTab === 'gyms' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'gyms' && styles.bottomTabLabelActive]}>
+            Gyms
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'users' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('users')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'users' && styles.bottomTabIconWrapActive]}>
+            <Users size={20} color={activeTab === 'users' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'users' && styles.bottomTabLabelActive]}>
+            Subscribers
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'checkins' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('checkins')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'checkins' && styles.bottomTabIconWrapActive]}>
+            <Calendar size={20} color={activeTab === 'checkins' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'checkins' && styles.bottomTabLabelActive]}>
+            Check-ins
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Add Gym Modal */}
+      <Modal
+        visible={showAddGymModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAddGymModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{editingGymId ? 'Edit Gym' : 'Add New Gym'}</Text>
+              <TouchableOpacity onPress={() => setShowAddGymModal(false)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.label}>Gym Name *</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.name}
+                onChangeText={(text) => setNewGym({ ...newGym, name: text })}
+                placeholder="Enter gym name"
+              />
+
+              <Text style={styles.label}>Address *</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.address}
+                onChangeText={(text) => setNewGym({ ...newGym, address: text })}
+                placeholder="Enter address"
+              />
+
+              <Text style={styles.label}>City *</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.city}
+                onChangeText={(text) => setNewGym({ ...newGym, city: text })}
+                placeholder="Enter city"
+              />
+
+              <Text style={styles.label}>Location *</Text>
+              <TouchableOpacity style={styles.mapButton} onPress={openMapModal}>
+                <MapPin size={20} color="#fff" />
+                <Text style={styles.mapButtonText}>Select on Google Maps</Text>
+              </TouchableOpacity>
+              {newGym.latitude && newGym.longitude ? (
+                <Text style={styles.locationSummary}>
+                  Selected location: {parseFloat(newGym.latitude).toFixed(4)}, {parseFloat(newGym.longitude).toFixed(4)}
+                </Text>
+              ) : (
+                <Text style={styles.locationSummaryMuted}>No location selected yet</Text>
+              )}
+
+              <Text style={styles.label}>Category *</Text>
+              <View style={styles.categoryContainer}>
+                {(['standard', 'premium', 'diamond', 'elite'] as GymCategory[]).map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[
+                      styles.categoryButton,
+                      newGym.category === cat && styles.categoryButtonActive,
+                    ]}
+                    onPress={() => setNewGym({ ...newGym, category: cat })}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryText,
+                        newGym.category === cat && styles.categoryTextActive,
+                      ]}
+                    >
+                      {cat.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.label}>Allowed Subscription Tiers</Text>
+              <View style={styles.tierContainer}>
+                {(['silver', 'gold', 'diamond', 'elite'] as SubscriptionTier[]).map((tier) => (
+                  <TouchableOpacity
+                    key={tier}
+                    style={[
+                      styles.tierButton,
+                      newGym.allowedTiers.includes(tier) && styles.tierButtonActive,
+                    ]}
+                    onPress={() => toggleTier(tier)}
+                  >
+                    <Text
+                      style={[
+                        styles.tierText,
+                        newGym.allowedTiers.includes(tier) && styles.tierTextActive,
+                      ]}
+                    >
+                      {tier.toUpperCase()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.label}>Amenities (comma-separated)</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.amenities}
+                onChangeText={(text) => setNewGym({ ...newGym, amenities: text })}
+                placeholder="Pool, Sauna, Personal Training"
+                multiline
+              />
+
+              <Text style={styles.label}>Hours</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.hours}
+                onChangeText={(text) => setNewGym({ ...newGym, hours: text })}
+                placeholder="6:00 AM - 10:00 PM"
+              />
+
+              <Text style={styles.label}>Gym Logo</Text>
+              <TouchableOpacity style={styles.uploadButton} onPress={handlePickImage}>
+                <ImageIcon size={20} color="#fff" />
+                <Text style={styles.uploadButtonText}>Upload Logo</Text>
+              </TouchableOpacity>
+              {newGym.imageUrl ? (
+                <Image source={{ uri: newGym.imageUrl }} style={styles.logoPreview} resizeMode="cover" />
+              ) : (
+                <Text style={styles.locationSummaryMuted}>No logo selected</Text>
+              )}
+
+              <Text style={styles.label}>Owner Email *</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.email}
+                onChangeText={(text) => setNewGym({ ...newGym, email: text })}
+                placeholder="owner@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              <Text style={styles.label}>Owner Name *</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.ownerName}
+                onChangeText={(text) => setNewGym({ ...newGym, ownerName: text })}
+                placeholder="Gym Owner Name"
+              />
+
+              <TouchableOpacity
+                style={[styles.submitButton, isCreatingGym && { opacity: 0.6 }]}
+                onPress={handleAddGym}
+                disabled={isCreatingGym}
+              >
+                {isCreatingGym ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.submitButtonText}>{editingGymId ? 'Save Changes' : 'Add Gym'}</Text>
+                )}
+              </TouchableOpacity>
+
+              {editingGymId && (
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={handleDeleteGym}
+                  disabled={isCreatingGym}
+                >
+                  <Text style={styles.deleteButtonText}>Delete Gym</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Map Picker Modal */}
+      <Modal
+        visible={isMapModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsMapModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.mapModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Gym Location</Text>
+              <TouchableOpacity onPress={() => setIsMapModalVisible(false)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            <GymLocationPicker coordinate={tempLocation} onChange={setTempLocation} />
+            <View style={styles.mapFooter}>
+              <Text style={styles.locationSummary}>
+                {tempLocation.latitude.toFixed(4)}, {tempLocation.longitude.toFixed(4)}
+              </Text>
+              <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmLocation}>
+                <Text style={styles.confirmButtonText}>Use this location</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Success Modal with QR Code */}
+      <Modal
+        visible={showSuccessModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleSuccessModalClose}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.successModalContent}>
+            <View style={styles.modalHeader}>
+              <View style={styles.successHeader}>
+                <CheckCircle size={32} color="#10B981" />
+                <Text style={styles.successTitle}>Gym Added Successfully!</Text>
+              </View>
+              <TouchableOpacity onPress={handleSuccessModalClose}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.successScrollView} showsVerticalScrollIndicator={false}>
+              {createdGymData && (
+                <>
+                  <View style={styles.successInfo}>
+                    <Text style={styles.successGymName}>{createdGymData.gymName}</Text>
+                    <Text style={styles.successSubtext}>Gym ID: {createdGymData.gymId}</Text>
+                  </View>
+
+                  {/* QR Code Section */}
+                  <View style={styles.qrSection}>
+                    <QrCode size={24} color="#4F46E5" />
+                    <Text style={styles.qrTitle}>Gym QR Code</Text>
+                    <Text style={styles.qrSubtext}>
+                      Members can scan this code to check in
+                    </Text>
+                    <View style={styles.qrContainer}>
+                      <Image
+                        source={{
+                          uri: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=xpass-gym-${createdGymData.gymId}`,
+                        }}
+                        style={styles.qrImage}
+                      />
+                    </View>
+                    <Text style={styles.qrData}>xpass-gym-{createdGymData.gymId}</Text>
+                  </View>
+
+                  {/* Owner Credentials Section */}
+                  <View style={styles.credentialsSection}>
+                    <Text style={styles.credentialsTitle}>Gym Owner Credentials</Text>
+                    <Text style={styles.credentialsSubtext}>
+                      Share these credentials with the gym owner
+                    </Text>
+
+                    <View style={styles.credentialItem}>
+                      <Text style={styles.credentialLabel}>Username:</Text>
+                      <View style={styles.credentialValueContainer}>
+                        <Text style={styles.credentialValue}>{createdGymData.username}</Text>
+                        <TouchableOpacity
+                          style={styles.copyButton}
+                          onPress={() => copyToClipboard(createdGymData.username)}
+                        >
+                          <Copy size={16} color="#4F46E5" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.credentialItem}>
+                      <Text style={styles.credentialLabel}>Password:</Text>
+                      <View style={styles.credentialValueContainer}>
+                        <Text style={styles.credentialValue}>{createdGymData.password}</Text>
+                        <TouchableOpacity
+                          style={styles.copyButton}
+                          onPress={() => copyToClipboard(createdGymData.password)}
+                        >
+                          <Copy size={16} color="#4F46E5" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.copyAllButton}
+                      onPress={() =>
+                        copyToClipboard(
+                          `Username: ${createdGymData.username}\nPassword: ${createdGymData.password}`
+                        )
+                      }
+                    >
+                      <Copy size={18} color="#fff" />
+                      <Text style={styles.copyAllText}>Copy All Credentials</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </ScrollView>
+
+            <View style={styles.successFooter}>
+              <TouchableOpacity
+                style={styles.successButton}
+                onPress={handleSuccessModalClose}
+              >
+                <LinearGradient colors={['#10B981', '#059669']} style={styles.successButtonGradient}>
+                  <Text style={styles.successButtonText}>Done</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#FFFFFF',
+  },
+  topBar: {
+    height: 64,
+    paddingHorizontal: 20,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EFEFEF',
+  },
+  brandRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+  },
+  brandLogo: {
+    width: 28,
+    height: 28,
+  },
+  brandText: {
+    fontSize: 18,
+    fontWeight: '800' as const,
+    color: '#111827',
+    letterSpacing: 0.4,
+  },
+  topBarRight: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+  },
+  langPill: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#111827',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  langText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800' as const,
+  },
+  profilePill: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#111827',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 110,
+  },
+  header: {
+    padding: 24,
+    paddingTop: 32,
+    paddingBottom: 32,
+    alignItems: 'center' as const,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold' as const,
+    color: '#fff',
+    marginTop: 12,
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: '#FEE2E2',
+    marginTop: 8,
+  },
+  tabsContainer: {
+    display: 'none',
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  tabActive: {
+    borderBottomWidth: 3,
+    borderBottomColor: '#DC2626',
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#6B7280',
+  },
+  tabTextActive: {
+    color: '#DC2626',
+  },
+  content: {
+    padding: 20,
+  },
+  pageHeaderBlock: {
+    marginBottom: 12,
+  },
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 2,
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  statsGrid2x2: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 12,
+    marginTop: 10,
+  },
+  statCardMinimal: {
+    width: '48.5%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 16,
+  },
+  statLabelMinimal: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600' as const,
+  },
+  statValueMinimal: {
+    marginTop: 10,
+    fontSize: 22,
+    fontWeight: '800' as const,
+    color: '#111827',
+  },
+  primaryCta: {
+    marginTop: 16,
+    backgroundColor: '#E31E24',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+  },
+  primaryCtaText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800' as const,
+  },
+  payoutRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F2',
+  },
+  payoutGymName: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '600' as const,
+    flex: 1,
+    paddingRight: 10,
+  },
+  payoutAmount: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '800' as const,
+  },
+  secondaryButton: {
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#111827',
+  },
+  listCount: {
+    marginTop: 6,
+    marginBottom: 10,
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600' as const,
+  },
+  gymRowCard: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 12,
+    marginBottom: 12,
+  },
+  gymThumb: {
+    width: 72,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  gymRowInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  gymRowTop: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    justifyContent: 'space-between' as const,
+    gap: 10,
+  },
+  amenitiesPills: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginTop: 8,
+  },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+  },
+  pillText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    color: '#111827',
+  },
+  editPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    alignSelf: 'flex-start' as const,
+  },
+  editPillText: {
+    color: '#FFFFFF',
+    fontWeight: '800' as const,
+    fontSize: 12,
+  },
+  bottomTabs: {
+    position: 'absolute' as const,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    paddingTop: 10,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#EFEFEF',
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+  },
+  bottomTabItem: {
+    flex: 1,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  bottomTabItemActive: {},
+  bottomTabIconWrap: {
+    width: 46,
+    height: 34,
+    borderRadius: 18,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: 'transparent',
+  },
+  bottomTabIconWrapActive: {
+    backgroundColor: '#111827',
+  },
+  bottomTabLabel: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '700' as const,
+  },
+  bottomTabLabelActive: {
+    color: '#111827',
+  },
+  statsGrid: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 12,
+  },
+  statCard: {
+    flex: 1,
+    minWidth: '30%',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  statValue: {
+    fontSize: 28,
+    fontWeight: 'bold' as const,
+    color: '#1F2937',
+    marginTop: 8,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  section: {
+    marginTop: 18,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 16,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 12,
+  },
+  searchContainer: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1F2937',
+    paddingVertical: 2,
+  },
+  activityCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  activityHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    marginBottom: 8,
+  },
+  activityInfo: {
+    flex: 1,
+  },
+  activityUser: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+  },
+  activityGym: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  activityTime: {
+    fontSize: 13,
+    color: '#9CA3AF',
+  },
+  tierBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  tierText: {
+    fontSize: 11,
+    fontWeight: 'bold' as const,
+  },
+  userCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  userHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    marginBottom: 12,
+  },
+  userIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+  },
+  userEmail: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  userStats: {
+    flexDirection: 'row' as const,
+    gap: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 12,
+  },
+  userStat: {
+    flex: 1,
+  },
+  userStatLabel: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginBottom: 4,
+  },
+  userStatValue: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+  },
+  gymCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  gymHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    marginBottom: 12,
+  },
+  gymIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  gymInfo: {
+    flex: 1,
+  },
+  gymName: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+  },
+  gymAddress: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  gymStats: {
+    flexDirection: 'row' as const,
+    gap: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 12,
+  },
+  gymStat: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+  },
+  gymStatText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  checkInCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  checkInHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    marginBottom: 8,
+  },
+  checkInInfo: {
+    flex: 1,
+  },
+  checkInUser: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+  },
+  checkInGym: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  checkInTime: {
+    fontSize: 13,
+    color: '#9CA3AF',
+  },
+  addButton: {
+    backgroundColor: '#DC2626',
+    padding: 8,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold' as const,
+    color: '#1F2937',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#374151',
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  input: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#1F2937',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  row: {
+    flexDirection: 'row' as const,
+    gap: 12,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  mapButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#2563EB',
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  mapButtonText: {
+    color: '#fff',
+    fontWeight: '600' as const,
+  },
+  locationSummary: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#1F2937',
+  },
+  locationSummaryMuted: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  categoryContainer: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+  },
+  categoryButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  categoryButtonActive: {
+    backgroundColor: '#DC2626',
+    borderColor: '#DC2626',
+  },
+  categoryText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#6B7280',
+  },
+  categoryTextActive: {
+    color: '#fff',
+  },
+  tierContainer: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+  },
+  tierButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  tierButtonActive: {
+    backgroundColor: '#9333EA',
+    borderColor: '#9333EA',
+  },
+  tierText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#6B7280',
+  },
+  tierTextActive: {
+    color: '#fff',
+  },
+  submitButton: {
+    backgroundColor: '#DC2626',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    marginTop: 24,
+    marginBottom: 20,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold' as const,
+  },
+  deleteButton: {
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    marginTop: 0,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  deleteButtonText: {
+    color: '#DC2626',
+    fontSize: 16,
+    fontWeight: '800' as const,
+  },
+  uploadButton: {
+    marginTop: 8,
+    backgroundColor: '#9333EA',
+    paddingVertical: 12,
+    borderRadius: 12,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+  },
+  uploadButtonText: {
+    color: '#fff',
+    fontWeight: '600' as const,
+  },
+  logoPreview: {
+    width: '100%',
+    height: 160,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  mapModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '85%',
+  },
+  mapFooter: {
+    padding: 16,
+  },
+  confirmButton: {
+    backgroundColor: '#2563EB',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    marginTop: 12,
+  },
+  confirmButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  successModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    flex: 1,
+  },
+  successHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: 'bold' as const,
+    color: '#1F2937',
+  },
+  successScrollView: {
+    flex: 1,
+  },
+  successInfo: {
+    padding: 20,
+    alignItems: 'center' as const,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  successGymName: {
+    fontSize: 22,
+    fontWeight: 'bold' as const,
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  successSubtext: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  qrSection: {
+    padding: 20,
+    alignItems: 'center' as const,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  qrTitle: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  qrSubtext: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center' as const,
+    marginBottom: 16,
+  },
+  qrContainer: {
+    backgroundColor: '#F9FAFB',
+    padding: 20,
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  qrImage: {
+    width: 250,
+    height: 250,
+  },
+  qrData: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  credentialsSection: {
+    padding: 20,
+  },
+  credentialsTitle: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  credentialsSubtext: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 20,
+  },
+  credentialItem: {
+    marginBottom: 16,
+  },
+  credentialLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#374151',
+    marginBottom: 8,
+  },
+  credentialValueContainer: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  credentialValue: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1F2937',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  copyButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  copyAllButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#4F46E5',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+    marginTop: 8,
+  },
+  copyAllText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  successFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  successButton: {
+    borderRadius: 12,
+    overflow: 'hidden' as const,
+  },
+  successButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+  },
+  successButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600' as const,
+  },
+  errorCard: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold' as const,
+    color: '#DC2626',
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#991B1B',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  errorCode: {
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    backgroundColor: '#FEF2F2',
+    padding: 8,
+    borderRadius: 6,
+    color: '#991B1B',
+    marginBottom: 12,
+  },
+  retryButton: {
+    backgroundColor: '#DC2626',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  loadingCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center' as const,
+    marginBottom: 16,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  emptyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center' as const,
+    marginBottom: 16,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600' as const,
+    color: '#1F2937',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 8,
+    textAlign: 'center' as const,
+  },
+});

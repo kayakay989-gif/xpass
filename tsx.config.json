@@ -1,0 +1,11 @@
+{
+  "external": [
+    "react-native",
+    "react-native-*",
+    "expo",
+    "expo-*",
+    "@react-native-*",
+    "@expo/*"
+  ]
+}
+

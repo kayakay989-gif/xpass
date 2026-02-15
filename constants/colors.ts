@@ -1,0 +1,21 @@
+export default {
+  primary: '#E31E24',
+  primaryDark: '#B71C1C',
+  background: '#FFFFFF',
+  surface: '#F8F8F8',
+  surfaceLight: '#FFFFFF',
+  text: '#1A1A1A',
+  textSecondary: '#666666',
+  textMuted: '#999999',
+  border: '#E5E5E5',
+  success: '#4CAF50',
+  warning: '#FF9800',
+  error: '#F44336',
+  // Tier tokens (generic)
+  gold: '#FFD700',
+  silver: '#C0C0C0',
+  diamond: '#B9F2FF',
+  elite: '#9C27B0',
+  white: '#FFFFFF',
+  black: '#1A1A1A',
+};
