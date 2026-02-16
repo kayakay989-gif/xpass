@@ -4,12 +4,7 @@
     },
     "build": {
       "production": {
-        "node": "20",
-        "android": {
-          "image": "latest"
-        },
-        "distribution": "store",
-        "npm": true
+        "distribution": "store"
       }
     }
   }
