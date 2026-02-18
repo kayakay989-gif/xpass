@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
@@ -12,17 +12,28 @@ export default function MySubscriptionScreen() {
   const { user } = useAuth();
   const { subscription } = useApp();
 
+  const goBackOrHome = () => {
+    const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
+    if (canGoBack) return router.back();
+    return router.replace('/(tabs)/home');
+  };
+
   if (!subscription) {
     return (
       <>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={[styles.container, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <Image 
-              source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+            <View style={styles.headerLeft}>
+              <TouchableOpacity onPress={goBackOrHome} style={styles.headerBackButton}>
+                <ChevronLeft size={22} color={Colors.text} />
+              </TouchableOpacity>
+              <Image 
+                source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+            </View>
             <View style={styles.headerRight}>
               <Text style={styles.greeting}>Hello {user?.name?.split(' ')[0] || 'Hamza'}</Text>
               <View style={styles.iconsContainer}>
@@ -30,7 +41,7 @@ export default function MySubscriptionScreen() {
                   <Text style={styles.languageText}>EN</Text>
                 </View>
                 <View style={styles.profileButton}>
-                  <Text style={styles.profileIcon}>👤</Text>
+                  <UserIcon size={16} color={Colors.white} />
                 </View>
               </View>
             </View>
@@ -71,11 +82,16 @@ export default function MySubscriptionScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Image 
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+          <View style={styles.headerLeft}>
+            <TouchableOpacity onPress={goBackOrHome} style={styles.headerBackButton}>
+              <ChevronLeft size={22} color={Colors.text} />
+            </TouchableOpacity>
+            <Image 
+              source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
           <View style={styles.headerRight}>
             <Text style={styles.greeting}>Hello {user?.name?.split(' ')[0] || 'Hamza'}</Text>
             <View style={styles.iconsContainer}>
@@ -83,7 +99,7 @@ export default function MySubscriptionScreen() {
                 <Text style={styles.languageText}>EN</Text>
               </View>
               <View style={styles.profileButton}>
-                <Text style={styles.profileIcon}>👤</Text>
+                <UserIcon size={16} color={Colors.white} />
               </View>
             </View>
           </View>
@@ -91,9 +107,6 @@ export default function MySubscriptionScreen() {
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
           <View style={styles.titleContainer}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <ChevronLeft size={24} color={Colors.text} />
-            </TouchableOpacity>
             <Text style={styles.title}>My Subscription</Text>
           </View>
 
@@ -163,6 +176,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerBackButton: {
+    padding: 6,
+    marginRight: 8,
+  },
   logo: {
     width: 40,
     height: 40,
@@ -202,9 +223,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  profileIcon: {
-    fontSize: 18,
-  },
   scrollView: {
     flex: 1,
   },
@@ -216,10 +234,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 24,
-    gap: 8,
-  },
-  backButton: {
-    padding: 4,
   },
   title: {
     fontSize: 18,

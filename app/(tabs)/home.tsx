@@ -11,14 +11,16 @@ type ViewMode = 'map' | 'list';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, isGuest } = useAuth();
+  const { user, firebaseUser, isGuest, isLoading: isLoadingAuth } = useAuth();
   const { subscription, gyms, isLoading } = useApp();
 
   useEffect(() => {
-    if (!user && !isGuest) {
+    // On web, Firebase Auth can be ready before the Firestore user profile loads.
+    // Guard routes based on firebaseUser (auth session), not on the Firestore profile object.
+    if (!isLoadingAuth && !firebaseUser && !isGuest) {
       router.replace('/splash');
     }
-  }, [user, isGuest, router]);
+  }, [firebaseUser, isGuest, isLoadingAuth, router]);
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [selectedCity, setSelectedCity] = useState<string>('all');
   const [selectedTier, setSelectedTier] = useState<string>('all'); // all|silver|gold|diamond|elite
@@ -98,14 +100,22 @@ export default function HomeScreen() {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.headerTitle}>Hello {user?.name?.split(' ')[0] || (isGuest ? 'Guest' : 'Member')}</Text>
+          <Text style={styles.headerTitle}>
+            Hello{' '}
+            {user?.name?.split(' ')[0] ||
+              firebaseUser?.displayName?.split(' ')[0] ||
+              firebaseUser?.email?.split('@')[0] ||
+              (isGuest ? 'Guest' : 'Member')}
+          </Text>
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.languageButton}>
             <Text style={styles.languageText}>EN</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileButton} onPress={() => {
-            if (isGuest || !user) {
+            // Consider the user logged in if Firebase Auth session exists,
+            // even if the Firestore profile hasn't loaded yet.
+            if (isGuest || !firebaseUser) {
               router.push('/login');
             } else {
               router.push('/profile');

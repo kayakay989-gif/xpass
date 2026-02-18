@@ -31,11 +31,18 @@ function GoogleMapDiv({ mapRef }: { mapRef: React.RefObject<HTMLDivElement> }) {
 export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }: MapViewComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
+  const [googleMapsError, setGoogleMapsError] = useState<string | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const infoWindowRef = useRef<any>(null);
+  const hasValidKey = !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'REPLACE_ME';
 
   useEffect(() => {
+    if (!hasValidKey) {
+      setGoogleMapsError('Google Maps API key is missing. Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY and rebuild the web bundle.');
+      return;
+    }
+
     // Check if script already exists
     if (typeof window !== 'undefined' && (window as any).google?.maps) {
       setGoogleMapsLoaded(true);
@@ -58,6 +65,7 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
         setGoogleMapsLoaded(true);
       };
       script.onerror = () => {
+        setGoogleMapsError('Failed to load Google Maps. Check console for API key validity / referrer restrictions.');
         console.error('Failed to load Google Maps API');
       };
       document.head.appendChild(script);
@@ -69,7 +77,7 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
         }
       };
     }
-  }, [googleMapsLoaded]);
+  }, [googleMapsLoaded, hasValidKey]);
 
   useEffect(() => {
     if (googleMapsLoaded && mapRef.current && !mapInstanceRef.current && typeof window !== 'undefined') {
@@ -143,6 +151,18 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
       map.fitBounds(bounds);
     }
   }, [googleMapsLoaded, gyms, onMarkerPress]);
+
+  if (googleMapsError) {
+    return (
+      <View style={styles.mapContainer}>
+        <View style={styles.webMapPlaceholder}>
+          <Text style={styles.webMapText}>Map unavailable</Text>
+          <Text style={styles.webMapSubtext}>{googleMapsError}</Text>
+          <Text style={styles.webMapSubtext}>{gyms.length} gyms found</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!googleMapsLoaded) {
     return (

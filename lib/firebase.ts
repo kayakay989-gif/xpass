@@ -2,6 +2,11 @@ import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, initializeAuth, getReactNativePersistence, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
+const dev =
+  typeof (globalThis as any).__DEV__ !== 'undefined'
+    ? (globalThis as any).__DEV__
+    : process.env.NODE_ENV !== 'production';
+
 // Firebase configuration (production-ready: set via EXPO_PUBLIC_* env vars)
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "REPLACE_ME",
@@ -11,6 +16,21 @@ const firebaseConfig = {
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "REPLACE_ME",
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "REPLACE_ME",
 };
+
+// Never allow shipping a production web build with REPLACE_ME fallbacks.
+// (On web, process.env is inlined at build time; if it wasn't injected, values will stay "REPLACE_ME".)
+if (!dev) {
+  const missingKeys = Object.entries(firebaseConfig)
+    .filter(([, v]) => !v || v === 'REPLACE_ME')
+    .map(([k]) => k);
+  if (missingKeys.length > 0) {
+    throw new Error(
+      `[Firebase] Missing Firebase env configuration for: ${missingKeys.join(
+        ', '
+      )}. Ensure EXPO_PUBLIC_FIREBASE_* vars were set at build time.`
+    );
+  }
+}
 
 // Initialize Firebase (prevent multiple initializations)
 let app: FirebaseApp;

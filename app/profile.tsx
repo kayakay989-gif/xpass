@@ -1,7 +1,7 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Edit } from 'lucide-react-native';
+import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Edit, User as UserIcon, ChevronLeft } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
@@ -9,8 +9,14 @@ import Colors from '@/constants/colors';
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, firebaseUser } = useAuth();
+  const { user, firebaseUser, isLoading } = useAuth();
   const { subscription } = useApp();
+
+  const goBackOrHome = () => {
+    const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
+    if (canGoBack) return router.back();
+    return router.replace('/(tabs)/home');
+  };
 
   const displayName =
     user?.name ||
@@ -19,19 +25,39 @@ export default function ProfileScreen() {
     'Guest';
   const primaryEmail = user?.email || firebaseUser?.email || 'Add your email';
   const primaryPhone = user?.phone || firebaseUser?.phoneNumber || 'Add phone number';
+  const photoUrl = user?.photoUrl || firebaseUser?.photoURL || '';
+
+  // If auth is still loading, don't treat it as logged out (prevents web from bouncing to login).
+  if (isLoading) {
+    return (
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="small" color={Colors.primary} />
+          <Text style={{ marginTop: 10, color: Colors.textSecondary }}>Loading profile…</Text>
+        </View>
+      </>
+    );
+  }
 
   // If not logged in, show a prompt to log in or sign up
-  if (!user) {
+  // (Use firebaseUser as the source of truth for auth session.)
+  if (!firebaseUser && !user) {
     return (
       <>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={[styles.container, { paddingTop: insets.top }]}>
           <View style={styles.header}>
-            <Image 
-              source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+            <View style={styles.headerLeft}>
+              <TouchableOpacity onPress={goBackOrHome} style={styles.backButton}>
+                <ChevronLeft size={22} color={Colors.text} />
+              </TouchableOpacity>
+              <Image 
+                source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+            </View>
             <View style={styles.headerRight}>
               <Text style={styles.greeting}>Welcome</Text>
               <View style={styles.iconsContainer}>
@@ -69,11 +95,16 @@ export default function ProfileScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Image 
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+          <View style={styles.headerLeft}>
+            <TouchableOpacity onPress={goBackOrHome} style={styles.backButton}>
+              <ChevronLeft size={22} color={Colors.text} />
+            </TouchableOpacity>
+            <Image 
+              source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
           <View style={styles.headerRight}>
             <Text style={styles.greeting}>Hello {displayName.split(' ')[0]}</Text>
             <View style={styles.iconsContainer}>
@@ -81,7 +112,7 @@ export default function ProfileScreen() {
                 <Text style={styles.languageText}>EN</Text>
               </View>
               <View style={styles.profileButton}>
-                <Text style={styles.profileIcon}>👤</Text>
+                <UserIcon size={16} color={Colors.white} />
               </View>
             </View>
           </View>
@@ -99,10 +130,13 @@ export default function ProfileScreen() {
 
           <View style={styles.profileCard}>
             <View style={styles.profileInfo}>
-              <Image
-                source={{ uri: 'https://i.pravatar.cc/300?u=' + (user?.email || firebaseUser?.email || 'default') }}
-                style={styles.avatar}
-              />
+              {photoUrl ? (
+                <Image source={{ uri: photoUrl }} style={styles.avatar} />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <UserIcon size={22} color={Colors.textMuted} />
+                </View>
+              )}
               <View style={styles.userInfo}>
                 <Text style={styles.userName}>{displayName}</Text>
                 <Text style={styles.userPhone}>{primaryPhone}</Text>
@@ -235,6 +269,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    padding: 6,
+    marginRight: 8,
+  },
   logo: {
     width: 40,
     height: 40,
@@ -273,9 +315,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.black,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  profileIcon: {
-    fontSize: 18,
   },
   scrollView: {
     flex: 1,
@@ -329,6 +368,17 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     marginRight: 16,
+  },
+  avatarPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginRight: 16,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   userInfo: {
     flex: 1,

@@ -117,7 +117,7 @@ const DURATIONS = [
 ];
 
 export default function SubscriptionScreen() {
-  const { user } = useAuth();
+  const { user, firebaseUser } = useAuth();
   const router = useRouter();
   const [selectedDuration, setSelectedDuration] = useState<number>(1);
   const insets = useSafeAreaInsets();
@@ -156,7 +156,9 @@ export default function SubscriptionScreen() {
           resizeMode="contain"
         />
         <View style={styles.headerRight}>
-          <Text style={styles.greeting}>Hello {user?.name?.split(' ')[0] || 'User'}</Text>
+          <Text style={styles.greeting}>
+            Hello {user?.name?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'User'}
+          </Text>
           <View style={styles.iconsContainer}>
             <View style={styles.languageButton}>
               <Text style={styles.languageText}>EN</Text>
@@ -164,7 +166,7 @@ export default function SubscriptionScreen() {
             <TouchableOpacity 
               style={styles.profileButton}
               onPress={() => {
-                if (!user) {
+                if (!firebaseUser) {
                   router.push('/login');
                 } else {
                   router.push('/profile');

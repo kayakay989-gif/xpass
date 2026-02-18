@@ -40,6 +40,7 @@ function firestoreDataToUser(id: string, data: any): User {
     name: data.name || '',
     email: data.email || '',
     phone: data.phone || '',
+    photoUrl: typeof data.photoUrl === 'string' ? data.photoUrl : '',
     referralCode: data.referralCode || generateReferralCode(),
     walletBalance: data.walletBalance || 0,
     createdAt: data.createdAt?.toDate() || new Date(),
@@ -393,7 +394,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [firebaseUser, user]);
 
   const updateProfileData = useCallback(
-    async (updates: { name?: string; phone?: string; email?: string }): Promise<void> => {
+    async (updates: { name?: string; phone?: string; email?: string; photoUrl?: string }): Promise<void> => {
       if (!firebaseUser) throw new Error('No authenticated user');
       const userRef = doc(db, 'users', firebaseUser.uid);
 
@@ -401,6 +402,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (typeof updates.name === 'string') updatePayload.name = updates.name;
       if (typeof updates.phone === 'string') updatePayload.phone = updates.phone;
       if (typeof updates.email === 'string') updatePayload.email = updates.email;
+      if (typeof updates.photoUrl === 'string') updatePayload.photoUrl = updates.photoUrl;
 
       // Update Firestore profile (create if missing)
       if (Object.keys(updatePayload).length > 0) {
@@ -413,6 +415,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           await updateProfile(firebaseUser, { displayName: updates.name });
         } catch (err) {
           console.warn('[AuthContext] Unable to update Firebase display name:', err);
+        }
+      }
+
+      // Optionally keep Firebase auth photoURL in sync
+      if (typeof updates.photoUrl === 'string') {
+        try {
+          await updateProfile(firebaseUser, { photoURL: updates.photoUrl || null });
+        } catch (err) {
+          console.warn('[AuthContext] Unable to update Firebase photoURL:', err);
         }
       }
 

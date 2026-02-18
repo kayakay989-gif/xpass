@@ -33,6 +33,42 @@ type GatewayConfig = {
   apiVersion: string;
 };
 
+function normalizeGatewayHost(rawHost: string): string {
+  const h = rawHost.trim();
+  if (!h) return h;
+  // Allow pasting full URLs; normalize to hostname only.
+  if (h.startsWith('http://') || h.startsWith('https://')) {
+    try {
+      return new URL(h).hostname;
+    } catch {
+      // fall through
+    }
+  }
+  // Remove any path suffix like "gateway.mastercard.com/api"
+  return h.split('/')[0] || h;
+}
+
+function assertProductionGatewayHost(host: string) {
+  const lower = host.toLowerCase();
+  const looksSandbox =
+    lower.includes('test-network') || lower.includes('.mtf.') || lower.includes('sandbox');
+  const isKnownProd =
+    lower === 'ap-gateway.mastercard.com' ||
+    lower === 'gateway.mastercard.com' ||
+    lower.endsWith('.mastercard.com');
+
+  if (looksSandbox) {
+    throw new Error(
+      `[Mastercard] Refusing to use a sandbox/test gateway host in production: "${host}". Set MPG_HOST to the production host (e.g. ap-gateway.mastercard.com).`
+    );
+  }
+  if (!isKnownProd) {
+    throw new Error(
+      `[Mastercard] MPG_HOST "${host}" doesn't look like a valid Mastercard gateway host. Set MPG_HOST to ap-gateway.mastercard.com (or your region-specific gateway hostname).`
+    );
+  }
+}
+
 const defaultBrowserDetails: BrowserDetails = {
   acceptHeaders: 'application/json',
   colorDepth: 24,
@@ -47,7 +83,8 @@ const defaultBrowserDetails: BrowserDetails = {
 function getGatewayConfig(): GatewayConfig {
   const isProd = process.env['NODE_ENV'] === 'production';
 
-  const host = process.env['MPG_HOST'];
+  const hostRaw = process.env['MPG_HOST'];
+  const host = hostRaw ? normalizeGatewayHost(hostRaw) : undefined;
   const merchantId = process.env['MPG_MERCHANT_ID'] || process.env['MPG_MERCHANT'];
   const apiUsername = process.env['MPG_API_USERNAME'] || (merchantId ? `merchant.${merchantId}` : undefined);
   const apiPassword = process.env['MPG_API_PASSWORD'];
@@ -68,6 +105,10 @@ function getGatewayConfig(): GatewayConfig {
     throw new Error(
       'Payment gateway is not configured. Please contact support or check server configuration.'
     );
+  }
+
+  if (isProd) {
+    assertProductionGatewayHost(host);
   }
 
   return { host, merchantId, apiUsername, apiPassword, apiVersion };
@@ -252,7 +293,8 @@ export async function authenticatePayer(params: {
   } = params;
 
   // Format amount as string (Mastercard API expects string for amounts)
-  const amountStr = amount.toString();
+  // Use 2 decimals for currency amounts to avoid "65" vs "65.00" inconsistencies.
+  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
 
   const payload = {
     apiOperation: 'AUTHENTICATE_PAYER',
@@ -307,7 +349,8 @@ export async function payWithAuthentication(params: {
   } = params;
 
   // Format amount as string (Mastercard API expects string for amounts)
-  const amountStr = amount.toString();
+  // Use 2 decimals for currency amounts to avoid "65" vs "65.00" inconsistencies.
+  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
 
   // IMPORTANT (per gateway error 400):
   // When referencing a prior AUTHENTICATION transaction via authentication.transactionId,

@@ -1,29 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator, Image, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { trpc } from '@/lib/trpc';
+import * as ImagePicker from 'expo-image-picker';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { app } from '@/lib/firebase';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
-  const { user, updateProfileData } = useAuth();
+  const { user, firebaseUser, updateProfileData } = useAuth();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   const sendOTPMutation = trpc.auth.sendOTP.useMutation();
   const verifyOTPMutation = trpc.auth.verifyOTP.useMutation();
 
   const initialPhoneRef = useRef<string>(user?.phone || '');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
 
   useEffect(() => {
     setName(user?.name || '');
     setEmail(user?.email || '');
+    setPhotoUrl(user?.photoUrl || '');
 
     const rawPhone = user?.phone || '';
     if (rawPhone.startsWith('+962')) {
@@ -34,6 +49,108 @@ export default function ProfileEditScreen() {
       initialPhoneRef.current = rawPhone;
     }
   }, [user]);
+
+  const pickWebImageFile = async (): Promise<File | null> => {
+    if (typeof document === 'undefined') return null;
+
+    if (!fileInputRef.current) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      fileInputRef.current = input;
+    }
+
+    const input = fileInputRef.current;
+    return await new Promise((resolve) => {
+      const onChange = () => {
+        input.removeEventListener('change', onChange);
+        const file = input.files && input.files[0] ? input.files[0] : null;
+        // allow selecting the same file again next time
+        input.value = '';
+        resolve(file);
+      };
+      input.addEventListener('change', onChange);
+      input.click();
+    });
+  };
+
+  const handleUploadPhoto = async () => {
+    if (!firebaseUser) {
+      showAlert('Not logged in', 'Please log in again to upload a photo.');
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    try {
+      const storage = getStorage(app);
+      const objectRef = ref(storage, `userUploads/${firebaseUser.uid}/profile.jpg`);
+
+      // Web: use native file input (more reliable than expo-image-picker on web exports)
+      if (Platform.OS === 'web') {
+        const file = await pickWebImageFile();
+        if (!file) return;
+        await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
+      } else {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (permission.status !== 'granted') {
+          showAlert('Permission required', 'Please allow photo library access to upload a profile photo.');
+          return;
+        }
+
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.85,
+          allowsEditing: true,
+          aspect: [1, 1],
+        });
+
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+
+        const uri = result.assets[0].uri;
+        const resp = await fetch(uri);
+        const blob = await resp.blob();
+        await uploadBytes(objectRef, blob, { contentType: blob.type || 'image/jpeg' });
+      }
+
+      const downloadUrl = await getDownloadURL(objectRef);
+
+      setPhotoUrl(downloadUrl);
+      await updateProfileData({ photoUrl: downloadUrl });
+      showAlert('Uploaded', 'Profile photo updated.');
+    } catch (e: any) {
+      console.error('[ProfileEdit] Upload photo failed:', e);
+      showAlert('Upload failed', e?.message || 'Could not upload photo. Please try again.');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    if (!firebaseUser) {
+      setPhotoUrl('');
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    try {
+      const storage = getStorage(app);
+      const objectRef = ref(storage, `userUploads/${firebaseUser.uid}/profile.jpg`);
+
+      // Best-effort delete (ignore if missing / denied)
+      await deleteObject(objectRef).catch(() => null);
+
+      setPhotoUrl('');
+      await updateProfileData({ photoUrl: '' });
+      showAlert('Removed', 'Profile photo removed.');
+    } catch (e: any) {
+      console.error('[ProfileEdit] Remove photo failed:', e);
+      showAlert('Error', e?.message || 'Could not remove photo.');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
 
   const hasPhoneChanged = useMemo(() => {
     const normalized = phone ? `+962${phone.replace(/\D/g, '')}` : '';
@@ -51,7 +168,7 @@ export default function ProfileEditScreen() {
   const handleSendOtp = async () => {
     const fullPhone = normalizePhone();
     if (!fullPhone || fullPhone.length < 10) {
-      Alert.alert('Invalid phone', 'Please enter a valid phone number.');
+      showAlert('Invalid phone', 'Please enter a valid phone number.');
       return;
     }
     try {
@@ -61,9 +178,9 @@ export default function ProfileEditScreen() {
         email: email || undefined,
       });
       setOtpSent(true);
-      Alert.alert('OTP sent', 'We sent a 6-digit code to your phone.');
+      showAlert('OTP sent', 'We sent a 6-digit code to your phone.');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to send OTP.');
+      showAlert('Error', error.message || 'Failed to send OTP.');
     }
   };
 
@@ -71,18 +188,18 @@ export default function ProfileEditScreen() {
     const fullPhone = normalizePhone();
 
     if (!name.trim()) {
-      Alert.alert('Missing name', 'Please enter your full name.');
+      showAlert('Missing name', 'Please enter your full name.');
       return;
     }
 
     // Only require OTP if phone number is being changed
     if (hasPhoneChanged) {
       if (!otpSent) {
-        Alert.alert('OTP required', 'Send and verify OTP to update your phone.');
+        showAlert('OTP required', 'Send and verify OTP to update your phone.');
         return;
       }
       if (!otp.trim()) {
-        Alert.alert('Enter OTP', 'Please enter the 6-digit code.');
+        showAlert('Enter OTP', 'Please enter the 6-digit code.');
         return;
       }
     }
@@ -104,13 +221,13 @@ export default function ProfileEditScreen() {
         name,
         email,
         phone: fullPhone || user?.phone,
+        photoUrl: photoUrl.trim(),
       });
 
-      Alert.alert('Saved', 'Profile updated successfully.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      showAlert('Saved', 'Profile updated successfully.');
+      router.replace('/profile');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to update profile.');
+      showAlert('Error', error.message || 'Failed to update profile.');
     } finally {
       setIsSaving(false);
     }
@@ -122,6 +239,37 @@ export default function ProfileEditScreen() {
       <View style={styles.container}>
         <Text style={styles.title}>Profile details</Text>
         <View style={styles.form}>
+          <Text style={styles.label}>Profile photo (optional)</Text>
+          <View style={styles.photoRow}>
+            {photoUrl ? (
+              <Image source={{ uri: photoUrl }} style={styles.photoPreview} />
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <Text style={{ color: Colors.textMuted, fontWeight: '700' }}>No photo</Text>
+              </View>
+            )}
+            <View style={styles.photoButtons}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, (isUploadingPhoto || isSaving) && styles.saveButtonDisabled]}
+                onPress={handleUploadPhoto}
+                disabled={isUploadingPhoto || isSaving}
+              >
+                {isUploadingPhoto ? (
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  <Text style={styles.secondaryButtonText}>Upload</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryOutlineButton, (isUploadingPhoto || isSaving) && styles.saveButtonDisabled]}
+                onPress={handleRemovePhoto}
+                disabled={isUploadingPhoto || isSaving}
+              >
+                <Text style={styles.secondaryOutlineButtonText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <Text style={styles.label}>Full name</Text>
           <TextInput
             style={styles.input}
@@ -231,6 +379,34 @@ const styles = StyleSheet.create({
     color: Colors.text,
     backgroundColor: Colors.surface,
   },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  photoPreview: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  photoPlaceholder: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoButtons: {
+    flex: 1,
+    gap: 10,
+  },
   phoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -251,6 +427,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+  },
+  secondaryOutlineButton: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  secondaryOutlineButtonText: {
+    color: Colors.text,
+    fontWeight: '600',
   },
   secondaryButtonText: {
     color: Colors.white,
