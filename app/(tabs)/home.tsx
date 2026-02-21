@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, Modal } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, Modal, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronDown, User as UserIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,6 +26,26 @@ export default function HomeScreen() {
   const [selectedTier, setSelectedTier] = useState<string>('all'); // all|silver|gold|diamond|elite
   const [selectedFacility, setSelectedFacility] = useState<string>('all');
   const [activeFilter, setActiveFilter] = useState<'city' | 'tier' | 'facility' | null>(null);
+
+  const promptCreateAccount = () => {
+    const goToLogin = () => router.push('/login');
+
+    // `Alert.alert` can be flaky on some mobile web browsers; use confirm() as a fallback.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const ok = window.confirm('Create an account to subscribe.\n\nWould you like to log in / sign up now?');
+      if (ok) goToLogin();
+      return;
+    }
+
+    Alert.alert(
+      'Create account',
+      'Please log in or create an account to subscribe.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log in / Sign up', onPress: goToLogin },
+      ]
+    );
+  };
 
   const filteredGyms = useMemo(() => {
     const norm = (v: any) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
@@ -146,7 +166,13 @@ export default function HomeScreen() {
       ) : (
         <TouchableOpacity 
           style={styles.noSubscriptionCard}
-          onPress={() => router.push('/(tabs)/subscription')}
+          onPress={() => {
+            if (isGuest || !firebaseUser) {
+              promptCreateAccount();
+              return;
+            }
+            router.push('/(tabs)/subscription');
+          }}
         >
           <Text style={styles.noSubTitle}>No Active Subscription</Text>
           <Text style={styles.noSubText}>Tap to choose a plan</Text>

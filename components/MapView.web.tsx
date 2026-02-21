@@ -37,47 +37,83 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
   const infoWindowRef = useRef<any>(null);
   const hasValidKey = !!GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== 'REPLACE_ME';
 
+  const loadGoogleMaps = async () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if ((window as any).google?.maps) return;
+
+    const w = window as any;
+    if (w.__xpassGoogleMapsLoadingPromise) {
+      await w.__xpassGoogleMapsLoadingPromise;
+      return;
+    }
+
+    w.__xpassGoogleMapsLoadingPromise = new Promise<void>((resolve, reject) => {
+      // If a script exists (e.g. navigating between screens), wait for it to finish loading.
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[data-xpass-google-maps="1"]'
+      );
+
+      const onLoaded = () => {
+        if ((window as any).google?.maps) resolve();
+        else reject(new Error('Google Maps script loaded but window.google.maps is missing'));
+      };
+
+      if (existing) {
+        // If it already loaded, resolve immediately. Otherwise, attach handlers.
+        if ((window as any).google?.maps) {
+          resolve();
+        } else {
+          existing.addEventListener('load', onLoaded, { once: true });
+          existing.addEventListener(
+            'error',
+            () => reject(new Error('Failed to load Google Maps script')),
+            { once: true }
+          );
+        }
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.setAttribute('data-xpass-google-maps', '1');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+      script.async = true;
+      script.defer = true;
+      script.onload = onLoaded;
+      script.onerror = () => reject(new Error('Failed to load Google Maps script'));
+      document.head.appendChild(script);
+    })
+      .finally(() => {
+        // Keep the resolved promise around; do not delete. This prevents racing reloads on slow mobile.
+      });
+
+    await w.__xpassGoogleMapsLoadingPromise;
+  };
+
   useEffect(() => {
     if (!hasValidKey) {
       setGoogleMapsError('Google Maps API key is missing. Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY and rebuild the web bundle.');
       return;
     }
 
-    // Check if script already exists
-    if (typeof window !== 'undefined' && (window as any).google?.maps) {
-      setGoogleMapsLoaded(true);
-      return;
-    }
-
-    // Load Google Maps JavaScript API
-    if (typeof document !== 'undefined' && !googleMapsLoaded) {
-      const existingScript = document.querySelector(`script[src*="maps.googleapis.com"]`);
-      if (existingScript) {
-        setGoogleMapsLoaded(true);
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => {
-        setGoogleMapsLoaded(true);
-      };
-      script.onerror = () => {
-        setGoogleMapsError('Failed to load Google Maps. Check console for API key validity / referrer restrictions.');
-        console.error('Failed to load Google Maps API');
-      };
-      document.head.appendChild(script);
-
-      return () => {
-        const scriptToRemove = document.querySelector(`script[src*="${GOOGLE_MAPS_API_KEY}"]`);
-        if (scriptToRemove) {
-          document.head.removeChild(scriptToRemove);
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadGoogleMaps();
+        if (!cancelled) setGoogleMapsLoaded(true);
+      } catch (e) {
+        console.error('[MapView.web] Failed to load Google Maps:', e);
+        if (!cancelled) {
+          setGoogleMapsError(
+            'Failed to load Google Maps. Check API key validity / referrer restrictions.'
+          );
         }
-      };
-    }
-  }, [googleMapsLoaded, hasValidKey]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasValidKey]);
 
   useEffect(() => {
     if (googleMapsLoaded && mapRef.current && !mapInstanceRef.current && typeof window !== 'undefined') {

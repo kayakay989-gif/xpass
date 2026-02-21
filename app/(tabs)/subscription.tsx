@@ -1,6 +1,6 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, Alert, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
 import { useRouter } from 'expo-router';
@@ -117,10 +117,24 @@ const DURATIONS = [
 ];
 
 export default function SubscriptionScreen() {
-  const { user, firebaseUser } = useAuth();
+  const { user, firebaseUser, isGuest } = useAuth();
   const router = useRouter();
   const [selectedDuration, setSelectedDuration] = useState<number>(1);
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (isGuest || !firebaseUser) {
+      // Prevent guest users from entering the purchase flow.
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Please log in or create an account to subscribe.');
+      } else {
+        Alert.alert('Create account', 'Please log in or create an account to subscribe.', [
+          { text: 'OK' },
+        ]);
+      }
+      router.replace('/login');
+    }
+  }, [firebaseUser, isGuest, router]);
 
   const getTotalPrice = useMemo(() => {
     return (tier: Package['tier']) => {
