@@ -1,19 +1,24 @@
-import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import Colors from '@/constants/colors';
-import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { config } from '@/lib/config';
 
 export default function SecurityScreen() {
-  const { user, updateProfileData } = useAuth();
+  const { user, firebaseUser, updateProfileData } = useAuth();
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [verificationId, setVerificationId] = useState<string | null>(null);
 
-  const sendOTPMutation = trpc.auth.sendOTP.useMutation();
-  const verifyOTPMutation = trpc.auth.verifyOTP.useMutation();
+  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
+  const recaptchaContainerId = useMemo(() => 'recaptcha-container-security', []);
 
   useEffect(() => {
     const rawPhone = user?.phone || '';
@@ -32,22 +37,56 @@ export default function SecurityScreen() {
     return `+962${digits}`;
   };
 
+  useEffect(() => {
+    // If phone changes, force re-send OTP
+    setOtpSent(false);
+    setVerificationId(null);
+    setOtp('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phone]);
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
+
   const handleSendOtp = async () => {
     const fullPhone = normalizePhone();
     if (!fullPhone || fullPhone.length < 10) {
       Alert.alert('Invalid phone', 'Please enter a valid phone number.');
       return;
     }
+    if (!firebaseUser || !auth.currentUser) {
+      showAlert('Not logged in', 'Please log in to verify your phone.');
+      return;
+    }
+    setIsSendingOtp(true);
     try {
-      await sendOTPMutation.mutateAsync({
-        phoneNumber: fullPhone,
-        method: 'sms',
-        email: user?.email || undefined,
-      });
+      const provider = new PhoneAuthProvider(auth);
+      if (Platform.OS === 'web') {
+        const verifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
+        await verifier.render();
+        const id = await provider.verifyPhoneNumber(fullPhone, verifier);
+        setVerificationId(id);
+      } else {
+        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current as any);
+        setVerificationId(id);
+      }
+
       setOtpSent(true);
-      Alert.alert('OTP sent', 'Enter the code we sent to your phone.');
+      showAlert('OTP sent', 'Enter the code we sent to your phone.');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to send OTP.');
+      console.error('[Security] Failed to send OTP:', error);
+      showAlert(
+        'Error',
+        error?.message ||
+          'Failed to send OTP. Ensure Firebase Phone Auth is enabled and your domain is authorized.'
+      );
+    } finally {
+      setIsSendingOtp(false);
     }
   };
 
@@ -57,18 +96,23 @@ export default function SecurityScreen() {
       Alert.alert('Missing OTP', 'Enter the 6-digit code.');
       return;
     }
+    if (!verificationId) {
+      showAlert('OTP required', 'Please send an OTP first.');
+      return;
+    }
+    if (!firebaseUser || !auth.currentUser) {
+      showAlert('Not logged in', 'Please log in to verify your phone.');
+      return;
+    }
     setIsVerifying(true);
     try {
-      await verifyOTPMutation.mutateAsync({
-        phoneNumber: fullPhone,
-        otp,
-        name: user?.name,
-        email: user?.email,
-      });
+      const credential = PhoneAuthProvider.credential(verificationId, otp);
+      await updatePhoneNumber(auth.currentUser, credential);
       await updateProfileData({ phone: fullPhone });
       Alert.alert('Phone verified', 'Your phone number was updated.');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Verification failed.');
+      console.error('[Security] OTP verify failed:', error);
+      showAlert('Error', error?.message || 'Verification failed.');
     } finally {
       setIsVerifying(false);
     }
@@ -97,9 +141,9 @@ export default function SecurityScreen() {
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={handleSendOtp}
-          disabled={sendOTPMutation.isPending}
+          disabled={isSendingOtp}
         >
-          {sendOTPMutation.isPending ? (
+          {isSendingOtp ? (
             <ActivityIndicator color={Colors.white} />
           ) : (
             <Text style={styles.primaryButtonText}>{otpSent ? 'Resend OTP' : 'Send OTP'}</Text>
@@ -131,6 +175,22 @@ export default function SecurityScreen() {
             </TouchableOpacity>
           </>
         )}
+
+        {Platform.OS !== 'web' && (
+          <FirebaseRecaptchaVerifierModal
+            ref={recaptchaVerifier}
+            firebaseConfig={config.firebase as any}
+            attemptInvisibleVerification
+          />
+        )}
+
+        {Platform.OS === 'web' &&
+          // RN Web: render an offscreen div for the invisible reCAPTCHA
+          // @ts-ignore
+          React.createElement('div', {
+            id: recaptchaContainerId,
+            style: { position: 'absolute', left: '-10000px', top: '-10000px' },
+          })}
       </View>
     </>
   );

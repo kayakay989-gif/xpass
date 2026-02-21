@@ -78,7 +78,7 @@ const PACKAGES: Package[] = [
   {
     tier: 'silver',
     name: 'Silver Package',
-    description: ['Access to Silver Tier Gyms only.', 'Access over 100 gyms'],
+    description: ['Access to Silver Tier Gyms only.'],
     baseMonthly: 65,
     headerColors: ['#F5F7FA', '#F5F7FA'],
     buttonColors: ['#E6EEF8', '#E6EEF8'],
@@ -86,7 +86,7 @@ const PACKAGES: Package[] = [
   {
     tier: 'gold',
     name: 'Gold Package',
-    description: ['Access to Gold & Silver Tier Gyms.', 'Access over 150 gyms'],
+    description: ['Access to Gold & Silver Tier Gyms.'],
     baseMonthly: 90,
     headerColors: ['#FFF3E8', '#FFF3E8'],
     buttonColors: ['#FFE0AE', '#FFE0AE'],
@@ -94,7 +94,7 @@ const PACKAGES: Package[] = [
   {
     tier: 'diamond',
     name: 'Diamond Package',
-    description: ['Access to Diamond, Gold & Silver Tier Gyms.', 'Access over 200 gyms'],
+    description: ['Access to Diamond, Gold & Silver Tier Gyms.'],
     baseMonthly: 140,
     headerColors: ['#F4F1FF', '#F4F1FF'],
     buttonColors: ['#E1DAFF', '#E1DAFF'],

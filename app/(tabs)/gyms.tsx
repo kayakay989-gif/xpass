@@ -5,6 +5,7 @@ import { MapPin, Search, Filter } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { SubscriptionTier } from '@/types';
+import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 
 export default function GymsScreen() {
   const { gymId } = useLocalSearchParams<{ gymId?: string }>();
@@ -90,7 +91,11 @@ export default function GymsScreen() {
           />
         }
       >
-        {orderedGyms.map((gym) => (
+        {orderedGyms.map((gym) => {
+          const tier = getGymTier(gym);
+          const badge = getTierBadgeColors(tier);
+          const label = getTierLabel(tier);
+          return (
           <TouchableOpacity key={gym.id} style={styles.gymCard}>
             <Image 
               source={{ uri: gym.imageUrl }} 
@@ -100,8 +105,8 @@ export default function GymsScreen() {
             <View style={styles.gymInfo}>
               <View style={styles.gymHeader}>
                 <Text style={styles.gymName}>{gym.name}</Text>
-                <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(gym.category) }]}>
-                  <Text style={styles.categoryText}>{gym.category.toUpperCase()}</Text>
+                <View style={[styles.categoryBadge, { backgroundColor: badge.backgroundColor }]}>
+                  <Text style={[styles.categoryText, { color: badge.textColor }]}>{label.toUpperCase()}</Text>
                 </View>
               </View>
               
@@ -126,7 +131,8 @@ export default function GymsScreen() {
               <Text style={styles.hoursText}>{gym.hours}</Text>
             </View>
           </TouchableOpacity>
-        ))}
+          );
+        })}
 
         {orderedGyms.length === 0 && (
           <View style={styles.emptyState}>
@@ -138,16 +144,6 @@ export default function GymsScreen() {
       </ScrollView>
     </View>
   );
-}
-
-function getCategoryColor(category: string): string {
-  switch (category) {
-    case 'standard': return Colors.textSecondary;
-    case 'premium': return Colors.gold;
-    case 'diamond': return Colors.diamond;
-    case 'elite': return Colors.elite;
-    default: return Colors.textSecondary;
-  }
 }
 
 const styles = StyleSheet.create({

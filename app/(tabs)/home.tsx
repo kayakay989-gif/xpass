@@ -6,6 +6,7 @@ import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { useState, useMemo, useEffect } from 'react';
 import MapViewComponent from '@/components/MapView';
+import { getGymTier, getTierLabel } from '@/lib/gym-tier';
 
 type ViewMode = 'map' | 'list';
 
@@ -64,7 +65,12 @@ export default function HomeScreen() {
   }, [gyms, selectedCity, selectedTier, selectedFacility]);
 
   const spotlightGyms = useMemo(() => {
-    return gyms.filter(g => g.category === 'elite' || g.category === 'diamond').slice(0, 3);
+    return gyms
+      .filter((g: any) => {
+        const t = getGymTier(g);
+        return t === 'elite' || t === 'diamond';
+      })
+      .slice(0, 3);
   }, [gyms]);
 
   const getTierName = (tier: string): string => {
@@ -220,7 +226,9 @@ export default function HomeScreen() {
               />
               <View style={styles.spotlightOverlay}>
                 <View style={styles.spotlightBadge}>
-                  <Text style={styles.spotlightBadgeText}>{gym.category.toUpperCase()}</Text>
+                  <Text style={styles.spotlightBadgeText}>
+                    {getTierLabel(getGymTier(gym)).toUpperCase()}
+                  </Text>
                 </View>
               </View>
             </TouchableOpacity>
@@ -282,7 +290,9 @@ export default function HomeScreen() {
                   <Text style={styles.gymName}>{gym.name}</Text>
                   <Text style={styles.gymAddress}>{gym.address}</Text>
                   <View style={styles.gymCategory}>
-                    <Text style={styles.gymCategoryText}>{gym.category}</Text>
+                    <Text style={styles.gymCategoryText}>
+                      {getTierLabel(getGymTier(gym))}
+                    </Text>
                   </View>
                 </View>
               </TouchableOpacity>

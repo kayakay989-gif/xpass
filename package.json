@@ -35,6 +35,7 @@
     "expo-clipboard": "~8.0.7",
     "expo-constants": "~18.0.10",
     "expo-crypto": "^15.0.7",
+    "expo-firebase-recaptcha": "^2.3.1",
     "expo-font": "~14.0.9",
     "expo-haptics": "~15.0.7",
     "expo-image": "~3.0.10",
@@ -82,8 +83,8 @@
     "expo-build-properties": "^1.0.9",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.6",
-    "yaml": "2.8.2",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "yaml": "2.8.2"
   },
   "private": true
 }

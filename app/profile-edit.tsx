@@ -3,10 +3,13 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityInd
 import { Stack, useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { trpc } from '@/lib/trpc';
 import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app } from '@/lib/firebase';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { config } from '@/lib/config';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
@@ -18,11 +21,11 @@ export default function ProfileEditScreen() {
   const [photoUrl, setPhotoUrl] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [verificationId, setVerificationId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-
-  const sendOTPMutation = trpc.auth.sendOTP.useMutation();
-  const verifyOTPMutation = trpc.auth.verifyOTP.useMutation();
+  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
+  const recaptchaContainerId = useMemo(() => 'recaptcha-container-profile-edit', []);
 
   const initialPhoneRef = useRef<string>(user?.phone || '');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -157,6 +160,13 @@ export default function ProfileEditScreen() {
     return normalized !== initialPhoneRef.current;
   }, [phone]);
 
+  useEffect(() => {
+    // If phone changes, force re-send OTP
+    setOtpSent(false);
+    setVerificationId(null);
+    setOtp('');
+  }, [hasPhoneChanged]);
+
   const normalizePhone = (): string => {
     const digits = phone.replace(/\D/g, '');
     if (!digits) return '';
@@ -171,15 +181,26 @@ export default function ProfileEditScreen() {
       showAlert('Invalid phone', 'Please enter a valid phone number.');
       return;
     }
+    if (!firebaseUser || !auth.currentUser) {
+      showAlert('Not logged in', 'Please log in to verify your phone.');
+      return;
+    }
     try {
-      await sendOTPMutation.mutateAsync({
-        phoneNumber: fullPhone,
-        method: 'sms',
-        email: email || undefined,
-      });
+      const provider = new PhoneAuthProvider(auth);
+      if (Platform.OS === 'web') {
+        const verifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
+        await verifier.render();
+        const id = await provider.verifyPhoneNumber(fullPhone, verifier);
+        setVerificationId(id);
+      } else {
+        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current as any);
+        setVerificationId(id);
+      }
+
       setOtpSent(true);
       showAlert('OTP sent', 'We sent a 6-digit code to your phone.');
     } catch (error: any) {
+      console.error('[ProfileEdit] Failed to send OTP:', error);
       showAlert('Error', error.message || 'Failed to send OTP.');
     }
   };
@@ -208,12 +229,14 @@ export default function ProfileEditScreen() {
     try {
       // Verify OTP only if phone changed
       if (hasPhoneChanged) {
-        await verifyOTPMutation.mutateAsync({
-          phoneNumber: fullPhone,
-          otp,
-          name,
-          email,
-        });
+        if (!verificationId) {
+          throw new Error('Please send OTP first.');
+        }
+        if (!firebaseUser || !auth.currentUser) {
+          throw new Error('Please log in to verify your phone.');
+        }
+        const credential = PhoneAuthProvider.credential(verificationId, otp);
+        await updatePhoneNumber(auth.currentUser, credential);
       }
 
       // Update profile data (name, email, and phone if changed)
@@ -307,15 +330,11 @@ export default function ProfileEditScreen() {
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={handleSendOtp}
-                disabled={sendOTPMutation.isPending}
+                disabled={isSaving}
               >
-                {sendOTPMutation.isPending ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.secondaryButtonText}>
-                    {otpSent ? 'Resend OTP' : 'Send OTP'}
-                  </Text>
-                )}
+                <Text style={styles.secondaryButtonText}>
+                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+                </Text>
               </TouchableOpacity>
 
               {otpSent && (
@@ -333,6 +352,22 @@ export default function ProfileEditScreen() {
               )}
             </View>
           )}
+
+          {Platform.OS !== 'web' && (
+            <FirebaseRecaptchaVerifierModal
+              ref={recaptchaVerifier}
+              firebaseConfig={config.firebase as any}
+              attemptInvisibleVerification
+            />
+          )}
+
+          {Platform.OS === 'web' &&
+            // RN Web: render an offscreen div for the invisible reCAPTCHA
+            // @ts-ignore
+            React.createElement('div', {
+              id: recaptchaContainerId,
+              style: { position: 'absolute', left: '-10000px', top: '-10000px' },
+            })}
 
           <TouchableOpacity
             style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
