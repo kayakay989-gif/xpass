@@ -17,7 +17,8 @@ import { firestoreGyms, firestoreCheckIns, firestoreGymOwners, firestoreUsers } 
 
 export default function GymDashboardScreen() {
   const router = useRouter();
-  const { gymId } = useLocalSearchParams<{ gymId: string }>();
+  const urlParams = useLocalSearchParams<{ gymId?: string }>();
+  const [actualGymId, setActualGymId] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'home' | 'payments' | 'profile'>('home');
   const [homeView, setHomeView] = useState<'main' | 'checkinsToday' | 'checkinsAll'>('main');
@@ -29,17 +30,36 @@ export default function GymDashboardScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Load data from Firestore
-  const loadData = async () => {
-    if (!gymId) return;
+  const loadData = async (gymIdToLoad: string) => {
+    if (!gymIdToLoad) {
+      console.warn('[GymDashboard] No gymId provided to loadData');
+      setIsLoading(false);
+      return;
+    }
     
     try {
       setIsRefreshing(true);
+      console.log('[GymDashboard] Loading data for gymId:', gymIdToLoad);
+      
       const [gymData, checkInsData, ownerData, usersData] = await Promise.all([
-        firestoreGyms.getById(gymId),
-        firestoreCheckIns.getByGymId(gymId),
-        firestoreGymOwners.getByGymId(gymId),
+        firestoreGyms.getById(gymIdToLoad),
+        firestoreCheckIns.getByGymId(gymIdToLoad),
+        firestoreGymOwners.getByGymId(gymIdToLoad),
         firestoreUsers.getAll(),
       ]);
+
+      console.log('[GymDashboard] Loaded data:', { 
+        gym: !!gymData, 
+        checkIns: checkInsData?.length || 0, 
+        owner: !!ownerData 
+      });
+
+      if (!gymData) {
+        console.error('[GymDashboard] Gym not found in Firestore for gymId:', gymIdToLoad);
+        setIsLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
 
       setGym(gymData);
       
@@ -69,18 +89,37 @@ export default function GymDashboardScreen() {
           AsyncStorage.getItem('gymOwnerSessionToken'),
           AsyncStorage.getItem('gymOwnerGymId'),
         ]);
-        if (!token || !storedGymId || (gymId && storedGymId !== gymId)) {
+        
+        // Use gymId from URL params if available, otherwise use stored gymId
+        const gymIdToUse = urlParams.gymId || storedGymId;
+        
+        console.log('[GymDashboard] Session check:', { 
+          hasToken: !!token, 
+          storedGymId, 
+          urlGymId: urlParams.gymId,
+          gymIdToUse 
+        });
+        
+        if (!token || !gymIdToUse) {
+          console.warn('[GymDashboard] Missing token or gymId, redirecting to login');
           router.replace('/gym-login' as any);
           return;
         }
+        
+        // If URL has different gymId than stored, use stored one
+        if (urlParams.gymId && storedGymId && urlParams.gymId !== storedGymId) {
+          console.warn('[GymDashboard] URL gymId differs from stored, using stored:', storedGymId);
+        }
+        
+        setActualGymId(gymIdToUse);
         setSessionChecked(true);
-        await loadData();
+        await loadData(gymIdToUse);
       } catch (error) {
         console.error('[GymDashboard] Session check error:', error);
         router.replace('/gym-login' as any);
       }
     })();
-  }, [gymId, router]);
+  }, [urlParams.gymId, router]);
 
   // Mock payments data (can be replaced with actual Firestore query later)
   const payments = useMemo(() => [], []);
@@ -114,14 +153,38 @@ export default function GymDashboardScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#111827" />
+        <Text style={styles.loadingText}>Loading gym dashboard...</Text>
       </View>
     );
   }
 
-  if (!gym) {
+  if (!gym && !isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.errorText}>Gym not found</Text>
+        <Text style={styles.errorSubtext}>Gym ID: {actualGymId || 'unknown'}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={async () => {
+            const storedGymId = await AsyncStorage.getItem('gymOwnerGymId');
+            if (storedGymId) {
+              await loadData(storedGymId);
+            } else {
+              router.replace('/gym-login' as any);
+            }
+          }}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.logoutButtonSmall}
+          onPress={async () => {
+            await AsyncStorage.multiRemove(['gymOwnerSessionToken', 'gymOwnerGymId', 'gymOwnerId']);
+            router.replace('/gym-login' as any);
+          }}
+        >
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -254,6 +317,7 @@ export default function GymDashboardScreen() {
           headerShown: false,
           gestureEnabled: false,
           headerBackVisible: false,
+          headerLeft: () => null,
         }} 
       />
 
@@ -405,7 +469,24 @@ const styles = StyleSheet.create({
     alignItems: 'center' as const,
     backgroundColor: '#FFFFFF',
   },
-  errorText: { fontSize: 18, color: '#EF4444', fontWeight: '600' as const },
+  errorText: { fontSize: 18, color: '#EF4444', fontWeight: '600' as const, marginBottom: 8 },
+  errorSubtext: { fontSize: 14, color: '#6B7280', marginBottom: 16 },
+  loadingText: { marginTop: 12, fontSize: 14, color: '#6B7280' },
+  retryButton: {
+    backgroundColor: '#E31E24',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 16,
+  },
+  retryButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' as const },
+  logoutButtonSmall: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    marginTop: 12,
+  },
   scrollView: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 110 },
 
