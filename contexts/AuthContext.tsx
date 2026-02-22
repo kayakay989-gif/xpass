@@ -16,8 +16,12 @@ import {
 import { 
   doc, 
   getDoc, 
+  getDocs,
+  collection,
   setDoc, 
   updateDoc, 
+  query,
+  where,
   serverTimestamp 
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -42,6 +46,7 @@ function firestoreDataToUser(id: string, data: any): User {
     phone: data.phone || '',
     photoUrl: typeof data.photoUrl === 'string' ? data.photoUrl : '',
     referralCode: data.referralCode || generateReferralCode(),
+    referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
     walletBalance: data.walletBalance || 0,
     createdAt: data.createdAt?.toDate() || new Date(),
   };
@@ -194,7 +199,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     email: string, 
     password: string, 
     name: string, 
-    phone?: string
+    phone?: string,
+    referralCodeUsed?: string
   ): Promise<void> => {
     try {
       const normalizedEmail = (email || '').trim();
@@ -205,6 +211,22 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         await updateProfile(userCredential.user, { displayName: name });
       }
 
+      const normalizedReferral = typeof referralCodeUsed === 'string' ? referralCodeUsed.trim().toUpperCase() : '';
+      let referredBy: string | undefined = undefined;
+      let initialWalletBalance = 0;
+
+      if (normalizedReferral) {
+        // Validate referral code: must match an existing user's referralCode.
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('referralCode', '==', normalizedReferral));
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          throw new Error('Invalid referral code. Please check and try again.');
+        }
+        referredBy = normalizedReferral;
+        initialWalletBalance = 10;
+      }
+
       // Create user profile in Firestore
       const newUser: User = {
         id: userCredential.user.uid,
@@ -212,7 +234,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         email: normalizedEmail,
         phone: phone || '',
         referralCode: generateReferralCode(),
-        walletBalance: 0,
+        referredBy,
+        walletBalance: initialWalletBalance,
         createdAt: new Date(),
       };
 

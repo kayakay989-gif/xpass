@@ -1,8 +1,8 @@
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState } from 'react';
-import { ChevronLeft, Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -11,6 +11,7 @@ type AuthMode = 'login' | 'signup';
 export default function LoginScreen() {
   const router = useRouter();
   const { loginWithEmail, signUpWithEmail, loginWithGoogle } = useAuth();
+  const params = useLocalSearchParams<{ mode?: string; ref?: string }>();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('login');
   
@@ -18,8 +19,16 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [referral, setReferral] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
+    const r = typeof params.ref === 'string' ? params.ref.trim().toUpperCase() : '';
+    if (m === 'signup') setMode('signup');
+    if (r) setReferral(r);
+  }, [params.mode, params.ref]);
 
   const validatePhone = (phoneNum: string): boolean => {
     const jordanPhoneRegex = /^[0-9]{9}$/;
@@ -44,7 +53,7 @@ export default function LoginScreen() {
 
     setIsLoading(true);
     try {
-      await signUpWithEmail(email.trim(), password, name, `+962${phone}`);
+      await signUpWithEmail(email.trim(), password, name, `+962${phone}`, referral.trim() || undefined);
       Alert.alert('Success', 'Account created successfully!', [
         { text: 'OK', onPress: () => router.replace('/(tabs)/home') }
       ]);
@@ -229,6 +238,23 @@ export default function LoginScreen() {
               </View>
             )}
 
+            {mode === 'signup' && (
+              <View style={styles.inputContainer}>
+                <View style={styles.inputWrapper}>
+                  <GiftIcon size={20} color={Colors.textMuted} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Referral code (optional)"
+                    placeholderTextColor={Colors.textMuted}
+                    value={referral}
+                    onChangeText={(t) => setReferral((t || '').toUpperCase())}
+                    autoCapitalize="characters"
+                  />
+                </View>
+                <Text style={styles.helperText}>Enter a friend’s code to get 10 JDS credit.</Text>
+              </View>
+            )}
+
             <View style={styles.inputContainer}>
               <View style={styles.inputWrapper}>
                 <Lock size={20} color={Colors.textMuted} style={styles.inputIcon} />
@@ -398,6 +424,12 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: Colors.text,
     zIndex: 1,
+  },
+  helperText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginLeft: 2,
   },
   eyeButton: {
     position: 'absolute',

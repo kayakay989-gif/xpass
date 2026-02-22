@@ -42,6 +42,7 @@ export const firestoreUsers = {
       email: data.email || '',
       phone: data.phone || '',
       referralCode: data.referralCode || '',
+      referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
       walletBalance: data.walletBalance || 0,
       createdAt: timestampToDate(data.createdAt),
     };
@@ -64,6 +65,7 @@ export const firestoreUsers = {
         email: data.email || '',
         phone: data.phone || '',
         referralCode: data.referralCode || '',
+        referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
         walletBalance: data.walletBalance || 0,
         createdAt: timestampToDate(data.createdAt),
       };

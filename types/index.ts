@@ -11,6 +11,8 @@ export interface User {
   password?: string;
   googleId?: string;
   referralCode: string;
+  // Referral code used at signup (referrer's code)
+  referredBy?: string;
   walletBalance: number;
   createdAt: Date;
 }

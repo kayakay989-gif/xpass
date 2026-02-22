@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Share, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Share, ActivityIndicator, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { Gift, Copy, Share2, Users } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -42,7 +42,12 @@ export default function ReferFriendScreen() {
   };
 
   const referralCode = user?.referralCode || 'N/A';
-  const referralLink = `https://xpass.app/join?ref=${referralCode}`;
+  const webBaseUrl =
+    process.env.EXPO_PUBLIC_WEB_BASE_URL ||
+    (Platform.OS === 'web' && typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://xpass-rork-1e6ad.web.app');
+  const referralLink = `${webBaseUrl.replace(/\/+$/, '')}/join?ref=${referralCode}`;
 
   const handleCopyCode = async () => {
     await Clipboard.setStringAsync(referralCode);
