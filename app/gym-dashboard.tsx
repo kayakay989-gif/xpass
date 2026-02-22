@@ -11,9 +11,9 @@ import {
   Alert,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { trpc } from '@/lib/trpc';
 import { ChevronRight, CreditCard, Filter, Home, User as UserIcon } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { firestoreGyms, firestoreCheckIns, firestoreGymOwners, firestoreUsers } from '@/lib/firestore';
 
 export default function GymDashboardScreen() {
   const router = useRouter();
@@ -22,6 +22,45 @@ export default function GymDashboardScreen() {
   const [activeTab, setActiveTab] = useState<'home' | 'payments' | 'profile'>('home');
   const [homeView, setHomeView] = useState<'main' | 'checkinsToday' | 'checkinsAll'>('main');
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [gym, setGym] = useState<any>(null);
+  const [checkIns, setCheckIns] = useState<any[]>([]);
+  const [gymOwner, setGymOwner] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Load data from Firestore
+  const loadData = async () => {
+    if (!gymId) return;
+    
+    try {
+      setIsRefreshing(true);
+      const [gymData, checkInsData, ownerData, usersData] = await Promise.all([
+        firestoreGyms.getById(gymId),
+        firestoreCheckIns.getByGymId(gymId),
+        firestoreGymOwners.getByGymId(gymId),
+        firestoreUsers.getAll(),
+      ]);
+
+      setGym(gymData);
+      
+      // Enrich check-ins with user names
+      const enrichedCheckIns = (checkInsData || []).map((checkIn: any) => {
+        const user = usersData.find((u: any) => u.id === checkIn.userId);
+        return {
+          ...checkIn,
+          userName: user?.name || 'Unknown User',
+        };
+      });
+      
+      setCheckIns(enrichedCheckIns);
+      setGymOwner(ownerData);
+    } catch (error) {
+      console.error('[GymDashboard] Error loading data:', error);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -34,23 +73,17 @@ export default function GymDashboardScreen() {
           router.replace('/gym-login' as any);
           return;
         }
-      } finally {
         setSessionChecked(true);
+        await loadData();
+      } catch (error) {
+        console.error('[GymDashboard] Session check error:', error);
+        router.replace('/gym-login' as any);
       }
     })();
   }, [gymId, router]);
 
-  const gymQuery = trpc.gyms.getById.useQuery({ id: gymId || '1' }, { enabled: !!gymId });
-  const checkInsQuery = trpc.gyms.getCheckIns.useQuery(
-    { gymId: gymId || '1' },
-    { enabled: !!gymId, refetchInterval: 10000 }
-  );
-  const paymentsQuery = trpc.gyms.getPayments.useQuery({ gymId: gymId || '1' }, { enabled: !!gymId });
-  const profileQuery = trpc.gymOwners.getProfile.useQuery({ gymId: gymId || '1' }, { enabled: !!gymId });
-
-  const gym = gymQuery.data;
-  const checkIns = useMemo(() => checkInsQuery.data || [], [checkInsQuery.data]);
-  const payments = useMemo(() => paymentsQuery.data || [], [paymentsQuery.data]);
+  // Mock payments data (can be replaced with actual Firestore query later)
+  const payments = useMemo(() => [], []);
 
   const todayCheckIns = useMemo(() => {
     const today = new Date();
@@ -74,13 +107,10 @@ export default function GymDashboardScreen() {
   }, [checkIns.length, todayCheckIns.length]);
 
   const onRefresh = () => {
-    checkInsQuery.refetch();
-    paymentsQuery.refetch();
-    gymQuery.refetch();
-    profileQuery.refetch();
+    loadData();
   };
 
-  if (!sessionChecked || gymQuery.isLoading) {
+  if (!sessionChecked || isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#111827" />
@@ -96,7 +126,7 @@ export default function GymDashboardScreen() {
     );
   }
 
-  const ownerEmail = profileQuery.data?.owner?.email;
+  const ownerEmail = gymOwner?.email;
 
   const TopBar = () => (
     <View style={styles.topBar}>
@@ -185,7 +215,7 @@ export default function GymDashboardScreen() {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={checkInsQuery.isRefetching} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.sectionHeaderRow}>
@@ -219,7 +249,13 @@ export default function GymDashboardScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen 
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false,
+          headerBackVisible: false,
+        }} 
+      />
 
       <TopBar />
 
@@ -230,7 +266,7 @@ export default function GymDashboardScreen() {
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
-          refreshControl={<RefreshControl refreshing={checkInsQuery.isRefetching} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.screenTitle}>{gym.name}</Text>
