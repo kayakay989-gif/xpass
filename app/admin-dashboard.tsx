@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -177,7 +177,7 @@ export default function AdminDashboardScreen() {
   };
 
   // Load spotlight banners
-  const loadSpotlightBanners = async () => {
+  const loadSpotlightBanners = useCallback(async () => {
     try {
       setIsLoadingSpotlight(true);
       const banners = await firestoreSpotlightBanners.getAll();
@@ -188,7 +188,7 @@ export default function AdminDashboardScreen() {
     } finally {
       setIsLoadingSpotlight(false);
     }
-  };
+  }, []);
 
   // Load data on mount and when refreshing
   useEffect(() => {
@@ -200,7 +200,7 @@ export default function AdminDashboardScreen() {
     if (showSpotlightModal) {
       loadSpotlightBanners();
     }
-  }, [showSpotlightModal]);
+  }, [showSpotlightModal, loadSpotlightBanners]);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
