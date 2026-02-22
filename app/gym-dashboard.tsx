@@ -419,14 +419,11 @@ export default function GymDashboardScreen() {
 
           <Text style={styles.sectionLabel}>Account</Text>
           <View style={styles.listCard}>
-            <TouchableOpacity style={styles.navRow} activeOpacity={0.85} onPress={() => Alert.alert('Security', 'Coming soon')}>
-              <View>
-                <Text style={styles.navTitle}>Security</Text>
-                <Text style={styles.navSub}>Phone OTP</Text>
-              </View>
-              <ChevronRight size={18} color="#9CA3AF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.navRow, { borderBottomWidth: 0 }]} activeOpacity={0.85} onPress={() => Alert.alert('Notifications', 'Coming soon')}>
+            <TouchableOpacity 
+              style={[styles.navRow, { borderBottomWidth: 0 }]} 
+              activeOpacity={0.85} 
+              onPress={() => router.push('/notifications' as any)}
+            >
               <View>
                 <Text style={styles.navTitle}>Notifications</Text>
                 <Text style={styles.navSub}>Push • SMS</Text>
