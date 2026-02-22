@@ -26,38 +26,59 @@ export default function GymLoginScreen() {
   // Simple password verification for client-side
   // Supports plaintext passwords and sha256 hashes (common legacy format)
   const verifyPasswordClient = async (inputPassword: string, storedHash: string | undefined, storedPlaintext: string | undefined): Promise<boolean> => {
-    // If plaintext password exists, use it (legacy support)
-    if (storedPlaintext && storedPlaintext === inputPassword) {
-      return true;
-    }
+    try {
+      // If plaintext password exists, use it (legacy support)
+      if (storedPlaintext && typeof storedPlaintext === 'string' && storedPlaintext.trim() === inputPassword.trim()) {
+        return true;
+      }
 
-    // If no hash, return false
-    if (!storedHash) {
-      return false;
-    }
-
-    // Support sha256:<salt>:<hexDigest> format
-    if (storedHash.startsWith('sha256:')) {
-      const parts = storedHash.split(':');
-      if (parts.length !== 3) return false;
-      const salt = parts[1] || '';
-      const expectedHex = parts[2] || '';
-      
-      try {
-        const hashInput = `${salt}:${inputPassword}`;
-        const actualHex = await Crypto.digestStringAsync(
-          Crypto.CryptoDigestAlgorithm.SHA256,
-          hashInput
-        );
-        return actualHex.toLowerCase() === expectedHex.toLowerCase();
-      } catch {
+      // If no hash, return false
+      if (!storedHash || typeof storedHash !== 'string') {
         return false;
       }
-    }
 
-    // For pbkdf2 hashes, we'd need more complex crypto - skip for now
-    // In practice, most passwords are plaintext or sha256
-    return false;
+      const trimmedHash = storedHash.trim();
+
+      // Support sha256:<salt>:<hexDigest> format
+      if (trimmedHash.startsWith('sha256:')) {
+        const parts = trimmedHash.split(':');
+        if (parts.length !== 3) {
+          console.warn('[GymLogin] Invalid sha256 hash format');
+          return false;
+        }
+        const salt = parts[1] || '';
+        const expectedHex = parts[2] || '';
+        
+        if (!salt || !expectedHex) {
+          console.warn('[GymLogin] Missing salt or hash in sha256 format');
+          return false;
+        }
+
+        try {
+          const hashInput = `${salt}:${inputPassword.trim()}`;
+          const actualHex = await Crypto.digestStringAsync(
+            Crypto.CryptoDigestAlgorithm.SHA256,
+            hashInput
+          );
+          const matches = actualHex.toLowerCase() === expectedHex.toLowerCase();
+          if (!matches) {
+            console.warn('[GymLogin] Password hash mismatch');
+          }
+          return matches;
+        } catch (error) {
+          console.error('[GymLogin] Error computing hash:', error);
+          return false;
+        }
+      }
+
+      // For pbkdf2 hashes, we'd need more complex crypto - skip for now
+      // In practice, most passwords are plaintext or sha256
+      console.warn('[GymLogin] Unsupported hash format:', trimmedHash.substring(0, 20));
+      return false;
+    } catch (error) {
+      console.error('[GymLogin] Password verification error:', error);
+      return false;
+    }
   };
 
   const generateSessionToken = (): string => {
@@ -85,13 +106,17 @@ export default function GymLoginScreen() {
 
     try {
       // Get gym owner by username
-      const gymOwner = await firestoreGymOwners.getByUsername(username.trim());
+      const trimmedUsername = username.trim();
+      const gymOwner = await firestoreGymOwners.getByUsername(trimmedUsername);
       
       if (!gymOwner) {
+        console.warn('[GymLogin] Gym owner not found for username:', trimmedUsername);
         setError('Invalid username or password');
         setIsLoading(false);
         return;
       }
+
+      console.log('[GymLogin] Found gym owner:', { id: gymOwner.id, gymId: gymOwner.gymId, hasHash: !!gymOwner.passwordHash, hasPlaintext: !!gymOwner.password });
 
       // Verify password
       const passwordValid = await verifyPasswordClient(
@@ -101,10 +126,13 @@ export default function GymLoginScreen() {
       );
 
       if (!passwordValid) {
+        console.warn('[GymLogin] Password verification failed for username:', trimmedUsername);
         setError('Invalid username or password');
         setIsLoading(false);
         return;
       }
+
+      console.log('[GymLogin] Password verified successfully');
 
       // Get gym details
       const gym = await firestoreGyms.getById(gymOwner.gymId);

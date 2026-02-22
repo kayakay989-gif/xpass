@@ -107,14 +107,25 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   // Load user profile from Firestore
   const loadUserProfile = useCallback(async (uid: string) => {
     try {
+      const firebaseAuthUser = auth.currentUser;
       const userDoc = await getDoc(doc(db, 'users', uid));
+      
       if (userDoc.exists()) {
         const userData = firestoreDataToUser(uid, userDoc.data());
+        
+        // Sync Firebase Auth displayName with Firestore if they differ
+        if (firebaseAuthUser && firebaseAuthUser.displayName !== userData.name && userData.name) {
+          try {
+            await updateProfile(firebaseAuthUser, { displayName: userData.name });
+          } catch (error) {
+            console.warn('[AuthContext] Failed to sync displayName:', error);
+          }
+        }
+        
         setUser(userData);
         return userData;
       } else {
         // Create user profile if it doesn't exist
-        const firebaseAuthUser = auth.currentUser;
         if (firebaseAuthUser) {
           const newUser: User = {
             id: uid,
@@ -150,7 +161,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (firebaseUser) {
           setFirebaseUser(firebaseUser);
           setIsGuest(false);
-          await loadUserProfile(firebaseUser.uid);
+          // Always load profile from Firestore first (source of truth)
+          const profile = await loadUserProfile(firebaseUser.uid);
+          // If profile loaded successfully, ensure Firebase Auth displayName matches
+          if (profile && profile.name && firebaseUser.displayName !== profile.name) {
+            try {
+              await updateProfile(firebaseUser, { displayName: profile.name });
+            } catch (error) {
+              console.warn('[AuthContext] Failed to sync displayName after profile load:', error);
+            }
+          }
           await evaluateAdminClaim(firebaseUser);
         } else {
           setFirebaseUser(null);

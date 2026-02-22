@@ -54,14 +54,28 @@ export default function AdminLoginScreen() {
       const userSnap = await getDoc(doc(db, 'users', uid));
       const userData = userSnap.exists() ? userSnap.data() : null;
 
+      if (!userSnap.exists()) {
+        await logout();
+        setError('Admin account not found in system. Please contact administrator.');
+        return;
+      }
+
       const role = normalize(userData?.role);
       const status = normalize(userData?.status);
+
+      console.log('[AdminLogin] User data:', { uid, role, status, email: userData?.email });
 
       if (role === 'admin' && status === 'active') {
         router.replace('/admin-dashboard' as any);
       } else {
         await logout();
-        setError('This account is not authorized as an admin.');
+        if (role !== 'admin') {
+          setError(`Account does not have admin role. Current role: ${role || 'none'}. Please contact administrator.`);
+        } else if (status !== 'active') {
+          setError(`Admin account is not active. Current status: ${status || 'none'}. Please contact administrator.`);
+        } else {
+          setError('This account is not authorized as an admin.');
+        }
       }
     } catch (err: any) {
       const code = err?.code as string | undefined;
