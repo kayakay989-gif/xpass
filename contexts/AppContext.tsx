@@ -4,6 +4,7 @@ import { Subscription, Gym, CheckIn, SubscriptionTier, SubscriptionDuration } fr
 import { trpc } from '@/lib/trpc';
 import { useAuth } from './AuthContext';
 import { firestoreGyms } from '@/lib/firestore';
+import { config } from '@/lib/config';
 
 // Pricing table (TOTAL price for duration) based on provided spec
 const TOTAL_PRICES: Record<SubscriptionDuration, Record<SubscriptionTier, number>> = {
@@ -55,7 +56,8 @@ export const [AppProvider, useApp] = createContextHook(() => {
         e?.code
           ? `${e.code}${e?.message ? `: ${e.message}` : ''}`
           : e?.message || 'Failed to load gyms from Firestore.';
-      setGymsError(msg);
+      const projectHint = config.firebase.projectId ? ` (project: ${config.firebase.projectId})` : '';
+      setGymsError(`${msg}${projectHint}`);
       // Keep previous gyms (if any) so we don't flash empty UI.
       throw e;
     } finally {
