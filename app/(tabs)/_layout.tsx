@@ -39,8 +39,18 @@ export default function TabLayout() {
           fontWeight: '700' as const,
         },
         headerLeft: () => {
-          // No back button on Home (per requirement).
-          if (route.name === 'home') return null;
+          // Home: show back only for guest flow (lands on splash).
+          if (route.name === 'home') {
+            if (!isGuest && firebaseUser) return null;
+            return (
+              <TouchableOpacity
+                onPress={() => router.replace('/splash')}
+                style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+              >
+                <ChevronLeft size={22} color={Colors.text} />
+              </TouchableOpacity>
+            );
+          }
 
           return (
             <TouchableOpacity
