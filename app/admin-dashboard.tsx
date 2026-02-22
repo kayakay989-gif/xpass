@@ -41,7 +41,7 @@ import GymLocationPicker from '@/components/GymLocationPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
 
 const TIER_COLORS = {
   silver: '#C0C0C0',
@@ -652,22 +652,38 @@ export default function AdminDashboardScreen() {
             <Text style={styles.pageTitle}>Admin Console</Text>
 
             <View style={styles.statsGrid2x2}>
-              <View style={styles.statCardMinimal}>
+              <TouchableOpacity
+                style={styles.statCardMinimal}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('users')}
+              >
                 <Text style={styles.statLabelMinimal}>Active Users</Text>
                 <Text style={styles.statValueMinimal}>{stats?.totalUsers || 0}</Text>
-              </View>
-              <View style={styles.statCardMinimal}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statCardMinimal}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('checkins')}
+              >
                 <Text style={styles.statLabelMinimal}>Check-ins</Text>
                 <Text style={styles.statValueMinimal}>{stats?.totalCheckIns || 0}</Text>
-              </View>
-              <View style={styles.statCardMinimal}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statCardMinimal}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('payouts')}
+              >
                 <Text style={styles.statLabelMinimal}>Payouts Pending</Text>
                 <Text style={styles.statValueMinimal}>0</Text>
-              </View>
-              <View style={styles.statCardMinimal}>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statCardMinimal}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('gyms')}
+              >
                 <Text style={styles.statLabelMinimal}>Total Gyms</Text>
                 <Text style={styles.statValueMinimal}>{stats?.totalGyms || 0}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity
@@ -691,7 +707,7 @@ export default function AdminDashboardScreen() {
               <TouchableOpacity
                 style={styles.secondaryButton}
                 activeOpacity={0.85}
-                onPress={() => setActiveTab('gyms')}
+                onPress={() => setActiveTab('payouts')}
               >
                 <Text style={styles.secondaryButtonText}>View All</Text>
               </TouchableOpacity>
@@ -882,6 +898,34 @@ export default function AdminDashboardScreen() {
             })}
           </View>
         )}
+
+        {activeTab === 'payouts' && (
+          <View style={styles.content}>
+            <Text style={styles.pageTitle}>Payouts</Text>
+            <Text style={styles.pageSubtitle}>
+              Monthly payouts are calculated from check-ins. (Currently showing placeholders: JOD 0)
+            </Text>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Monthly Payouts</Text>
+
+              {(gymsWithStats || []).map((g: any) => (
+                <View key={g.id} style={styles.payoutRow}>
+                  <Text style={styles.payoutGymName}>{g.name}</Text>
+                  <Text style={styles.payoutAmount}>JOD 0</Text>
+                </View>
+              ))}
+
+              {(gymsWithStats || []).length === 0 && (
+                <View style={styles.emptyState}>
+                  <DollarSign size={48} color="#9CA3AF" />
+                  <Text style={styles.emptyTitle}>No payouts</Text>
+                  <Text style={styles.emptyText}>Add gyms and check-ins to generate payouts.</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       <View style={styles.bottomTabs}>
@@ -934,6 +978,19 @@ export default function AdminDashboardScreen() {
           </View>
           <Text style={[styles.bottomTabLabel, activeTab === 'checkins' && styles.bottomTabLabelActive]}>
             Check-ins
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'payouts' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('payouts')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'payouts' && styles.bottomTabIconWrapActive]}>
+            <DollarSign size={20} color={activeTab === 'payouts' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'payouts' && styles.bottomTabLabelActive]}>
+            Payouts
           </Text>
         </TouchableOpacity>
       </View>
