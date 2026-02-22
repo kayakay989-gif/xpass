@@ -146,7 +146,9 @@ export default function GymDashboardScreen() {
   }, [checkIns.length, todayCheckIns.length]);
 
   const onRefresh = () => {
-    loadData();
+    if (actualGymId) {
+      loadData(actualGymId);
+    }
   };
 
   if (!sessionChecked || isLoading) {

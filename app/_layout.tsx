@@ -30,8 +30,10 @@ function RootLayoutNav() {
           fontWeight: '700' as const,
         },
         headerLeft: () => {
-          // Back button on all stack screens, except splash.
-          if (route.name === 'splash') return null;
+          // Back button on all stack screens, except splash, gym-login, and gym-dashboard.
+          if (route.name === 'splash' || route.name === 'gym-login' || route.name === 'gym-dashboard') {
+            return null;
+          }
           return (
             <TouchableOpacity
               onPress={() => {
@@ -65,6 +67,23 @@ function RootLayoutNav() {
         options={{ 
           title: "Choose Plan",
           presentation: "modal",
+        }} 
+      />
+      <Stack.Screen 
+        name="gym-login" 
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false,
+          headerBackVisible: false,
+        }} 
+      />
+      <Stack.Screen 
+        name="gym-dashboard" 
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false,
+          headerBackVisible: false,
+          headerLeft: () => null,
         }} 
       />
     </Stack>
