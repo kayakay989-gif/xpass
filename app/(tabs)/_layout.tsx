@@ -1,16 +1,20 @@
 import { Tabs } from "expo-router";
-import { Home, Dumbbell, QrCode, CreditCard } from "lucide-react-native";
+import { Home, Dumbbell, QrCode, CreditCard, ChevronLeft } from "lucide-react-native";
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/contexts/AuthContext";
+import { useRouter } from "expo-router";
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { isGuest, firebaseUser } = useAuth();
 
   return (
     <Tabs
-      screenOptions={{
+      screenOptions={({ route, navigation }) => ({
         tabBarShowLabel: false,
         headerShown: true,
         tabBarHideOnKeyboard: true,
@@ -34,7 +38,31 @@ export default function TabLayout() {
         headerTitleStyle: {
           fontWeight: '700' as const,
         },
-      }}
+        headerLeft: () => {
+          // No back button on Home (per requirement).
+          if (route.name === 'home') return null;
+
+          return (
+            <TouchableOpacity
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                  return;
+                }
+                // If there's no back history (tab root), choose a safe fallback.
+                if (isGuest || !firebaseUser) {
+                  router.replace('/splash');
+                } else {
+                  router.replace('/(tabs)/home');
+                }
+              }}
+              style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+            >
+              <ChevronLeft size={22} color={Colors.text} />
+            </TouchableOpacity>
+          );
+        },
+      })}
     >
       <Tabs.Screen
         name="home"

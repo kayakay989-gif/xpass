@@ -2,7 +2,7 @@ import { StyleSheet, Text, View, TouchableOpacity, TextInput, Image, ScrollView,
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react-native';
+import { ChevronLeft, Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -147,6 +147,16 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+            <TouchableOpacity
+              onPress={() => {
+                const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
+                if (canGoBack) router.back();
+                else router.replace('/splash');
+              }}
+              style={{ padding: 8 }}
+            >
+              <ChevronLeft size={22} color={Colors.text} />
+            </TouchableOpacity>
             <Image 
               source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }} 
               style={styles.logo}

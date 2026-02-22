@@ -1,7 +1,7 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Edit, User as UserIcon, ChevronLeft } from 'lucide-react-native';
+import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Edit, User as UserIcon, ChevronLeft, LogOut } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
@@ -9,7 +9,7 @@ import Colors from '@/constants/colors';
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, firebaseUser, isLoading } = useAuth();
+  const { user, firebaseUser, isLoading, logout, isGuest } = useAuth();
   const { subscription } = useApp();
 
   const goBackOrHome = () => {
@@ -88,6 +88,25 @@ export default function ProfileScreen() {
     const diffTime = end.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return Math.max(0, diffDays);
+  };
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (e: any) {
+      console.error('[Profile] Logout failed:', e);
+      showAlert('Error', e?.message || 'Failed to log out.');
+    } finally {
+      router.replace('/splash');
+    }
   };
 
   return (
@@ -248,6 +267,16 @@ export default function ProfileScreen() {
               <ChevronRight size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
           </View>
+
+          <View style={{ height: 16 }} />
+
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={handleLogout}
+          >
+            <LogOut size={18} color={Colors.white} />
+            <Text style={styles.logoutText}>{isGuest ? 'Exit guest' : 'Logout'}</Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
     </>
@@ -440,6 +469,21 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Colors.border,
     marginVertical: 4,
+  },
+  logoutButton: {
+    backgroundColor: '#DC2626',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 40,
+  },
+  logoutText: {
+    color: Colors.white,
+    fontWeight: '800' as const,
+    fontSize: 14,
   },
   subscriptionIcon: {
     width: 20,

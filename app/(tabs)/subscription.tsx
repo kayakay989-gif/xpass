@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { User as UserIcon } from 'lucide-react-native';
+import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 
 type Package = {
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
@@ -122,6 +122,13 @@ export default function SubscriptionScreen() {
   const [selectedDuration, setSelectedDuration] = useState<number>(1);
   const insets = useSafeAreaInsets();
 
+  const goBackOrFallback = () => {
+    const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
+    if (canGoBack) return router.back();
+    if (isGuest || !firebaseUser) return router.replace('/splash');
+    return router.replace('/(tabs)/home');
+  };
+
   useEffect(() => {
     if (isGuest || !firebaseUser) {
       // Prevent guest users from entering the purchase flow.
@@ -164,11 +171,16 @@ export default function SubscriptionScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Image 
-          source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity onPress={goBackOrFallback} style={{ padding: 6 }}>
+            <ChevronLeft size={22} color={Colors.text} />
+          </TouchableOpacity>
+          <Image 
+            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
         <View style={styles.headerRight}>
           <Text style={styles.greeting}>
             Hello {user?.name?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'User'}

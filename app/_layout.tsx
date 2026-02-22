@@ -19,7 +19,7 @@ const queryClient = new QueryClient();
 function RootLayoutNav() {
   return (
     <Stack 
-      screenOptions={({ navigation }) => ({ 
+      screenOptions={({ navigation, route }) => ({ 
         headerBackTitle: "Back",
         headerBackTitleVisible: false,
         headerStyle: {
@@ -30,11 +30,18 @@ function RootLayoutNav() {
           fontWeight: '700' as const,
         },
         headerLeft: () => {
-          // Ensure a subtle back button on non-tab screens when possible.
-          if (!navigation.canGoBack()) return null;
+          // Back button on all stack screens, except splash.
+          if (route.name === 'splash') return null;
           return (
             <TouchableOpacity
-              onPress={() => navigation.goBack()}
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  // If there's no history (common on web/mobile), go to splash as the safe fallback.
+                  navigation.navigate('splash' as never);
+                }
+              }}
               style={{ paddingHorizontal: 12, paddingVertical: 8 }}
             >
               <ChevronLeft size={22} color={Colors.text} />

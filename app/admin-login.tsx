@@ -11,7 +11,7 @@ import {
   Image,
 } from 'react-native';
 import { Stack, router } from 'expo-router';
-import { Lock, User } from 'lucide-react-native';
+import { ChevronLeft, Lock, User } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { auth, db } from '@/lib/firebase';
@@ -88,6 +88,16 @@ export default function AdminLoginScreen() {
 
       <View style={styles.topBar}>
         <View style={styles.brandRow}>
+          <TouchableOpacity
+            onPress={() => {
+              const canGoBack = typeof (router as any).canGoBack === 'function' ? (router as any).canGoBack() : false;
+              if (canGoBack) (router as any).back();
+              else router.replace('/splash' as any);
+            }}
+            style={{ padding: 8, marginLeft: -8 }}
+          >
+            <ChevronLeft size={22} color="#111827" />
+          </TouchableOpacity>
           <Image
             source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
             style={styles.brandLogo}
