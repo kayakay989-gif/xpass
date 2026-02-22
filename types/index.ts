@@ -60,6 +60,17 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
+export interface SpotlightBanner {
+  id: string;
+  imageUrl: string;
+  title?: string;
+  linkUrl?: string;
+  isActive: boolean;
+  order: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export type PaymentStatus = 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled';
 
 export interface Payment {

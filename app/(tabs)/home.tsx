@@ -7,6 +7,7 @@ import Colors from '@/constants/colors';
 import { useState, useMemo, useEffect } from 'react';
 import MapViewComponent from '@/components/MapView';
 import { getGymTier, getTierLabel } from '@/lib/gym-tier';
+import { firestoreSpotlightBanners } from '@/lib/firestore';
 
 type ViewMode = 'map' | 'list';
 
@@ -14,6 +15,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const { user, firebaseUser, isGuest, isLoading: isLoadingAuth } = useAuth();
   const { subscription, gyms, isLoading } = useApp();
+  const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
+  const [isLoadingBanners, setIsLoadingBanners] = useState(true);
 
   useEffect(() => {
     // On web, Firebase Auth can be ready before the Firestore user profile loads.
@@ -22,6 +25,22 @@ export default function HomeScreen() {
       router.replace('/splash');
     }
   }, [firebaseUser, isGuest, isLoadingAuth, router]);
+
+  useEffect(() => {
+    const loadBanners = async () => {
+      try {
+        setIsLoadingBanners(true);
+        const banners = await firestoreSpotlightBanners.getAll();
+        
+        setSpotlightBanners(banners);
+      } catch (error) {
+        console.error('[Home] Error loading spotlight banners:', error);
+      } finally {
+        setIsLoadingBanners(false);
+      }
+    };
+    loadBanners();
+  }, []);
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [selectedCity, setSelectedCity] = useState<string>('all');
   const [selectedTier, setSelectedTier] = useState<string>('all'); // all|silver|gold|diamond|elite
@@ -64,14 +83,7 @@ export default function HomeScreen() {
     });
   }, [gyms, selectedCity, selectedTier, selectedFacility]);
 
-  const spotlightGyms = useMemo(() => {
-    return gyms
-      .filter((g: any) => {
-        const t = getGymTier(g);
-        return t === 'elite' || t === 'diamond';
-      })
-      .slice(0, 3);
-  }, [gyms]);
+  // Spotlight banners are now loaded from Firestore, not from gyms
 
   const getTierName = (tier: string): string => {
     return tier.charAt(0).toUpperCase() + tier.slice(1);
@@ -189,52 +201,51 @@ export default function HomeScreen() {
         <Text style={styles.sectionTitle}>Spotlight</Text>
       </View>
       
-      {isLoading ? (
+      {isLoadingBanners ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={Colors.primary} />
         </View>
-      ) : (
+      ) : spotlightBanners.length > 0 ? (
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false}
           style={styles.spotlightContainer}
           contentContainerStyle={styles.spotlightContent}
         >
-          {spotlightGyms.map((gym) => (
+          {spotlightBanners.map((banner) => (
             <TouchableOpacity 
-              key={gym.id} 
+              key={banner.id} 
               style={styles.spotlightCard}
               onPress={() => {
-                if (isGuest || !subscription) {
-                  Alert.alert(
-                    'Subscription Required',
-                    'Please subscribe to access gym details and check-in features.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Subscribe', onPress: () => router.push('/(tabs)/subscription') },
-                    ]
-                  );
-                } else {
-                  router.push(`/gyms`);
+                if (banner.linkUrl) {
+                  if (banner.linkUrl.startsWith('http')) {
+                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                      window.open(banner.linkUrl, '_blank');
+                    }
+                  } else {
+                    router.push(banner.linkUrl as any);
+                  }
                 }
               }}
             >
               <Image 
-                source={{ uri: gym.imageUrl }} 
+                source={{ uri: banner.imageUrl }} 
                 style={styles.spotlightImage}
                 resizeMode="cover"
               />
-              <View style={styles.spotlightOverlay}>
-                <View style={styles.spotlightBadge}>
-                  <Text style={styles.spotlightBadgeText}>
-                    {getTierLabel(getGymTier(gym)).toUpperCase()}
-                  </Text>
+              {banner.title && (
+                <View style={styles.spotlightOverlay}>
+                  <View style={styles.spotlightBadge}>
+                    <Text style={styles.spotlightBadgeText}>
+                      {banner.title.toUpperCase()}
+                    </Text>
+                  </View>
                 </View>
-              </View>
+              )}
             </TouchableOpacity>
           ))}
         </ScrollView>
-      )}
+      ) : null}
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Discover</Text>

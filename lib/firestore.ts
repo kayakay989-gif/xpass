@@ -14,7 +14,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { User, Subscription, Gym, CheckIn, GymOwner } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightBanner } from '@/types';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -392,6 +392,80 @@ export const firestoreGymOwners = {
   },
 };
 
+// Spotlight Banners collection
+export const spotlightBannersCollection = collection(db, 'spotlightBanners');
+
+export const firestoreSpotlightBanners = {
+  async getAll(): Promise<SpotlightBanner[]> {
+    try {
+      const q = query(
+        spotlightBannersCollection,
+        where('isActive', '==', true),
+        orderBy('order', 'asc')
+      );
+      
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          imageUrl: data.imageUrl,
+          title: data.title,
+          linkUrl: data.linkUrl,
+          isActive: data.isActive,
+          order: data.order || 0,
+          createdAt: timestampToDate(data.createdAt),
+          updatedAt: timestampToDate(data.updatedAt),
+        };
+      });
+    } catch (error: any) {
+      // If index doesn't exist, try without orderBy
+      if (error?.code === 'failed-precondition') {
+        const q = query(
+          spotlightBannersCollection,
+          where('isActive', '==', true)
+        );
+        const snapshot = await getDocs(q);
+        const banners = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            imageUrl: data.imageUrl,
+            title: data.title,
+            linkUrl: data.linkUrl,
+            isActive: data.isActive,
+            order: data.order || 0,
+            createdAt: timestampToDate(data.createdAt),
+            updatedAt: timestampToDate(data.updatedAt),
+          };
+        });
+        // Sort in memory
+        return banners.sort((a, b) => a.order - b.order);
+      }
+      throw error;
+    }
+  },
+
+  async create(banner: SpotlightBanner): Promise<void> {
+    await setDoc(doc(db, 'spotlightBanners', banner.id), {
+      ...banner,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async update(bannerId: string, updates: Partial<SpotlightBanner>): Promise<void> {
+    await updateDoc(doc(db, 'spotlightBanners', bannerId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async delete(bannerId: string): Promise<void> {
+    await deleteDoc(doc(db, 'spotlightBanners', bannerId));
+  },
+};
+
 // Export all services
 export default {
   users: firestoreUsers,
@@ -399,5 +473,6 @@ export default {
   gyms: firestoreGyms,
   checkIns: firestoreCheckIns,
   gymOwners: firestoreGymOwners,
+  spotlightBanners: firestoreSpotlightBanners,
 };
 

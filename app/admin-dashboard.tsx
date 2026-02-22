@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns } from '@/lib/firestore';
+import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightBanners } from '@/lib/firestore';
 import {
   Shield,
   Users,
@@ -42,7 +42,7 @@ import GymLocationPicker from '@/components/GymLocationPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'spotlight';
 
 const TIER_COLORS = {
   silver: '#C0C0C0',
