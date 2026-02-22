@@ -68,6 +68,13 @@ export default function AdminDashboardScreen() {
     category: 'standard' as GymCategory,
     amenities: '',
     hours: '6:00 AM - 10:00 PM',
+    timings: {
+      men: { from: '', to: '' },
+      women: { from: '', to: '' },
+      mixed: { from: '', to: '' },
+    },
+    menOnly: false,
+    womenOnly: false,
     imageUrl: '',
     allowedTiers: [] as SubscriptionTier[],
     email: '',
@@ -255,6 +262,13 @@ export default function AdminDashboardScreen() {
       category: 'standard',
       amenities: '',
       hours: '6:00 AM - 10:00 PM',
+      timings: {
+        men: { from: '', to: '' },
+        women: { from: '', to: '' },
+        mixed: { from: '', to: '' },
+      },
+      menOnly: false,
+      womenOnly: false,
       imageUrl: '',
       allowedTiers: [],
       email: '',
@@ -296,6 +310,13 @@ export default function AdminDashboardScreen() {
         category: gym.category || 'standard',
         amenities: Array.isArray(gym.amenities) ? gym.amenities.join(', ') : (gym.amenities || ''),
         hours: gym.hours || '6:00 AM - 10:00 PM',
+        timings: gym.timings || {
+          men: { from: '', to: '' },
+          women: { from: '', to: '' },
+          mixed: { from: '', to: '' },
+        },
+        menOnly: gym.menOnly || false,
+        womenOnly: gym.womenOnly || false,
         imageUrl: gym.imageUrl || '',
         allowedTiers: Array.isArray(gym.allowedTiers) ? gym.allowedTiers : [],
         // Prefer values stored on the gym doc (if present), then try gymOwners lookup below.
@@ -420,6 +441,9 @@ export default function AdminDashboardScreen() {
         category: gymData.category,
         amenities: gymData.amenities,
         hours: gymData.hours,
+        timings: newGym.timings,
+        menOnly: newGym.menOnly,
+        womenOnly: newGym.womenOnly,
         imageUrl:
           gymData.imageUrl ||
           'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
@@ -1138,13 +1162,123 @@ export default function AdminDashboardScreen() {
                 multiline
               />
 
-              <Text style={styles.label}>Hours</Text>
-              <TextInput
-                style={styles.input}
-                value={newGym.hours}
-                onChangeText={(text) => setNewGym({ ...newGym, hours: text })}
-                placeholder="6:00 AM - 10:00 PM"
-              />
+              <Text style={styles.label}>Timings</Text>
+              
+              {/* Men Timings */}
+              <View style={styles.timingRow}>
+                <Text style={styles.timingLabel}>Men</Text>
+                <View style={styles.timingInputs}>
+                  <TextInput
+                    style={styles.timingInput}
+                    value={newGym.timings.men.from}
+                    onChangeText={(text) =>
+                      setNewGym({
+                        ...newGym,
+                        timings: { ...newGym.timings, men: { ...newGym.timings.men, from: text } },
+                      })
+                    }
+                    placeholder="From"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                  <TextInput
+                    style={styles.timingInput}
+                    value={newGym.timings.men.to}
+                    onChangeText={(text) =>
+                      setNewGym({
+                        ...newGym,
+                        timings: { ...newGym.timings, men: { ...newGym.timings.men, to: text } },
+                      })
+                    }
+                    placeholder="To"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+              </View>
+
+              {/* Women Timings */}
+              <View style={styles.timingRow}>
+                <Text style={styles.timingLabel}>Women</Text>
+                <View style={styles.timingInputs}>
+                  <TextInput
+                    style={styles.timingInput}
+                    value={newGym.timings.women.from}
+                    onChangeText={(text) =>
+                      setNewGym({
+                        ...newGym,
+                        timings: { ...newGym.timings, women: { ...newGym.timings.women, from: text } },
+                      })
+                    }
+                    placeholder="From"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                  <TextInput
+                    style={styles.timingInput}
+                    value={newGym.timings.women.to}
+                    onChangeText={(text) =>
+                      setNewGym({
+                        ...newGym,
+                        timings: { ...newGym.timings, women: { ...newGym.timings.women, to: text } },
+                      })
+                    }
+                    placeholder="To"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+              </View>
+
+              {/* Mixed Timings */}
+              <View style={styles.timingRow}>
+                <Text style={styles.timingLabel}>Mixed</Text>
+                <View style={styles.timingInputs}>
+                  <TextInput
+                    style={styles.timingInput}
+                    value={newGym.timings.mixed.from}
+                    onChangeText={(text) =>
+                      setNewGym({
+                        ...newGym,
+                        timings: { ...newGym.timings, mixed: { ...newGym.timings.mixed, from: text } },
+                      })
+                    }
+                    placeholder="From"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                  <TextInput
+                    style={styles.timingInput}
+                    value={newGym.timings.mixed.to}
+                    onChangeText={(text) =>
+                      setNewGym({
+                        ...newGym,
+                        timings: { ...newGym.timings, mixed: { ...newGym.timings.mixed, to: text } },
+                      })
+                    }
+                    placeholder="To"
+                    placeholderTextColor="#9CA3AF"
+                  />
+                </View>
+              </View>
+
+              {/* Access Checkboxes */}
+              <View style={styles.checkboxContainer}>
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setNewGym({ ...newGym, menOnly: !newGym.menOnly })}
+                >
+                  <View style={[styles.checkbox, newGym.menOnly && styles.checkboxChecked]}>
+                    {newGym.menOnly && <Text style={styles.checkmark}>✓</Text>}
+                  </View>
+                  <Text style={styles.checkboxLabel}>Men only</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setNewGym({ ...newGym, womenOnly: !newGym.womenOnly })}
+                >
+                  <View style={[styles.checkbox, newGym.womenOnly && styles.checkboxChecked]}>
+                    {newGym.womenOnly && <Text style={styles.checkmark}>✓</Text>}
+                  </View>
+                  <Text style={styles.checkboxLabel}>Women only</Text>
+                </TouchableOpacity>
+              </View>
 
               <Text style={styles.label}>Gym Logo</Text>
               <TouchableOpacity style={styles.uploadButton} onPress={handlePickImage}>
@@ -2034,6 +2168,63 @@ const styles = StyleSheet.create({
   },
   tierTextActive: {
     color: '#fff',
+  },
+  timingRow: {
+    marginTop: 12,
+  },
+  timingLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#111827',
+    marginBottom: 8,
+  },
+  timingInputs: {
+    flexDirection: 'row' as const,
+    gap: 8,
+  },
+  timingInput: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: '#111827',
+  },
+  checkboxContainer: {
+    marginTop: 16,
+    gap: 12,
+  },
+  checkboxRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  checkboxChecked: {
+    backgroundColor: '#E31E24',
+    borderColor: '#E31E24',
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold' as const,
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#111827',
   },
   submitButton: {
     backgroundColor: '#DC2626',
