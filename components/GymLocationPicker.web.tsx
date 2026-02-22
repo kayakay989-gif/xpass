@@ -22,7 +22,7 @@ function GoogleMapDiv({ mapRef }: { mapRef: React.RefObject<HTMLDivElement> }) {
     style: {
       width: '100%',
       height: '100%',
-      borderRadius: 16,
+      minHeight: 400,
     },
   });
 }
@@ -117,7 +117,7 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
     });
   };
 
-  // Initialize map
+  // Load Google Maps script
   useEffect(() => {
     if (!hasValidKey) {
       setGoogleMapsError('Google Maps API key is missing. Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY and rebuild the web bundle.');
@@ -128,97 +128,8 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
     (async () => {
       try {
         await loadGoogleMaps();
-        if (cancelled) return;
-
-        // Get current location and initialize map
-        const currentLocation = await getCurrentLocation();
-        if (cancelled) return;
-
-        setGoogleMapsLoaded(true);
-
-        // Initialize map with current location
-        if (mapRef.current && typeof window !== 'undefined') {
-          const google = (window as any).google;
-          if (!google?.maps) return;
-
-          const map = new google.maps.Map(mapRef.current, {
-            center: {
-              lat: currentLocation.latitude,
-              lng: currentLocation.longitude,
-            },
-            zoom: 15,
-            mapTypeId: 'roadmap',
-            zoomControl: true,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: true,
-          });
-
-          mapInstanceRef.current = map;
-
-          // Create marker
-          const marker = new google.maps.Marker({
-            position: { lat: currentLocation.latitude, lng: currentLocation.longitude },
-            map,
-            draggable: true,
-            title: 'Selected Location',
-          });
-
-          markerRef.current = marker;
-
-          // Update coordinate when marker is dragged
-          marker.addListener('dragend', (event: any) => {
-            const lat = event.latLng.lat();
-            const lng = event.latLng.lng();
-            onChange({ latitude: lat, longitude: lng });
-            setSelectedPlace(null);
-          });
-
-          // Update marker when map is clicked
-          map.addListener('click', (event: any) => {
-            const lat = event.latLng.lat();
-            const lng = event.latLng.lng();
-            marker.setPosition({ lat, lng });
-            onChange({ latitude: lat, longitude: lng });
-            setSelectedPlace(null);
-          });
-
-          // Initialize Places service
-          placesServiceRef.current = new google.maps.places.PlacesService(map);
-
-          // Initialize Autocomplete for search
-          if (searchInputRef.current) {
-            const autocomplete = new google.maps.places.Autocomplete(searchInputRef.current, {
-              types: ['gym', 'establishment'],
-              fields: ['place_id', 'geometry', 'name', 'formatted_address', 'address_components'],
-            });
-
-            autocompleteRef.current = autocomplete;
-
-            autocomplete.addListener('place_changed', () => {
-              const place = autocomplete.getPlace();
-              if (place.geometry && place.geometry.location) {
-                const lat = place.geometry.location.lat();
-                const lng = place.geometry.location.lng();
-                
-                marker.setPosition({ lat, lng });
-                map.setCenter({ lat, lng });
-                map.setZoom(16);
-                
-                onChange({ latitude: lat, longitude: lng });
-                
-                const address = place.formatted_address || '';
-                const name = place.name || '';
-                
-                setSelectedPlace({ name, address, latitude: lat, longitude: lng });
-                setSearchQuery(name || address);
-                
-                if (onSelectPlace) {
-                  onSelectPlace({ name, address, latitude: lat, longitude: lng });
-                }
-              }
-            });
-          }
+        if (!cancelled) {
+          setGoogleMapsLoaded(true);
         }
       } catch (e) {
         console.error('[GymLocationPicker] Failed to load Google Maps:', e);
@@ -234,6 +145,127 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
       cancelled = true;
     };
   }, [hasValidKey]);
+
+  // Initialize map after Google Maps is loaded
+  useEffect(() => {
+    if (!googleMapsLoaded || !mapRef.current || typeof window === 'undefined') return;
+    
+    const google = (window as any).google;
+    if (!google?.maps) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // Get current location
+        const currentLocation = await getCurrentLocation();
+        if (cancelled) return;
+
+        // Wait a bit to ensure the div is fully rendered and has dimensions
+        await new Promise(resolve => setTimeout(resolve, 200));
+        if (cancelled || !mapRef.current) return;
+
+        // Ensure the map div has dimensions
+        const mapDiv = mapRef.current;
+        if (mapDiv.offsetWidth === 0 || mapDiv.offsetHeight === 0) {
+          console.warn('[GymLocationPicker] Map div has no dimensions, retrying...');
+          await new Promise(resolve => setTimeout(resolve, 300));
+          if (cancelled || !mapRef.current) return;
+        }
+
+        // Initialize map with current location
+        const map = new google.maps.Map(mapRef.current, {
+          center: {
+            lat: currentLocation.latitude,
+            lng: currentLocation.longitude,
+          },
+          zoom: 15,
+          mapTypeId: 'roadmap',
+          zoomControl: true,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: true,
+        });
+
+        if (cancelled) return;
+
+        mapInstanceRef.current = map;
+
+        // Create marker
+        const marker = new google.maps.Marker({
+          position: { lat: currentLocation.latitude, lng: currentLocation.longitude },
+          map,
+          draggable: true,
+          title: 'Selected Location',
+        });
+
+        markerRef.current = marker;
+
+        // Update coordinate when marker is dragged
+        marker.addListener('dragend', (event: any) => {
+          const lat = event.latLng.lat();
+          const lng = event.latLng.lng();
+          onChange({ latitude: lat, longitude: lng });
+          setSelectedPlace(null);
+        });
+
+        // Update marker when map is clicked
+        map.addListener('click', (event: any) => {
+          const lat = event.latLng.lat();
+          const lng = event.latLng.lng();
+          marker.setPosition({ lat, lng });
+          onChange({ latitude: lat, longitude: lng });
+          setSelectedPlace(null);
+        });
+
+        // Initialize Places service
+        placesServiceRef.current = new google.maps.places.PlacesService(map);
+
+        // Initialize Autocomplete for search
+        if (searchInputRef.current) {
+          const autocomplete = new google.maps.places.Autocomplete(searchInputRef.current, {
+            types: ['gym', 'establishment'],
+            fields: ['place_id', 'geometry', 'name', 'formatted_address', 'address_components'],
+          });
+
+          autocompleteRef.current = autocomplete;
+
+          autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (place.geometry && place.geometry.location) {
+              const lat = place.geometry.location.lat();
+              const lng = place.geometry.location.lng();
+              
+              marker.setPosition({ lat, lng });
+              map.setCenter({ lat, lng });
+              map.setZoom(16);
+              
+              onChange({ latitude: lat, longitude: lng });
+              
+              const address = place.formatted_address || '';
+              const name = place.name || '';
+              
+              setSelectedPlace({ name, address, latitude: lat, longitude: lng });
+              setSearchQuery(name || address);
+              
+              if (onSelectPlace) {
+                onSelectPlace({ name, address, latitude: lat, longitude: lng });
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.error('[GymLocationPicker] Failed to initialize map:', e);
+        if (!cancelled) {
+          setGoogleMapsError('Failed to initialize map. Please try again.');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleMapsLoaded, onChange, onSelectPlace]);
 
   // Search for gyms using Places API
   const searchGyms = async (query: string) => {
@@ -397,7 +429,9 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
       )}
 
       {/* Map */}
-      <GoogleMapDiv mapRef={mapRef} />
+      <View style={styles.mapContainer}>
+        <GoogleMapDiv mapRef={mapRef} />
+      </View>
       
       <View style={styles.mapHint}>
         <Text style={styles.mapHintText}>
@@ -410,9 +444,15 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
 
 const styles = StyleSheet.create({
   wrapper: {
-    height: 500,
     width: '100%',
     position: 'relative',
+  },
+  mapContainer: {
+    height: 400,
+    width: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 12,
   },
   searchContainer: {
     flexDirection: 'row',
