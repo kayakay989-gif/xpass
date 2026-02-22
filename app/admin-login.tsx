@@ -64,8 +64,15 @@ export default function AdminLoginScreen() {
         setError('This account is not authorized as an admin.');
       }
     } catch (err: any) {
-      const message = err?.message || 'Login failed. Please try again.';
-      setError(message);
+      const code = err?.code as string | undefined;
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+        setError('Invalid email or password.');
+      } else if (code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.');
+      } else {
+        const message = err?.message || 'Login failed. Please try again.';
+        setError(message);
+      }
     } finally {
       setIsSubmitting(false);
     }

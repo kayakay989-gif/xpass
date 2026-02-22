@@ -41,13 +41,23 @@ export const [AppProvider, useApp] = createContextHook(() => {
   const checkIns = checkInsQuery.data || [];
   const [gyms, setGyms] = useState<Gym[]>([]);
   const [isGymsLoading, setIsGymsLoading] = useState<boolean>(true);
+  const [gymsError, setGymsError] = useState<string | null>(null);
 
   const refetchGyms = useCallback(async () => {
     setIsGymsLoading(true);
     try {
       const gymsData = await firestoreGyms.getAll();
       setGyms(gymsData);
+      setGymsError(null);
       return gymsData;
+    } catch (e: any) {
+      const msg =
+        e?.code
+          ? `${e.code}${e?.message ? `: ${e.message}` : ''}`
+          : e?.message || 'Failed to load gyms from Firestore.';
+      setGymsError(msg);
+      // Keep previous gyms (if any) so we don't flash empty UI.
+      throw e;
     } finally {
       setIsGymsLoading(false);
     }
@@ -114,6 +124,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
       subscription,
       gyms,
       filteredGyms,
+      gymsError,
       checkIns,
       selectedGymFilter,
       setSelectedGymFilter,
@@ -127,6 +138,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
     subscription,
     gyms,
     filteredGyms,
+    gymsError,
     checkIns,
     selectedGymFilter,
     checkIn,

@@ -9,7 +9,7 @@ import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 
 export default function GymsScreen() {
   const { gymId } = useLocalSearchParams<{ gymId?: string }>();
-  const { filteredGyms, selectedGymFilter, setSelectedGymFilter, refetchGyms, isLoading } = useApp();
+  const { filteredGyms, selectedGymFilter, setSelectedGymFilter, refetchGyms, isLoading, gymsError } = useApp();
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -91,6 +91,12 @@ export default function GymsScreen() {
           />
         }
       >
+        {!!gymsError && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorTitle}>Couldn’t load gyms</Text>
+            <Text style={styles.errorText}>{gymsError}</Text>
+          </View>
+        )}
         {orderedGyms.map((gym) => {
           const tier = getGymTier(gym);
           const badge = getTierBadgeColors(tier);
@@ -137,8 +143,12 @@ export default function GymsScreen() {
         {orderedGyms.length === 0 && (
           <View style={styles.emptyState}>
             <Filter size={48} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>No gyms found</Text>
-            <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
+            <Text style={styles.emptyText}>
+              {gymsError ? 'Unable to load gyms' : 'No gyms found'}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {gymsError ? 'Pull to refresh or try again later.' : 'Try adjusting your filters'}
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -295,5 +305,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textMuted,
     marginTop: 4,
+  },
+  errorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  errorTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#991B1B',
+    marginBottom: 4,
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#991B1B',
   },
 });

@@ -87,7 +87,11 @@ export default function LoginScreen() {
       let errorMessage = 'Invalid credentials. Please try again.';
       
       if (error.code) {
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        if (
+          error.code === 'auth/user-not-found' ||
+          error.code === 'auth/wrong-password' ||
+          error.code === 'auth/invalid-credential'
+        ) {
           errorMessage = 'Invalid email or password.';
         } else if (error.code === 'auth/invalid-email') {
           errorMessage = 'Please enter a valid email address.';

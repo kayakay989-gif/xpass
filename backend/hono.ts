@@ -91,7 +91,7 @@ app.all("/api/3ds/callback", async (c) => {
           result,
           gatewayRecommendation,
         },
-      });
+  });
     } catch (e) {
       console.warn('[3DS Callback] Failed to persist callback details (non-fatal):', e);
     }
@@ -119,7 +119,7 @@ app.all("/api/3ds/callback", async (c) => {
           try {
             if (window.parent && window.parent !== window) {
               window.parent.postMessage(${JSON.stringify(msg)}, '*');
-            }
+          }
           } catch (e) {}
         </script>
       </body>
