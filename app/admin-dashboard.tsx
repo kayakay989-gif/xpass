@@ -523,12 +523,46 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  const openMapModal = () => {
-    if (newGym.latitude && newGym.longitude) {
-      const lat = parseFloat(newGym.latitude);
-      const lng = parseFloat(newGym.longitude);
-      if (!isNaN(lat) && !isNaN(lng)) {
-        setTempLocation({ latitude: lat, longitude: lng });
+  const openMapModal = async () => {
+    // Try to get user's current location first
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setTempLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        () => {
+          // Fallback to existing location or default
+          if (newGym.latitude && newGym.longitude) {
+            const lat = parseFloat(newGym.latitude);
+            const lng = parseFloat(newGym.longitude);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              setTempLocation({ latitude: lat, longitude: lng });
+            } else {
+              // Default to Amman, Jordan
+              setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+            }
+          } else {
+            // Default to Amman, Jordan
+            setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+          }
+        },
+        { timeout: 3000, enableHighAccuracy: true }
+      );
+    } else {
+      // Fallback if geolocation not available
+      if (newGym.latitude && newGym.longitude) {
+        const lat = parseFloat(newGym.latitude);
+        const lng = parseFloat(newGym.longitude);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          setTempLocation({ latitude: lat, longitude: lng });
+        } else {
+          setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+        }
+      } else {
+        setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
       }
     }
     setIsMapModalVisible(true);
@@ -1182,7 +1216,22 @@ export default function AdminDashboardScreen() {
                 <X size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
-            <GymLocationPicker coordinate={tempLocation} onChange={setTempLocation} />
+            <GymLocationPicker
+              coordinate={tempLocation}
+              onChange={setTempLocation}
+              onSelectPlace={(place) => {
+                // Auto-fill gym name and address when a place is selected
+                setNewGym({
+                  ...newGym,
+                  name: place.name || newGym.name,
+                  address: place.address || newGym.address,
+                });
+                setTempLocation({
+                  latitude: place.latitude,
+                  longitude: place.longitude,
+                });
+              }}
+            />
             <View style={styles.mapFooter}>
               <Text style={styles.locationSummary}>
                 {tempLocation.latitude.toFixed(4)}, {tempLocation.longitude.toFixed(4)}
