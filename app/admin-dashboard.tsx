@@ -31,6 +31,7 @@ import {
   QrCode,
   Copy,
   CheckCircle,
+  Download,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GymCategory, SubscriptionTier } from '@/types';
@@ -598,6 +599,36 @@ export default function AdminDashboardScreen() {
       Alert.alert('Copied!', 'Credentials copied to clipboard');
     } catch (error) {
       console.error('Failed to copy:', error);
+    }
+  };
+
+  const downloadQRCode = async (gymId: string, gymName: string) => {
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=xpass-gym-${gymId}`;
+        
+        // Fetch the QR code image
+        const response = await fetch(qrUrl);
+        const blob = await response.blob();
+        
+        // Create a download link
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${gymName.replace(/[^a-z0-9]/gi, '_')}_QR_Code.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        Alert.alert('Success', 'QR code downloaded successfully!');
+      } else {
+        // For native platforms, you could use expo-file-system or similar
+        Alert.alert('Info', 'Download is only available on web');
+      }
+    } catch (error) {
+      console.error('Failed to download QR code:', error);
+      Alert.alert('Error', 'Failed to download QR code. Please try again.');
     }
   };
 
@@ -1421,6 +1452,13 @@ export default function AdminDashboardScreen() {
                       />
                     </View>
                     <Text style={styles.qrData}>xpass-gym-{createdGymData.gymId}</Text>
+                    <TouchableOpacity
+                      style={styles.downloadQRButton}
+                      onPress={() => downloadQRCode(createdGymData.gymId, createdGymData.gymName)}
+                    >
+                      <Download size={18} color="#fff" />
+                      <Text style={styles.downloadQRButtonText}>Download QR</Text>
+                    </TouchableOpacity>
                   </View>
 
                   {/* Owner Credentials Section */}
@@ -2364,6 +2402,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginBottom: 16,
+  },
+  downloadQRButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#4F46E5',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 8,
+    marginTop: 8,
+  },
+  downloadQRButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
   credentialsSection: {
     padding: 20,
