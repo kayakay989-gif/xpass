@@ -15,6 +15,8 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightBanners } from '@/lib/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { app } from '@/lib/firebase';
 import {
   Shield,
   Users,
@@ -58,6 +60,9 @@ export default function AdminDashboardScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
+  const [showSpotlightModal, setShowSpotlightModal] = useState<boolean>(false);
+  const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
+  const [isLoadingSpotlight, setIsLoadingSpotlight] = useState(false);
   const [editingGymId, setEditingGymId] = useState<string | null>(null);
   const [editingGymOwnerId, setEditingGymOwnerId] = useState<string | null>(null);
   const [editingGymCredentials, setEditingGymCredentials] = useState<{
@@ -175,6 +180,13 @@ export default function AdminDashboardScreen() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Load spotlight banners when modal opens
+  useEffect(() => {
+    if (showSpotlightModal) {
+      loadSpotlightBanners();
+    }
+  }, [showSpotlightModal]);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
@@ -687,6 +699,113 @@ export default function AdminDashboardScreen() {
     }
   };
 
+  // Spotlight banner management functions
+  const handleUploadSpotlightBanner = async () => {
+    try {
+      let imageUri: string | null = null;
+
+      if (Platform.OS === 'web') {
+        // Web: use file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        const file = await new Promise<File | null>((resolve) => {
+          input.onchange = (e: any) => resolve(e.target.files?.[0] || null);
+          input.click();
+        });
+        if (!file) return;
+
+        const storage = getStorage(app);
+        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${Date.now()}-${file.name}`);
+        const objectRef = ref(storage, `spotlightBanners/${bannerId}.jpg`);
+        await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
+        imageUri = await getDownloadURL(objectRef);
+      } else {
+        // Mobile: use ImagePicker
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Permission needed', 'Please grant access to your photo library.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          quality: 0.85,
+          aspect: [16, 9], // Banner aspect ratio
+        });
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+
+        const storage = getStorage(app);
+        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${Date.now()}-spotlight`);
+        const objectRef = ref(storage, `spotlightBanners/${bannerId}.jpg`);
+        const response = await fetch(result.assets[0].uri);
+        const blob = await response.blob();
+        await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' });
+        imageUri = await getDownloadURL(objectRef);
+      }
+
+      if (!imageUri) return;
+
+      // Create banner in Firestore
+      const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${Date.now()}-${imageUri}`);
+      const newBanner = {
+        id: bannerId,
+        imageUrl: imageUri,
+        title: '',
+        linkUrl: '',
+        isActive: true,
+        order: spotlightBanners.length,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await firestoreSpotlightBanners.create(newBanner);
+      await loadSpotlightBanners();
+      Alert.alert('Success', 'Spotlight banner uploaded successfully!');
+    } catch (error: any) {
+      console.error('[Admin] Error uploading spotlight banner:', error);
+      Alert.alert('Error', error?.message || 'Failed to upload banner. Please try again.');
+    }
+  };
+
+  const handleDeleteSpotlightBanner = async (bannerId: string, imageUrl: string) => {
+    Alert.alert(
+      'Delete Banner',
+      'Are you sure you want to delete this spotlight banner?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete from Firestore
+              await firestoreSpotlightBanners.delete(bannerId);
+              
+              // Try to delete from Storage (if it's a Firebase Storage URL)
+              try {
+                if (imageUrl.includes('firebasestorage')) {
+                  const storage = getStorage(app);
+                  const imageRef = ref(storage, imageUrl);
+                  await deleteObject(imageRef);
+                }
+              } catch (storageError) {
+                console.warn('[Admin] Could not delete image from storage:', storageError);
+                // Continue even if storage deletion fails
+              }
+
+              await loadSpotlightBanners();
+              Alert.alert('Success', 'Banner deleted successfully!');
+            } catch (error: any) {
+              console.error('[Admin] Error deleting banner:', error);
+              Alert.alert('Error', error?.message || 'Failed to delete banner. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   useEffect(() => {
     if (!isAuthLoading && !isCheckingAdmin) {
       if (!isAuthenticated || !isAdmin) {
@@ -949,6 +1068,14 @@ export default function AdminDashboardScreen() {
                 </Text>
               </View>
             )}
+
+            <TouchableOpacity
+              style={styles.spotlightButton}
+              onPress={() => setShowSpotlightModal(true)}
+            >
+              <ImageIcon size={18} color="#fff" />
+              <Text style={styles.spotlightButtonText}>Spotlight Images</Text>
+            </TouchableOpacity>
 
             <Text style={styles.listCount}>Showing {filteredGyms.length} gyms</Text>
 
@@ -1726,6 +1853,77 @@ export default function AdminDashboardScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Spotlight Banners Modal */}
+      <Modal
+        visible={showSpotlightModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowSpotlightModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Spotlight Images</Text>
+              <TouchableOpacity onPress={() => setShowSpotlightModal(false)}>
+                <X size={24} color="#111827" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={styles.uploadBannerButton}
+                onPress={handleUploadSpotlightBanner}
+              >
+                <Plus size={20} color="#fff" />
+                <Text style={styles.uploadBannerButtonText}>Upload New Banner</Text>
+              </TouchableOpacity>
+
+              {isLoadingSpotlight ? (
+                <View style={styles.loadingCard}>
+                  <ActivityIndicator size="large" color="#DC2626" />
+                  <Text style={styles.loadingText}>Loading banners...</Text>
+                </View>
+              ) : spotlightBanners.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <ImageIcon size={48} color="#9CA3AF" />
+                  <Text style={styles.emptyText}>No spotlight banners</Text>
+                  <Text style={styles.emptySubtext}>Upload a banner to display in the spotlight section</Text>
+                </View>
+              ) : (
+                <View style={styles.bannersList}>
+                  {spotlightBanners.map((banner) => (
+                    <View key={banner.id} style={styles.bannerCard}>
+                      <Image
+                        source={{ uri: banner.imageUrl }}
+                        style={styles.bannerPreview}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.bannerInfo}>
+                        <Text style={styles.bannerTitle} numberOfLines={1}>
+                          {banner.title || 'No title'}
+                        </Text>
+                        {banner.linkUrl ? (
+                          <Text style={styles.bannerLink} numberOfLines={1}>
+                            Link: {banner.linkUrl}
+                          </Text>
+                        ) : null}
+                        <Text style={styles.bannerOrder}>Order: {banner.order}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteBannerButton}
+                        onPress={() => handleDeleteSpotlightBanner(banner.id, banner.imageUrl)}
+                      >
+                        <X size={18} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2390,6 +2588,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
+  modalScrollView: {
+    maxHeight: 600,
+    padding: 20,
+  },
   modalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
@@ -2867,5 +3069,84 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 8,
     textAlign: 'center' as const,
+  },
+  spotlightButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+    backgroundColor: '#9333EA',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  spotlightButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700' as const,
+  },
+  uploadBannerButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+    backgroundColor: '#DC2626',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  uploadBannerButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  bannersList: {
+    gap: 12,
+  },
+  bannerCard: {
+    flexDirection: 'row' as const,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    overflow: 'hidden' as const,
+    marginBottom: 12,
+  },
+  bannerPreview: {
+    width: 120,
+    height: 80,
+    backgroundColor: '#F3F4F6',
+  },
+  bannerInfo: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'center' as const,
+  },
+  bannerTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 4,
+  },
+  bannerLink: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  bannerOrder: {
+    fontSize: 11,
+    color: '#9CA3AF',
+  },
+  deleteBannerButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#DC2626',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    borderTopRightRadius: 12,
+    borderBottomRightRadius: 12,
   },
 });
