@@ -841,49 +841,72 @@ export default function AdminDashboardScreen() {
               />
             </View>
 
-            {filteredUsers.map((user: any) => (
-              <View key={user.id} style={styles.userCard}>
-                <View style={styles.userHeader}>
-                  <View style={styles.userIcon}>
-                    <Users size={24} color="#DC2626" />
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>{user.name}</Text>
-                    <Text style={styles.userEmail}>{user.email}</Text>
-                    {user.subscription && (
-                      <View
-                        style={[
-                          styles.tierBadge,
-                          {
-                            backgroundColor:
-                              TIER_COLORS[user.subscription.tier as keyof typeof TIER_COLORS] + '20',
-                          },
-                        ]}
-                      >
-                        <Text
+            {filteredUsers.map((user: any) => {
+              const subscription = user.subscription;
+              const now = new Date();
+              const isExpired = subscription && new Date(subscription.endDate) < now;
+              const daysRemaining = subscription
+                ? Math.ceil((new Date(subscription.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                : null;
+
+              return (
+                <View key={user.id} style={styles.userCard}>
+                  <View style={styles.userHeader}>
+                    <View style={styles.userIcon}>
+                      <Users size={24} color="#DC2626" />
+                    </View>
+                    <View style={styles.userInfo}>
+                      <Text style={styles.userName}>{user.name || 'No name'}</Text>
+                      <Text style={styles.userEmail}>{user.email || 'No email'}</Text>
+                      {user.phone && (
+                        <Text style={styles.userPhone}>{user.phone}</Text>
+                      )}
+                      {subscription && (
+                        <View
                           style={[
-                            styles.tierText,
-                            { color: TIER_COLORS[user.subscription.tier as keyof typeof TIER_COLORS] },
+                            styles.tierBadge,
+                            {
+                              backgroundColor:
+                                TIER_COLORS[subscription.tier as keyof typeof TIER_COLORS] + '20',
+                            },
                           ]}
                         >
-                          {user.subscription.tier.toUpperCase()} - {user.subscription.duration}mo
-                        </Text>
-                      </View>
-                    )}
+                          <Text
+                            style={[
+                              styles.tierText,
+                              { color: TIER_COLORS[subscription.tier as keyof typeof TIER_COLORS] },
+                            ]}
+                          >
+                            {subscription.tier.toUpperCase()} - {subscription.duration}mo
+                          </Text>
+                        </View>
+                      )}
+                      {subscription && (
+                        <View style={styles.subscriptionInfo}>
+                          {isExpired ? (
+                            <Text style={styles.expiredText}>Expired</Text>
+                          ) : daysRemaining !== null ? (
+                            <Text style={styles.daysRemainingText}>
+                              {daysRemaining > 0 ? `${daysRemaining} days remaining` : 'Expires today'}
+                            </Text>
+                          ) : null}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.userStats}>
+                    <View style={styles.userStat}>
+                      <Text style={styles.userStatLabel}>Wallet</Text>
+                      <Text style={styles.userStatValue}>${user.walletBalance || 0}</Text>
+                    </View>
+                    <View style={styles.userStat}>
+                      <Text style={styles.userStatLabel}>Code</Text>
+                      <Text style={styles.userStatValue}>{user.referralCode || 'N/A'}</Text>
+                    </View>
                   </View>
                 </View>
-                <View style={styles.userStats}>
-                  <View style={styles.userStat}>
-                    <Text style={styles.userStatLabel}>Wallet</Text>
-                    <Text style={styles.userStatValue}>${user.walletBalance || 0}</Text>
-                  </View>
-                  <View style={styles.userStat}>
-                    <Text style={styles.userStatLabel}>Code</Text>
-                    <Text style={styles.userStatValue}>{user.referralCode}</Text>
-                  </View>
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 
@@ -966,6 +989,76 @@ export default function AdminDashboardScreen() {
         {activeTab === 'checkins' && (
           <View style={styles.content}>
             <Text style={styles.pageTitle}>Check-ins</Text>
+            
+            {/* Today's Check-ins Summary */}
+            {(() => {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const todayCheckIns = enrichedCheckIns.filter((ci: any) => {
+                const ciDate = new Date(ci.timestamp);
+                ciDate.setHours(0, 0, 0, 0);
+                return ciDate.getTime() === today.getTime();
+              });
+
+              if (todayCheckIns.length > 0) {
+                return (
+                  <View style={styles.todayCheckInsSection}>
+                    <Text style={styles.sectionTitle}>Check-ins Today: {todayCheckIns.length}</Text>
+                    {todayCheckIns.slice(0, 5).map((checkIn: any) => {
+                      const checkInDate = new Date(checkIn.timestamp);
+                      return (
+                        <View key={checkIn.id} style={styles.checkInCard}>
+                          <View style={styles.checkInHeader}>
+                            <View
+                              style={[
+                                styles.tierBadge,
+                                { backgroundColor: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] + '20' },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.tierText,
+                                  { color: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] },
+                                ]}
+                              >
+                                {checkIn.tier.toUpperCase()}
+                              </Text>
+                            </View>
+                            <View style={styles.checkInInfo}>
+                              <Text style={styles.checkInUser}>{checkIn.userName}</Text>
+                              <Text style={styles.checkInGym}>{checkIn.gymName}</Text>
+                            </View>
+                          </View>
+                          <View style={styles.checkInTimeRow}>
+                            <Text style={styles.checkInDate}>
+                              {checkInDate.toLocaleDateString('en-US', { 
+                                weekday: 'short', 
+                                month: 'short', 
+                                day: 'numeric' 
+                              })}
+                            </Text>
+                            <Text style={styles.checkInTime}>
+                              {checkInDate.toLocaleTimeString('en-US', { 
+                                hour: '2-digit', 
+                                minute: '2-digit',
+                                hour12: true 
+                              })}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                    {todayCheckIns.length > 5 && (
+                      <Text style={styles.moreCheckInsText}>
+                        +{todayCheckIns.length - 5} more today
+                      </Text>
+                    )}
+                  </View>
+                );
+              }
+              return null;
+            })()}
+
             <View style={styles.searchContainer}>
               <Search size={20} color="#9CA3AF" style={styles.searchIcon} />
               <TextInput
@@ -977,8 +1070,18 @@ export default function AdminDashboardScreen() {
               />
             </View>
 
+            <Text style={styles.allCheckInsTitle}>All Check-ins</Text>
+
             {filteredCheckIns.map((checkIn: any) => {
               const checkInDate = new Date(checkIn.timestamp);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const isToday = (() => {
+                const ciDate = new Date(checkIn.timestamp);
+                ciDate.setHours(0, 0, 0, 0);
+                return ciDate.getTime() === today.getTime();
+              })();
+
               return (
                 <View key={checkIn.id} style={styles.checkInCard}>
                   <View style={styles.checkInHeader}>
@@ -1002,9 +1105,23 @@ export default function AdminDashboardScreen() {
                       <Text style={styles.checkInGym}>{checkIn.gymName}</Text>
                     </View>
                   </View>
-                  <Text style={styles.checkInTime}>
-                    {checkInDate.toLocaleDateString()} at {checkInDate.toLocaleTimeString()}
-                  </Text>
+                  <View style={styles.checkInTimeRow}>
+                    <Text style={styles.checkInDate}>
+                      {isToday ? 'Today' : checkInDate.toLocaleDateString('en-US', { 
+                        weekday: 'short', 
+                        month: 'short', 
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </Text>
+                    <Text style={styles.checkInTime}>
+                      {checkInDate.toLocaleTimeString('en-US', { 
+                        hour: '2-digit', 
+                        minute: '2-digit',
+                        hour12: true 
+                      })}
+                    </Text>
+                  </View>
                 </View>
               );
             })}
@@ -2056,6 +2173,24 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: 6,
   },
+  userPhone: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  subscriptionInfo: {
+    marginTop: 6,
+  },
+  expiredText: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '600' as const,
+  },
+  daysRemainingText: {
+    fontSize: 12,
+    color: '#059669',
+    fontWeight: '600' as const,
+  },
   userStats: {
     flexDirection: 'row' as const,
     gap: 16,
@@ -2162,7 +2297,87 @@ const styles = StyleSheet.create({
   },
   checkInTime: {
     fontSize: 13,
-    color: '#9CA3AF',
+    color: '#6B7280',
+    fontWeight: '600' as const,
+  },
+  checkInDate: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '600' as const,
+  },
+  checkInTimeRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginTop: 8,
+  },
+  todayCheckInsSection: {
+    marginBottom: 24,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 12,
+  },
+  allCheckInsTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  moreCheckInsText: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontStyle: 'italic' as const,
+    marginTop: 8,
+    textAlign: 'center' as const,
+  },
+  checkInTime: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '600' as const,
+  },
+  checkInDate: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '600' as const,
+  },
+  checkInTimeRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginTop: 8,
+  },
+  todayCheckInsSection: {
+    marginBottom: 24,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 12,
+  },
+  allCheckInsTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  moreCheckInsText: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontStyle: 'italic' as const,
+    marginTop: 8,
+    textAlign: 'center' as const,
   },
   addButton: {
     backgroundColor: '#DC2626',
