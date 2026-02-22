@@ -18,6 +18,10 @@
       "bundleIdentifier": "com.xpass.app",
       "buildNumber": "1",
       "config": {},
+      "associatedDomains": [
+        "applinks:xpass-rork-1e6ad.web.app",
+        "applinks:xpass.app"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera",
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone",
@@ -37,6 +41,28 @@
       "package": "com.xpass.app",
       "versionCode": 1,
       "config": {},
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "xpass-rork-1e6ad.web.app",
+              "pathPrefix": "/join"
+            },
+            {
+              "scheme": "https",
+              "host": "xpass.app",
+              "pathPrefix": "/join"
+            }
+          ]
+        }
+      ],
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",

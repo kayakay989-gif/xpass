@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "REPLACE_APPLE_TEAM_ID.com.xpass.app",
+        "paths": [
+          "/join",
+          "/join/*",
+          "/join?*",
+          "/join/*?*"
+        ]
+      }
+    ]
+  }
+}
+
