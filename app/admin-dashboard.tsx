@@ -63,6 +63,7 @@ export default function AdminDashboardScreen() {
   const [showSpotlightModal, setShowSpotlightModal] = useState<boolean>(false);
   const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
   const [isLoadingSpotlight, setIsLoadingSpotlight] = useState(false);
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const [editingGymId, setEditingGymId] = useState<string | null>(null);
   const [editingGymOwnerId, setEditingGymOwnerId] = useState<string | null>(null);
   const [editingGymCredentials, setEditingGymCredentials] = useState<{
@@ -715,30 +716,72 @@ export default function AdminDashboardScreen() {
 
   // Spotlight banner management functions
   const handleUploadSpotlightBanner = async () => {
+    if (isUploadingBanner) return; // Prevent multiple uploads
+    
+    setIsUploadingBanner(true);
     try {
       let imageUri: string | null = null;
 
       if (Platform.OS === 'web') {
         // Web: use file input
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        const file = await new Promise<File | null>((resolve) => {
-          input.onchange = (e: any) => resolve(e.target.files?.[0] || null);
+        const file = await new Promise<File | null>((resolve, reject) => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.style.display = 'none';
+          
+          const handleChange = (e: Event) => {
+            const target = e.target as HTMLInputElement;
+            const file = target.files?.[0] || null;
+            input.removeEventListener('change', handleChange);
+            input.removeEventListener('cancel', handleCancel);
+            document.body.removeChild(input);
+            resolve(file);
+          };
+          
+          const handleCancel = () => {
+            input.removeEventListener('change', handleChange);
+            input.removeEventListener('cancel', handleCancel);
+            document.body.removeChild(input);
+            resolve(null);
+          };
+          
+          input.addEventListener('change', handleChange);
+          document.body.appendChild(input);
           input.click();
+          
+          // Handle cancellation (when user closes file picker)
+          setTimeout(() => {
+            if (document.body.contains(input)) {
+              input.removeEventListener('change', handleChange);
+              document.body.removeChild(input);
+              resolve(null);
+            }
+          }, 100);
         });
-        if (!file) return;
+        
+        if (!file) {
+          setIsUploadingBanner(false);
+          return;
+        }
 
+        console.log('[Admin] Uploading file:', file.name, file.size);
         const storage = getStorage(app);
-        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${Date.now()}-${file.name}`);
+        const timestamp = Date.now();
+        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${timestamp}-${file.name}`);
         const objectRef = ref(storage, `spotlightBanners/${bannerId}.jpg`);
+        
+        console.log('[Admin] Uploading to storage:', objectRef.fullPath);
         await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
+        console.log('[Admin] Getting download URL...');
         imageUri = await getDownloadURL(objectRef);
+        console.log('[Admin] Image uploaded, URL:', imageUri);
       } else {
         // Mobile: use ImagePicker
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permission.granted) {
           Alert.alert('Permission needed', 'Please grant access to your photo library.');
+          setIsUploadingBanner(false);
           return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -747,21 +790,35 @@ export default function AdminDashboardScreen() {
           quality: 0.85,
           aspect: [16, 9], // Banner aspect ratio
         });
-        if (result.canceled || !result.assets?.[0]?.uri) return;
+        if (result.canceled || !result.assets?.[0]?.uri) {
+          setIsUploadingBanner(false);
+          return;
+        }
 
+        console.log('[Admin] Uploading image from mobile:', result.assets[0].uri);
         const storage = getStorage(app);
-        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${Date.now()}-spotlight`);
+        const timestamp = Date.now();
+        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${timestamp}-spotlight`);
         const objectRef = ref(storage, `spotlightBanners/${bannerId}.jpg`);
         const response = await fetch(result.assets[0].uri);
         const blob = await response.blob();
+        console.log('[Admin] Uploading to storage:', objectRef.fullPath);
         await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' });
+        console.log('[Admin] Getting download URL...');
         imageUri = await getDownloadURL(objectRef);
+        console.log('[Admin] Image uploaded, URL:', imageUri);
       }
 
-      if (!imageUri) return;
+      if (!imageUri) {
+        setIsUploadingBanner(false);
+        Alert.alert('Error', 'Failed to get image URL after upload.');
+        return;
+      }
 
       // Create banner in Firestore
-      const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${Date.now()}-${imageUri}`);
+      console.log('[Admin] Creating banner in Firestore...');
+      const timestamp = Date.now();
+      const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${timestamp}-${imageUri}`);
       const newBanner = {
         id: bannerId,
         imageUrl: imageUri,
@@ -773,12 +830,21 @@ export default function AdminDashboardScreen() {
         updatedAt: new Date(),
       };
 
+      console.log('[Admin] Banner data:', newBanner);
       await firestoreSpotlightBanners.create(newBanner);
+      console.log('[Admin] Banner created, reloading list...');
       await loadSpotlightBanners();
       Alert.alert('Success', 'Spotlight banner uploaded successfully!');
     } catch (error: any) {
       console.error('[Admin] Error uploading spotlight banner:', error);
+      console.error('[Admin] Error details:', {
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack,
+      });
       Alert.alert('Error', error?.message || 'Failed to upload banner. Please try again.');
+    } finally {
+      setIsUploadingBanner(false);
     }
   };
 
@@ -1886,11 +1952,21 @@ export default function AdminDashboardScreen() {
 
             <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={false}>
               <TouchableOpacity
-                style={styles.uploadBannerButton}
+                style={[styles.uploadBannerButton, isUploadingBanner && styles.uploadBannerButtonDisabled]}
                 onPress={handleUploadSpotlightBanner}
+                disabled={isUploadingBanner}
               >
-                <Plus size={20} color="#fff" />
-                <Text style={styles.uploadBannerButtonText}>Upload New Banner</Text>
+                {isUploadingBanner ? (
+                  <>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.uploadBannerButtonText}>Uploading...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={20} color="#fff" />
+                    <Text style={styles.uploadBannerButtonText}>Upload New Banner</Text>
+                  </>
+                )}
               </TouchableOpacity>
 
               {isLoadingSpotlight ? (
@@ -3111,6 +3187,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 20,
     marginBottom: 20,
+  },
+  uploadBannerButtonDisabled: {
+    opacity: 0.6,
   },
   uploadBannerButtonText: {
     color: '#fff',
