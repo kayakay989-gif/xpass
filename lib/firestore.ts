@@ -207,14 +207,15 @@ export const checkInsCollection = collection(db, 'checkIns');
 
 export const firestoreCheckIns = {
   async getByUserId(userId: string): Promise<CheckIn[]> {
+    // Query without orderBy to avoid requiring a composite index
+    // We'll sort in memory instead
     const q = query(
       checkInsCollection,
-      where('userId', '==', userId),
-      orderBy('timestamp', 'desc')
+      where('userId', '==', userId)
     );
     
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => {
+    const checkIns = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: doc.id,
@@ -224,17 +225,21 @@ export const firestoreCheckIns = {
         subscriptionId: data.subscriptionId,
       };
     });
+    
+    // Sort by timestamp descending in memory
+    return checkIns.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   },
 
   async getByGymId(gymId: string): Promise<CheckIn[]> {
+    // Query without orderBy to avoid requiring a composite index
+    // We'll sort in memory instead
     const q = query(
       checkInsCollection,
-      where('gymId', '==', gymId),
-      orderBy('timestamp', 'desc')
+      where('gymId', '==', gymId)
     );
     
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => {
+    const checkIns = snapshot.docs.map(doc => {
       const data = doc.data();
       return {
         id: doc.id,
@@ -244,6 +249,9 @@ export const firestoreCheckIns = {
         subscriptionId: data.subscriptionId,
       };
     });
+    
+    // Sort by timestamp descending in memory
+    return checkIns.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   },
 
   async getAll(): Promise<CheckIn[]> {
