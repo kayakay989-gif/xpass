@@ -176,6 +176,20 @@ export default function AdminDashboardScreen() {
     }
   };
 
+  // Load spotlight banners
+  const loadSpotlightBanners = async () => {
+    try {
+      setIsLoadingSpotlight(true);
+      const banners = await firestoreSpotlightBanners.getAll();
+      setSpotlightBanners(banners);
+    } catch (error) {
+      console.error('[Admin] Error loading spotlight banners:', error);
+      Alert.alert('Error', 'Failed to load spotlight banners');
+    } finally {
+      setIsLoadingSpotlight(false);
+    }
+  };
+
   // Load data on mount and when refreshing
   useEffect(() => {
     loadData();

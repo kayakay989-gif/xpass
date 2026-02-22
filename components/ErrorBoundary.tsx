@@ -27,7 +27,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReset = () => {
+    // Reset error state without navigating
     this.setState({ hasError: false, error: null });
+    // Force a re-render by updating the component
+    this.forceUpdate();
   };
 
   render() {
