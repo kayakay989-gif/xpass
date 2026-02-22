@@ -60,6 +60,10 @@ export default function AdminDashboardScreen() {
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
   const [editingGymId, setEditingGymId] = useState<string | null>(null);
   const [editingGymOwnerId, setEditingGymOwnerId] = useState<string | null>(null);
+  const [editingGymCredentials, setEditingGymCredentials] = useState<{
+    username: string;
+    password: string;
+  } | null>(null);
   const [newGym, setNewGym] = useState({
     name: '',
     address: '',
@@ -277,6 +281,7 @@ export default function AdminDashboardScreen() {
     });
     setEditingGymId(null);
     setEditingGymOwnerId(null);
+    setEditingGymCredentials(null);
     setTempLocation({
       latitude: 31.963158,
       longitude: 35.930359,
@@ -325,7 +330,7 @@ export default function AdminDashboardScreen() {
         ownerName: gym.ownerName || '',
       });
 
-      // Load owner contact info (best-effort)
+      // Load owner contact info and credentials (best-effort)
       const owner = await firestoreGymOwners.getByGymId(gym.id).catch(() => null);
       if (owner) {
         setEditingGymOwnerId(owner.id);
@@ -334,6 +339,24 @@ export default function AdminDashboardScreen() {
           email: owner.email || '',
           ownerName: owner.name || '',
         }));
+        
+        // Set credentials - use stored username if available, otherwise reconstruct
+        // Password is reconstructed from gym ID pattern: gym_${gymId.substring(0, 8)}
+        const password = `gym_${gym.id.substring(0, 8)}`;
+        setEditingGymCredentials({
+          username: owner.username || '',
+          password: password,
+        });
+      } else {
+        // If no owner record, reconstruct credentials from gym ID pattern
+        const sanitizedName = (gym.name || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '_')
+          .replace(/_+/g, '_')
+          .substring(0, 20);
+        const username = `${sanitizedName}_${gym.id.substring(0, 6)}`;
+        const password = `gym_${gym.id.substring(0, 8)}`;
+        setEditingGymCredentials({ username, password });
       }
 
       setShowAddGymModal(true);
@@ -1095,7 +1118,10 @@ export default function AdminDashboardScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{editingGymId ? 'Edit Gym' : 'Add New Gym'}</Text>
-              <TouchableOpacity onPress={() => setShowAddGymModal(false)}>
+              <TouchableOpacity onPress={() => {
+                setShowAddGymModal(false);
+                resetGymForm();
+              }}>
                 <X size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
@@ -1339,6 +1365,66 @@ export default function AdminDashboardScreen() {
                 onChangeText={(text) => setNewGym({ ...newGym, ownerName: text })}
                 placeholder="Gym Owner Name"
               />
+
+              {/* Show credentials and QR code when editing */}
+              {editingGymId && editingGymCredentials && (
+                <>
+                  <View style={styles.credentialsSectionEdit}>
+                    <Text style={styles.credentialsTitleEdit}>Gym Owner Credentials</Text>
+                    
+                    <View style={styles.credentialItem}>
+                      <Text style={styles.credentialLabel}>Username:</Text>
+                      <View style={styles.credentialValueContainer}>
+                        <Text style={styles.credentialValue}>{editingGymCredentials.username}</Text>
+                        <TouchableOpacity
+                          style={styles.copyButton}
+                          onPress={() => copyToClipboard(editingGymCredentials.username)}
+                        >
+                          <Copy size={16} color="#4F46E5" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.credentialItem}>
+                      <Text style={styles.credentialLabel}>Password:</Text>
+                      <View style={styles.credentialValueContainer}>
+                        <Text style={styles.credentialValue}>{editingGymCredentials.password}</Text>
+                        <TouchableOpacity
+                          style={styles.copyButton}
+                          onPress={() => copyToClipboard(editingGymCredentials.password)}
+                        >
+                          <Copy size={16} color="#4F46E5" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* QR Code Section */}
+                  <View style={styles.qrSectionEdit}>
+                    <QrCode size={24} color="#4F46E5" />
+                    <Text style={styles.qrTitleEdit}>Gym QR Code</Text>
+                    <Text style={styles.qrSubtextEdit}>
+                      Members can scan this code to check in
+                    </Text>
+                    <View style={styles.qrContainer}>
+                      <Image
+                        source={{
+                          uri: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=xpass-gym-${editingGymId}`,
+                        }}
+                        style={styles.qrImage}
+                      />
+                    </View>
+                    <Text style={styles.qrData}>xpass-gym-{editingGymId}</Text>
+                    <TouchableOpacity
+                      style={styles.downloadQRButton}
+                      onPress={() => downloadQRCode(editingGymId, newGym.name)}
+                    >
+                      <Download size={18} color="#fff" />
+                      <Text style={styles.downloadQRButtonText}>Download QR</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
 
               <TouchableOpacity
                 style={[styles.submitButton, isCreatingGym && { opacity: 0.6 }]}
