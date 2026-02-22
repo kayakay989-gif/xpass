@@ -27,13 +27,20 @@ export default function GymLoginScreen() {
   // Supports plaintext passwords and sha256 hashes (common legacy format)
   const verifyPasswordClient = async (inputPassword: string, storedHash: string | undefined, storedPlaintext: string | undefined): Promise<boolean> => {
     try {
+      const trimmedInput = inputPassword.trim();
+      
       // If plaintext password exists, use it (legacy support)
-      if (storedPlaintext && typeof storedPlaintext === 'string' && storedPlaintext.trim() === inputPassword.trim()) {
-        return true;
+      if (storedPlaintext && typeof storedPlaintext === 'string') {
+        const trimmedPlaintext = storedPlaintext.trim();
+        if (trimmedPlaintext === trimmedInput) {
+          console.log('[GymLogin] Plaintext password match (legacy)');
+          return true;
+        }
       }
 
       // If no hash, return false
       if (!storedHash || typeof storedHash !== 'string') {
+        console.warn('[GymLogin] No password hash available');
         return false;
       }
 
@@ -55,14 +62,29 @@ export default function GymLoginScreen() {
         }
 
         try {
-          const hashInput = `${salt}:${inputPassword.trim()}`;
+          const trimmedPassword = inputPassword.trim();
+          const hashInput = `${salt}:${trimmedPassword}`;
+          console.log('[GymLogin] Computing hash:', { 
+            saltLength: salt.length, 
+            passwordLength: trimmedPassword.length,
+            hashInputLength: hashInput.length
+          });
+          
           const actualHex = await Crypto.digestStringAsync(
             Crypto.CryptoDigestAlgorithm.SHA256,
             hashInput
           );
+          
           const matches = actualHex.toLowerCase() === expectedHex.toLowerCase();
           if (!matches) {
-            console.warn('[GymLogin] Password hash mismatch');
+            console.warn('[GymLogin] Password hash mismatch', {
+              expectedLength: expectedHex.length,
+              actualLength: actualHex.length,
+              expectedPrefix: expectedHex.substring(0, 10),
+              actualPrefix: actualHex.substring(0, 10)
+            });
+          } else {
+            console.log('[GymLogin] Password hash matches!');
           }
           return matches;
         } catch (error) {
@@ -116,17 +138,37 @@ export default function GymLoginScreen() {
         return;
       }
 
-      console.log('[GymLogin] Found gym owner:', { id: gymOwner.id, gymId: gymOwner.gymId, hasHash: !!gymOwner.passwordHash, hasPlaintext: !!gymOwner.password });
+      console.log('[GymLogin] Found gym owner:', { 
+        id: gymOwner.id, 
+        gymId: gymOwner.gymId, 
+        hasHash: !!gymOwner.passwordHash, 
+        hasPlaintext: !!gymOwner.password,
+        hashPrefix: gymOwner.passwordHash ? gymOwner.passwordHash.substring(0, 20) : 'none'
+      });
 
       // Verify password
+      console.log('[GymLogin] Verifying password...', { 
+        inputLength: password.length,
+        hasHash: !!gymOwner.passwordHash,
+        hasPlaintext: !!gymOwner.password
+      });
+      
       const passwordValid = await verifyPasswordClient(
         password,
         gymOwner.passwordHash,
         gymOwner.password
       );
 
+      console.log('[GymLogin] Password verification result:', passwordValid);
+
       if (!passwordValid) {
         console.warn('[GymLogin] Password verification failed for username:', trimmedUsername);
+        console.warn('[GymLogin] Debug info:', {
+          inputPassword: password.substring(0, 3) + '***',
+          hasHash: !!gymOwner.passwordHash,
+          hashType: gymOwner.passwordHash ? (gymOwner.passwordHash.startsWith('sha256:') ? 'sha256' : 'other') : 'none',
+          hasPlaintext: !!gymOwner.password
+        });
         setError('Invalid username or password');
         setIsLoading(false);
         return;
@@ -177,16 +219,6 @@ export default function GymLoginScreen() {
 
       <View style={styles.topBar}>
         <View style={styles.brandRow}>
-          <TouchableOpacity
-            onPress={() => {
-              const canGoBack = typeof (router as any).canGoBack === 'function' ? (router as any).canGoBack() : false;
-              if (canGoBack) (router as any).back();
-              else router.replace('/splash' as any);
-            }}
-            style={{ padding: 8, marginLeft: -8 }}
-          >
-            <ChevronLeft size={22} color="#111827" />
-          </TouchableOpacity>
           <Image
             source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
             style={styles.brandLogo}
