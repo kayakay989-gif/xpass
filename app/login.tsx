@@ -18,6 +18,7 @@ export default function LoginScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [age, setAge] = useState('');
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -36,13 +37,19 @@ export default function LoginScreen() {
   };
 
   const handleSignUp = async () => {
-    if (!name || !email || !phone || !password) {
-      Alert.alert('Error', 'Please fill all fields');
+    if (!name || !email || !phone || !password || !age) {
+      Alert.alert('Error', 'Please fill all required fields');
       return;
     }
 
     if (!validatePhone(phone)) {
       Alert.alert('Error', 'Please enter a valid 9-digit Jordan phone number (without +962)');
+      return;
+    }
+
+    const ageNum = parseInt(age, 10);
+    if (isNaN(ageNum) || ageNum < 1 || ageNum > 150) {
+      Alert.alert('Error', 'Please enter a valid age');
       return;
     }
 
@@ -53,7 +60,7 @@ export default function LoginScreen() {
 
     setIsLoading(true);
     try {
-      await signUpWithEmail(email.trim(), password, name, `+962${phone}`, referral.trim() || undefined);
+      await signUpWithEmail(email.trim(), password, name, `+962${phone}`, referral.trim() || undefined, ageNum);
       Alert.alert('Success', 'Account created successfully!', [
         { text: 'OK', onPress: () => router.replace('/(tabs)/home') }
       ]);
@@ -224,15 +231,34 @@ export default function LoginScreen() {
               <View style={styles.inputContainer}>
                 <View style={styles.inputWrapper}>
                   <Phone size={20} color={Colors.textMuted} style={styles.inputIcon} />
-                  <Text style={styles.countryCode}>+962</Text>
+                  <View style={styles.countryCodeContainer}>
+                    <Text style={styles.countryCode}>+962</Text>
+                  </View>
                   <TextInput
-                    style={[styles.input, { paddingLeft: 50 }]}
+                    style={styles.phoneInput}
                     placeholder="Phone (9 digits)"
                     placeholderTextColor={Colors.textMuted}
                     value={phone}
                     onChangeText={setPhone}
                     keyboardType="phone-pad"
                     maxLength={9}
+                  />
+                </View>
+              </View>
+            )}
+
+            {mode === 'signup' && (
+              <View style={styles.inputContainer}>
+                <View style={styles.inputWrapper}>
+                  <User size={20} color={Colors.textMuted} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Age"
+                    placeholderTextColor={Colors.textMuted}
+                    value={age}
+                    onChangeText={setAge}
+                    keyboardType="numeric"
+                    maxLength={3}
                   />
                 </View>
               </View>
@@ -251,7 +277,7 @@ export default function LoginScreen() {
                     autoCapitalize="characters"
                   />
                 </View>
-                <Text style={styles.helperText}>Enter a friend’s code to get 10 JDS credit.</Text>
+                <Text style={styles.helperText}>Only the person who referred you gets 10 JDs credit.</Text>
               </View>
             )}
 
@@ -417,13 +443,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
   },
-  countryCode: {
+  countryCodeContainer: {
     position: 'absolute',
     left: 46,
+    zIndex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingRight: 8,
+  },
+  countryCode: {
     fontSize: 16,
     fontWeight: '600' as const,
     color: Colors.text,
-    zIndex: 1,
+  },
+  phoneInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingLeft: 90,
+    fontSize: 16,
+    color: Colors.text,
   },
   helperText: {
     marginTop: 6,

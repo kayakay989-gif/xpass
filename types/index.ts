@@ -7,6 +7,7 @@ export interface User {
   name: string;
   email: string;
   phone?: string;
+  age?: number;
   photoUrl?: string;
   password?: string;
   googleId?: string;
@@ -40,6 +41,7 @@ export interface Gym {
   latitude: number;
   longitude: number;
   amenities: string[];
+  facilities?: string[]; // New field for facilities filter
   hours: string;
   imageUrl: string;
   allowedTiers: SubscriptionTier[];

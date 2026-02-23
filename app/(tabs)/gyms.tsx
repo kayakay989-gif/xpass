@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, TextInput, RefreshControl } from 'react-native';
 import { useState } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MapPin, Search, Filter } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
@@ -8,6 +8,7 @@ import { SubscriptionTier } from '@/types';
 import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 
 export default function GymsScreen() {
+  const router = useRouter();
   const { gymId } = useLocalSearchParams<{ gymId?: string }>();
   const { filteredGyms, selectedGymFilter, setSelectedGymFilter, refetchGyms, isLoading, gymsError } = useApp();
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -102,7 +103,16 @@ export default function GymsScreen() {
           const badge = getTierBadgeColors(tier);
           const label = getTierLabel(tier);
           return (
-          <TouchableOpacity key={gym.id} style={styles.gymCard}>
+          <TouchableOpacity 
+            key={gym.id} 
+            style={styles.gymCard}
+            onPress={() => {
+              router.push({
+                pathname: '/gym-details',
+                params: { gymId: gym.id },
+              } as any);
+            }}
+          >
             <Image 
               source={{ uri: gym.imageUrl }} 
               style={styles.gymImage}

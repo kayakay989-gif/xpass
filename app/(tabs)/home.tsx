@@ -77,8 +77,17 @@ export default function HomeScreen() {
         : [];
 
       const cityMatch = selectedCity === 'all' || gymCity === norm(selectedCity);
-      const tierMatch = selectedTier === 'all' || allowedTiers.includes(norm(selectedTier));
-      const facilityMatch = selectedFacility === 'all' || amenities.includes(norm(selectedFacility));
+      // Tier filter: must match EXACT tier (no mixed tiers) - only show gyms with single tier matching
+      const tierMatch = selectedTier === 'all' 
+        ? true 
+        : allowedTiers.length === 1 && allowedTiers[0] === norm(selectedTier);
+      // Facility filter: check both amenities and facilities arrays
+      const gymFacilities = Array.isArray(gym.facilities) 
+        ? gym.facilities.map((f: any) => (typeof f === 'string' ? f.trim().toLowerCase() : String(f).toLowerCase()))
+        : [];
+      const facilityMatch = selectedFacility === 'all' 
+        ? true 
+        : amenities.includes(norm(selectedFacility)) || gymFacilities.includes(norm(selectedFacility));
       return cityMatch && tierMatch && facilityMatch;
     });
   }, [gyms, selectedCity, selectedTier, selectedFacility]);
@@ -90,20 +99,26 @@ export default function HomeScreen() {
   };
 
   const cityOptions = useMemo(() => {
-    const cities = Array.from(
-      new Set((gyms || []).map((g: any) => (typeof g.city === 'string' ? g.city.trim() : '')).filter(Boolean))
-    );
-    return ['all', ...cities];
-  }, [gyms]);
+    // Fixed cities list: only Amman, Irbid, Aqaba, Madaba
+    const fixedCities = ['Amman', 'Irbid', 'Aqaba', 'Madaba'];
+    return ['all', ...fixedCities];
+  }, []);
 
+  // Fixed facilities list as per requirements
   const facilityOptions = useMemo(() => {
-    const all = (gyms || []).flatMap((g: any) => (Array.isArray(g.amenities) ? g.amenities : []));
-    const normalized = all
-      .map((a: any) => (typeof a === 'string' ? a.trim() : String(a)))
-      .filter((a: string) => a.length > 0);
-    const unique = Array.from(new Set(normalized));
-    return ['all', ...unique];
-  }, [gyms]);
+    const fixedFacilities = [
+      'Pool',
+      'Sauna',
+      'Steam Room',
+      'Jacuzzi',
+      'Running Track',
+      'Cardio Zone',
+      'Strength & Weight Training',
+      'Calisthenics',
+      'Instructor-Led Classes',
+    ];
+    return ['all', ...fixedFacilities];
+  }, []);
 
   const tierOptions = useMemo(() => ['all', 'silver', 'gold', 'diamond', 'elite'], []);
 
@@ -282,18 +297,10 @@ export default function HomeScreen() {
                 key={gym.id} 
                 style={styles.gymCard}
                 onPress={() => {
-                  if (isGuest || !subscription) {
-                    Alert.alert(
-                      'Subscription Required',
-                      'Please subscribe to access gym details and check-in features.',
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Subscribe', onPress: () => router.push('/(tabs)/subscription') },
-                      ]
-                    );
-                  } else {
-                    router.push('/gyms');
-                  }
+                  router.push({
+                    pathname: '/gym-details',
+                    params: { gymId: gym.id },
+                  } as any);
                 }}
               >
                 <Image source={{ uri: gym.imageUrl }} style={styles.gymImage} />

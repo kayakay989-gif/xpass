@@ -220,7 +220,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     password: string, 
     name: string, 
     phone?: string,
-    referralCodeUsed?: string
+    referralCodeUsed?: string,
+    age?: number
   ): Promise<void> => {
     try {
       const normalizedEmail = (email || '').trim();
@@ -244,7 +245,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           throw new Error('Invalid referral code. Please check and try again.');
         }
         referredBy = normalizedReferral;
-        initialWalletBalance = 10;
+        // Only the referrer gets 10 JDs, not the new user
+        initialWalletBalance = 0;
+        
+        // Give 10 JDs to the referrer
+        const referrerDoc = snap.docs[0];
+        const referrerData = referrerDoc.data();
+        const currentBalance = referrerData.walletBalance || 0;
+        await updateDoc(doc(db, 'users', referrerDoc.id), {
+          walletBalance: currentBalance + 10,
+        });
       }
 
       // Create user profile in Firestore
@@ -253,6 +263,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         name,
         email: normalizedEmail,
         phone: phone || '',
+        age: age,
         referralCode: generateReferralCode(),
         referredBy,
         walletBalance: initialWalletBalance,

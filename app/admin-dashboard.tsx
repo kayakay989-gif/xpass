@@ -78,6 +78,7 @@ export default function AdminDashboardScreen() {
     longitude: '',
     category: 'standard' as GymCategory,
     amenities: '',
+    facilities: [] as string[],
     hours: '6:00 AM - 10:00 PM',
     timings: {
       men: { from: '', to: '' },
@@ -293,6 +294,7 @@ export default function AdminDashboardScreen() {
       longitude: '',
       category: 'standard',
       amenities: '',
+      facilities: [],
       hours: '6:00 AM - 10:00 PM',
       timings: {
         men: { from: '', to: '' },
@@ -342,6 +344,7 @@ export default function AdminDashboardScreen() {
         longitude: typeof gym.longitude === 'number' ? String(gym.longitude) : (gym.longitude || ''),
         category: gym.category || 'standard',
         amenities: Array.isArray(gym.amenities) ? gym.amenities.join(', ') : (gym.amenities || ''),
+        facilities: Array.isArray(gym.facilities) ? gym.facilities : [],
         hours: gym.hours || '6:00 AM - 10:00 PM',
         timings: gym.timings || {
           men: { from: '', to: '' },
@@ -491,6 +494,7 @@ export default function AdminDashboardScreen() {
         longitude: gymData.longitude,
         category: gymData.category,
         amenities: gymData.amenities,
+        facilities: newGym.facilities || [],
         hours: gymData.hours,
         timings: newGym.timings,
         menOnly: newGym.menOnly,
@@ -1542,6 +1546,53 @@ export default function AdminDashboardScreen() {
                 placeholder="Pool, Sauna, Personal Training"
                 multiline
               />
+
+              <Text style={styles.label}>Facilities *</Text>
+              <Text style={styles.helperText}>Select facilities available at this gym</Text>
+              <View style={styles.facilitiesContainer}>
+                {[
+                  'Pool',
+                  'Sauna',
+                  'Steam Room',
+                  'Jacuzzi',
+                  'Running Track',
+                  'Cardio Zone',
+                  'Strength & Weight Training',
+                  'Calisthenics',
+                  'Instructor-Led Classes',
+                ].map((facility) => (
+                  <TouchableOpacity
+                    key={facility}
+                    style={[
+                      styles.facilityButton,
+                      newGym.facilities.includes(facility) && styles.facilityButtonActive,
+                    ]}
+                    onPress={() => {
+                      const currentFacilities = [...newGym.facilities];
+                      if (currentFacilities.includes(facility)) {
+                        setNewGym({
+                          ...newGym,
+                          facilities: currentFacilities.filter((f) => f !== facility),
+                        });
+                      } else {
+                        setNewGym({
+                          ...newGym,
+                          facilities: [...currentFacilities, facility],
+                        });
+                      }
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.facilityButtonText,
+                        newGym.facilities.includes(facility) && styles.facilityButtonTextActive,
+                      ]}
+                    >
+                      {facility}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
               <Text style={styles.label}>Timings</Text>
               
@@ -3241,5 +3292,36 @@ const styles = StyleSheet.create({
     alignItems: 'center' as const,
     borderTopRightRadius: 12,
     borderBottomRightRadius: 12,
+  },
+  facilitiesContainer: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginTop: 8,
+  },
+  facilityButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  facilityButtonActive: {
+    backgroundColor: '#9333EA',
+    borderColor: '#9333EA',
+  },
+  facilityButtonText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#6B7280',
+  },
+  facilityButtonTextActive: {
+    color: '#fff',
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 8,
   },
 });
