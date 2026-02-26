@@ -37,12 +37,16 @@ export default protectedProcedure
       throw new Error('This gym is not available for your tier');
     }
 
+    // Get gym's pricePerVisit for payout calculation
+    const pricePerVisit = gym.pricePerVisit || 0;
+
     const checkIn: CheckIn = {
       id: randomUUID(),
       userId: input.userId,
       gymId: input.gymId,
       timestamp: new Date(),
       subscriptionId: subscription.id,
+      payoutAmount: pricePerVisit, // Store the payout amount at check-in time
     };
 
     await firestoreCheckIns.create(checkIn);

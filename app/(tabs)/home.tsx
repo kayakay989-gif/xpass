@@ -8,6 +8,8 @@ import { useState, useMemo, useEffect } from 'react';
 import MapViewComponent from '@/components/MapView';
 import { getGymTier, getTierLabel } from '@/lib/gym-tier';
 import { firestoreSpotlightBanners } from '@/lib/firestore';
+import * as Location from 'expo-location';
+import { calculateDistance, formatDistance } from '@/lib/distance';
 
 type ViewMode = 'map' | 'list';
 
@@ -41,11 +43,59 @@ export default function HomeScreen() {
     };
     loadBanners();
   }, []);
+
+  // Request location permission and get user's current location
+  useEffect(() => {
+    let cancelled = false;
+
+    const requestLocation = async () => {
+      try {
+        // Request permission
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        
+        if (cancelled) return;
+
+        if (status !== 'granted') {
+          console.log('[Home] Location permission denied');
+          setLocationPermissionDenied(true);
+          return;
+        }
+
+        // Get current position
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        if (cancelled) return;
+
+        setUserLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        setLocationPermissionDenied(false);
+      } catch (error) {
+        console.error('[Home] Error getting location:', error);
+        if (!cancelled) {
+          setLocationPermissionDenied(true);
+        }
+      }
+    };
+
+    requestLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [viewMode, setViewMode] = useState<ViewMode>('map');
   const [selectedCity, setSelectedCity] = useState<string>('all');
   const [selectedTier, setSelectedTier] = useState<string>('all'); // all|silver|gold|diamond|elite
   const [selectedFacility, setSelectedFacility] = useState<string>('all');
   const [activeFilter, setActiveFilter] = useState<'city' | 'tier' | 'facility' | null>(null);
+  
+  // User location state
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
 
   const promptCreateAccount = () => {
     const goToLogin = () => router.push('/login');
@@ -69,7 +119,9 @@ export default function HomeScreen() {
 
   const filteredGyms = useMemo(() => {
     const norm = (v: any) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
-    return gyms.filter((gym: any) => {
+    
+    // First, apply filters
+    const filtered = gyms.filter((gym: any) => {
       const gymCity = norm(gym.city);
       const allowedTiers = Array.isArray(gym.allowedTiers) ? gym.allowedTiers.map(norm) : [];
       const amenities = Array.isArray(gym.amenities)
@@ -77,10 +129,10 @@ export default function HomeScreen() {
         : [];
 
       const cityMatch = selectedCity === 'all' || gymCity === norm(selectedCity);
-      // Tier filter: must match EXACT tier (no mixed tiers) - only show gyms with single tier matching
+      // Tier filter: use getGymTier to match the badge logic
       const tierMatch = selectedTier === 'all' 
         ? true 
-        : allowedTiers.length === 1 && allowedTiers[0] === norm(selectedTier);
+        : getGymTier(gym) === norm(selectedTier);
       // Facility filter: check both amenities and facilities arrays
       const gymFacilities = Array.isArray(gym.facilities) 
         ? gym.facilities.map((f: any) => (typeof f === 'string' ? f.trim().toLowerCase() : String(f).toLowerCase()))
@@ -90,7 +142,34 @@ export default function HomeScreen() {
         : amenities.includes(norm(selectedFacility)) || gymFacilities.includes(norm(selectedFacility));
       return cityMatch && tierMatch && facilityMatch;
     });
-  }, [gyms, selectedCity, selectedTier, selectedFacility]);
+
+    // Then, sort by distance if user location is available
+    if (userLocation) {
+      return filtered
+        .map((gym: any) => {
+          const gymLat = typeof gym.latitude === 'string' ? parseFloat(gym.latitude) : gym.latitude;
+          const gymLon = typeof gym.longitude === 'string' ? parseFloat(gym.longitude) : gym.longitude;
+          
+          if (!Number.isFinite(gymLat) || !Number.isFinite(gymLon)) {
+            return { gym, distance: Infinity };
+          }
+
+          const distance = calculateDistance(
+            userLocation.latitude,
+            userLocation.longitude,
+            gymLat,
+            gymLon
+          );
+
+          return { gym, distance };
+        })
+        .sort((a, b) => a.distance - b.distance)
+        .map((item) => ({ ...item.gym, distance: item.distance }));
+    }
+
+    // If no location, return filtered gyms without sorting
+    return filtered;
+  }, [gyms, selectedCity, selectedTier, selectedFacility, userLocation]);
 
   // Spotlight banners are now loaded from Firestore, not from gyms
 
@@ -212,55 +291,53 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Spotlight</Text>
-      </View>
-      
-      {isLoadingBanners ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color={Colors.primary} />
-        </View>
-      ) : spotlightBanners.length > 0 ? (
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          style={styles.spotlightContainer}
-          contentContainerStyle={styles.spotlightContent}
-        >
-          {spotlightBanners.map((banner) => (
-            <TouchableOpacity 
-              key={banner.id} 
-              style={styles.spotlightCard}
-              onPress={() => {
-                if (banner.linkUrl) {
-                  if (banner.linkUrl.startsWith('http')) {
-                    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                      window.open(banner.linkUrl, '_blank');
+      {!isLoadingBanners && spotlightBanners.length > 0 && (
+        <>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Spotlight</Text>
+          </View>
+          
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            style={styles.spotlightContainer}
+            contentContainerStyle={styles.spotlightContent}
+          >
+            {spotlightBanners.map((banner) => (
+              <TouchableOpacity 
+                key={banner.id} 
+                style={styles.spotlightCard}
+                onPress={() => {
+                  if (banner.linkUrl) {
+                    if (banner.linkUrl.startsWith('http')) {
+                      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                        window.open(banner.linkUrl, '_blank');
+                      }
+                    } else {
+                      router.push(banner.linkUrl as any);
                     }
-                  } else {
-                    router.push(banner.linkUrl as any);
                   }
-                }
-              }}
-            >
-              <Image 
-                source={{ uri: banner.imageUrl }} 
-                style={styles.spotlightImage}
-                resizeMode="cover"
-              />
-              {banner.title && (
-                <View style={styles.spotlightOverlay}>
-                  <View style={styles.spotlightBadge}>
-                    <Text style={styles.spotlightBadgeText}>
-                      {banner.title.toUpperCase()}
-                    </Text>
+                }}
+              >
+                <Image 
+                  source={{ uri: banner.imageUrl }} 
+                  style={styles.spotlightImage}
+                  resizeMode="cover"
+                />
+                {banner.title && (
+                  <View style={styles.spotlightOverlay}>
+                    <View style={styles.spotlightBadge}>
+                      <Text style={styles.spotlightBadgeText}>
+                        {banner.title.toUpperCase()}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      ) : null}
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Discover</Text>
@@ -305,7 +382,12 @@ export default function HomeScreen() {
               >
                 <Image source={{ uri: gym.imageUrl }} style={styles.gymImage} />
                 <View style={styles.gymInfo}>
-                  <Text style={styles.gymName}>{gym.name}</Text>
+                  <View style={styles.gymHeader}>
+                    <Text style={styles.gymName}>{gym.name}</Text>
+                    {userLocation && typeof gym.distance === 'number' && (
+                      <Text style={styles.gymDistance}>{formatDistance(gym.distance)}</Text>
+                    )}
+                  </View>
                   <Text style={styles.gymAddress}>{gym.address}</Text>
                   <View style={styles.gymCategory}>
                     <Text style={styles.gymCategoryText}>
@@ -610,11 +692,23 @@ const styles = StyleSheet.create({
   gymInfo: {
     padding: 12,
   },
+  gymHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
   gymName: {
     fontSize: 16,
     fontWeight: '600' as const,
     color: Colors.text,
-    marginBottom: 4,
+    flex: 1,
+    marginRight: 8,
+  },
+  gymDistance: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: Colors.primary,
   },
   gymAddress: {
     fontSize: 13,

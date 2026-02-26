@@ -70,6 +70,7 @@ export default function AdminDashboardScreen() {
     username: string;
     password: string;
   } | null>(null);
+  const [gymCreationStep, setGymCreationStep] = useState<'details' | 'pricing' | 'review'>('details');
   const [newGym, setNewGym] = useState({
     name: '',
     address: '',
@@ -91,6 +92,9 @@ export default function AdminDashboardScreen() {
     allowedTiers: [] as SubscriptionTier[],
     email: '',
     ownerName: '',
+    membershipModel: 'pay_per_visit' as 'pay_per_visit',
+    pricePerVisit: '',
+    gymImages: [] as string[],
   });
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
   const [tempLocation, setTempLocation] = useState({
@@ -98,6 +102,7 @@ export default function AdminDashboardScreen() {
     longitude: 35.930359,
   });
   const [isCreatingGym, setIsCreatingGym] = useState(false);
+  const [isUploadingGymImages, setIsUploadingGymImages] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [createdGymData, setCreatedGymData] = useState<{
     gymId: string;
@@ -119,6 +124,8 @@ export default function AdminDashboardScreen() {
   const [stats, setStats] = useState<any>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'inactive'>('all');
+  const [checkInsDateFilter, setCheckInsDateFilter] = useState<string>('');
 
   // Load data from Firestore directly
   const loadData = async () => {
@@ -227,7 +234,7 @@ export default function AdminDashboardScreen() {
     );
   }, [checkIns, users, gyms]);
 
-  // Add stats to gyms
+  // Add stats to gyms including payout calculations
   const gymsWithStats = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -240,22 +247,60 @@ export default function AdminDashboardScreen() {
         return ciDate.getTime() === today.getTime();
       });
       
+      // Calculate total payout: sum of payoutAmount from all check-ins
+      const totalPayout = gymCheckIns.reduce((sum: number, ci: any) => {
+        return sum + (ci.payoutAmount || 0);
+      }, 0);
+      
       return {
         ...gym,
         totalCheckIns: gymCheckIns.length,
         todayCheckIns: todayCheckIns.length,
+        totalPayout: totalPayout,
       };
     });
   }, [gyms, checkIns]);
 
   const filteredUsers = useMemo(() => {
-    if (!searchQuery) return users;
-    return users.filter(
-      (u: any) =>
-        u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.email.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [users, searchQuery]);
+    const norm = (v: any) =>
+      typeof v === 'string' ? v.trim().toLowerCase() : '';
+
+    // Base search filter (by name or email)
+    let result = !searchQuery
+      ? users
+      : users.filter(
+          (u: any) =>
+            (u.name || '')
+              .toLowerCase()
+              .includes(searchQuery.toLowerCase()) ||
+            (u.email || '')
+              .toLowerCase()
+              .includes(searchQuery.toLowerCase())
+        );
+
+    // Helper: determine if a user is inactive/expired
+    const isInactiveOrExpired = (user: any) => {
+      const subscription = user.subscription;
+      const now = new Date();
+
+      let isExpired = false;
+      if (subscription?.endDate) {
+        const end = new Date(subscription.endDate);
+        isExpired = end.getTime() < now.getTime();
+      }
+
+      const status = norm(user.status);
+      const isInactiveStatus = status === 'inactive';
+
+      return isExpired || isInactiveStatus;
+    };
+
+    if (userStatusFilter === 'inactive') {
+      result = result.filter(isInactiveOrExpired);
+    }
+
+    return result;
+  }, [users, searchQuery, userStatusFilter]);
 
   const filteredGyms = useMemo(() => {
     if (!searchQuery) return gymsWithStats;
@@ -267,13 +312,55 @@ export default function AdminDashboardScreen() {
   }, [gymsWithStats, searchQuery]);
 
   const filteredCheckIns = useMemo(() => {
-    if (!searchQuery) return enrichedCheckIns;
-    return enrichedCheckIns.filter(
-      (ci: any) =>
-        ci.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ci.gymName.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [enrichedCheckIns, searchQuery]);
+    let result = enrichedCheckIns;
+
+    // Text search (user name or gym name)
+    if (searchQuery) {
+      const queryLower = searchQuery.toLowerCase();
+      result = result.filter(
+        (ci: any) =>
+          (ci.userName || '').toLowerCase().includes(queryLower) ||
+          (ci.gymName || '').toLowerCase().includes(queryLower)
+      );
+    }
+
+    // Date filter (YYYY-MM-DD). Uses check-in timestamp but keeps existing sort.
+    const trimmedDate = checkInsDateFilter.trim();
+    if (trimmedDate) {
+      const parseDate = (value: string): Date | null => {
+        // Prefer YYYY-MM-DD; fall back to Date parsing if needed.
+        const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) {
+          const [_, y, m, d] = isoMatch;
+          const parsed = new Date(
+            Number(y),
+            Number(m) - 1,
+            Number(d),
+            0,
+            0,
+            0,
+            0
+          );
+          return isNaN(parsed.getTime()) ? null : parsed;
+        }
+
+        const fallback = new Date(value);
+        return isNaN(fallback.getTime()) ? null : fallback;
+      };
+
+      const selectedDate = parseDate(trimmedDate);
+      if (selectedDate) {
+        selectedDate.setHours(0, 0, 0, 0);
+        result = result.filter((ci: any) => {
+          const ciDate = new Date(ci.timestamp);
+          ciDate.setHours(0, 0, 0, 0);
+          return ciDate.getTime() === selectedDate.getTime();
+        });
+      }
+    }
+
+    return result;
+  }, [enrichedCheckIns, searchQuery, checkInsDateFilter]);
 
   const generateId = async (): Promise<string> => {
     if (Platform.OS === 'web' && typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -286,6 +373,7 @@ export default function AdminDashboardScreen() {
   };
 
   const resetGymForm = () => {
+    setGymCreationStep('details');
     setNewGym({
       name: '',
       address: '',
@@ -307,6 +395,9 @@ export default function AdminDashboardScreen() {
       allowedTiers: [],
       email: '',
       ownerName: '',
+      membershipModel: 'pay_per_visit',
+      pricePerVisit: '',
+      gymImages: [],
     });
     setEditingGymId(null);
     setEditingGymOwnerId(null);
@@ -336,6 +427,7 @@ export default function AdminDashboardScreen() {
       setEditingGymId(gym.id);
       setEditingGymOwnerId(null);
 
+      setGymCreationStep('details');
       setNewGym({
         name: gym.name || '',
         address: gym.address || '',
@@ -358,6 +450,9 @@ export default function AdminDashboardScreen() {
         // Prefer values stored on the gym doc (if present), then try gymOwners lookup below.
         email: gym.ownerEmail || gym.email || '',
         ownerName: gym.ownerName || '',
+        membershipModel: gym.membershipModel || 'pay_per_visit',
+        pricePerVisit: gym.pricePerVisit ? String(gym.pricePerVisit) : '',
+        gymImages: Array.isArray(gym.gymImages) ? gym.gymImages : [],
       });
 
       // Load owner contact info and credentials (best-effort)
@@ -423,23 +518,60 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  const handleAddGym = async () => {
-    console.log('[Admin] Add gym button clicked');
-    console.log('[Admin] Form data:', newGym);
-    
+  const validateDetailsStep = (): boolean => {
     if (!newGym.name || !newGym.address || !newGym.city) {
       Alert.alert('Error', 'Please fill in all required fields');
-      return;
+      return false;
     }
 
     if (!newGym.latitude || !newGym.longitude) {
       Alert.alert('Error', 'Please select the gym location on the map');
-      return;
+      return false;
     }
 
     const isEditing = !!editingGymId;
     if (!isEditing && (!newGym.email || !newGym.ownerName)) {
       Alert.alert('Error', 'Owner name and email are required');
+      return false;
+    }
+
+    return true;
+  };
+
+  const validatePricingStep = (): boolean => {
+    if (!newGym.pricePerVisit || isNaN(parseFloat(newGym.pricePerVisit)) || parseFloat(newGym.pricePerVisit) <= 0) {
+      Alert.alert('Error', 'Please enter a valid price per visit (must be greater than 0)');
+      return false;
+    }
+    return true;
+  };
+
+  const handleNextStep = () => {
+    if (gymCreationStep === 'details') {
+      if (validateDetailsStep()) {
+        setGymCreationStep('pricing');
+      }
+    } else if (gymCreationStep === 'pricing') {
+      if (validatePricingStep()) {
+        setGymCreationStep('review');
+      }
+    }
+  };
+
+  const handleBackStep = () => {
+    if (gymCreationStep === 'pricing') {
+      setGymCreationStep('details');
+    } else if (gymCreationStep === 'review') {
+      setGymCreationStep('pricing');
+    }
+  };
+
+  const handleAddGym = async () => {
+    console.log('[Admin] Add gym button clicked');
+    console.log('[Admin] Form data:', newGym);
+    
+    // Final validation before submission
+    if (!validateDetailsStep() || !validatePricingStep()) {
       return;
     }
 
@@ -451,10 +583,6 @@ export default function AdminDashboardScreen() {
       return;
     }
 
-    const amenities = newGym.amenities
-      ? newGym.amenities.split(',').map((a) => a.trim()).filter((a) => a.length > 0)
-      : [];
-
     const gymData = {
       name: newGym.name.trim(),
       address: newGym.address.trim(),
@@ -462,7 +590,6 @@ export default function AdminDashboardScreen() {
       latitude,
       longitude,
       category: newGym.category,
-      amenities,
       hours: newGym.hours || '6:00 AM - 10:00 PM',
       imageUrl: newGym.imageUrl?.trim() || undefined,
       allowedTiers: newGym.allowedTiers.length > 0 ? newGym.allowedTiers : undefined,
@@ -485,6 +612,8 @@ export default function AdminDashboardScreen() {
           ? ['gold', 'diamond', 'elite']
           : ['silver', 'gold', 'diamond', 'elite'];
 
+      const pricePerVisit = parseFloat(newGym.pricePerVisit);
+      
       const gymRecord: any = {
         id: gymId,
         name: gymData.name,
@@ -493,7 +622,7 @@ export default function AdminDashboardScreen() {
         latitude: gymData.latitude,
         longitude: gymData.longitude,
         category: gymData.category,
-        amenities: gymData.amenities,
+        amenities: gymData.amenities || [],
         facilities: newGym.facilities || [],
         hours: gymData.hours,
         timings: newGym.timings,
@@ -503,6 +632,9 @@ export default function AdminDashboardScreen() {
           gymData.imageUrl ||
           'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
         allowedTiers: gymData.allowedTiers || defaultAllowedTiers,
+        membershipModel: newGym.membershipModel || 'pay_per_visit',
+        pricePerVisit: pricePerVisit,
+        gymImages: Array.isArray(newGym.gymImages) ? newGym.gymImages : [],
       };
       // Persist owner contact on the gym doc for easy editing/display (even if gymOwners doc is missing)
       if (gymData.email) gymRecord.ownerEmail = gymData.email;
@@ -702,6 +834,109 @@ export default function AdminDashboardScreen() {
     setIsMapModalVisible(false);
   };
 
+  const handleUploadGymImages = async () => {
+    if (isUploadingGymImages) return;
+    setIsUploadingGymImages(true);
+
+    try {
+      const storage = getStorage(app);
+      const newUrls: string[] = [];
+
+      if (Platform.OS === 'web') {
+        const files = await new Promise<FileList | null>((resolve) => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.multiple = true;
+          input.style.display = 'none';
+
+          const handleChange = (e: Event) => {
+            const target = e.target as HTMLInputElement;
+            const list = target.files;
+            input.removeEventListener('change', handleChange);
+            document.body.removeChild(input);
+            resolve(list && list.length > 0 ? list : null);
+          };
+
+          input.addEventListener('change', handleChange);
+          document.body.appendChild(input);
+          input.click();
+        });
+
+        if (!files) {
+          setIsUploadingGymImages(false);
+          return;
+        }
+
+        const fileArray = Array.from(files);
+        for (let index = 0; index < fileArray.length; index++) {
+          const file = fileArray[index];
+          const timestamp = Date.now();
+          const idSeed = `${timestamp}-${file.name}-${index}`;
+          const objectId = await Crypto.digestStringAsync(
+            Crypto.CryptoDigestAlgorithm.SHA256,
+            idSeed
+          );
+          const objectRef = ref(storage, `gymImages/${objectId}.jpg`);
+          await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
+          const url = await getDownloadURL(objectRef);
+          newUrls.push(url);
+        }
+      } else {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Permission needed', 'Please grant access to your photo library.');
+          setIsUploadingGymImages(false);
+          return;
+        }
+
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          allowsMultipleSelection: true,
+          quality: 0.8,
+        } as any);
+
+        if (result.canceled || !result.assets?.length) {
+          setIsUploadingGymImages(false);
+          return;
+        }
+
+        for (let index = 0; index < result.assets.length; index++) {
+          const asset = result.assets[index];
+          const uri = asset.uri;
+          if (!uri) continue;
+          const timestamp = Date.now();
+          const objectId = await Crypto.digestStringAsync(
+            Crypto.CryptoDigestAlgorithm.SHA256,
+            `${timestamp}-gym-image-${index}`
+          );
+          const objectRef = ref(storage, `gymImages/${objectId}.jpg`);
+          const response = await fetch(uri);
+          const blob = await response.blob();
+          await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' });
+          const url = await getDownloadURL(objectRef);
+          newUrls.push(url);
+        }
+      }
+
+      if (newUrls.length === 0) {
+        setIsUploadingGymImages(false);
+        return;
+      }
+
+      setNewGym((prev) => ({
+        ...prev,
+        gymImages: [...(prev.gymImages || []), ...newUrls],
+      }));
+    } catch (error: any) {
+      console.error('[Admin] Error uploading gym images:', error);
+      Alert.alert('Error', error?.message || 'Failed to upload images. Please try again.');
+    } finally {
+      setIsUploadingGymImages(false);
+    }
+  };
+
   const handlePickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -712,6 +947,7 @@ export default function AdminDashboardScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       quality: 0.8,
+      aspect: [1, 1], // Force square crop for gym logos
     });
     if (!result.canceled && result.assets?.length) {
       setNewGym({ ...newGym, imageUrl: result.assets[0].uri });
@@ -849,6 +1085,29 @@ export default function AdminDashboardScreen() {
       Alert.alert('Error', error?.message || 'Failed to upload banner. Please try again.');
     } finally {
       setIsUploadingBanner(false);
+    }
+  };
+
+  const handleUpdateSpotlightOrder = async (bannerId: string, newOrderRaw: string) => {
+    const trimmed = newOrderRaw.trim();
+    if (!trimmed) return;
+    const parsed = parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+
+    // Optimistic local update
+    setSpotlightBanners((prev) =>
+      [...prev]
+        .map((b) => (b.id === bannerId ? { ...b, order: parsed } : b))
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+    );
+
+    try {
+      await firestoreSpotlightBanners.update(bannerId, { order: parsed });
+    } catch (error: any) {
+      console.error('[Admin] Failed to update spotlight banner order:', error);
+      Alert.alert('Error', error?.message || 'Failed to update banner position. Please try again.');
+      // Reload from server to ensure consistency
+      loadSpotlightBanners();
     }
   };
 
@@ -1015,7 +1274,7 @@ export default function AdminDashboardScreen() {
               {(gymsWithStats || []).slice(0, 2).map((g: any) => (
                 <View key={g.id} style={styles.payoutRow}>
                   <Text style={styles.payoutGymName}>{g.name}</Text>
-                  <Text style={styles.payoutAmount}>JOD 0</Text>
+                  <Text style={styles.payoutAmount}>JOD {g.totalPayout?.toFixed(2) || '0.00'}</Text>
                 </View>
               ))}
 
@@ -1042,6 +1301,44 @@ export default function AdminDashboardScreen() {
                 onChangeText={setSearchQuery}
                 placeholderTextColor="#9CA3AF"
               />
+            </View>
+
+            {/* Subscribers status filter: All vs Inactive / Expired */}
+            <View style={styles.userFilterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.userFilterChip,
+                  userStatusFilter === 'all' && styles.userFilterChipActive,
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setUserStatusFilter('all')}
+              >
+                <Text
+                  style={[
+                    styles.userFilterChipText,
+                    userStatusFilter === 'all' && styles.userFilterChipTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.userFilterChip,
+                  userStatusFilter === 'inactive' && styles.userFilterChipActive,
+                ]}
+                activeOpacity={0.85}
+                onPress={() => setUserStatusFilter('inactive')}
+              >
+                <Text
+                  style={[
+                    styles.userFilterChipText,
+                    userStatusFilter === 'inactive' && styles.userFilterChipTextActive,
+                  ]}
+                >
+                  Inactive / Expired
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {filteredUsers.map((user: any) => {
@@ -1281,6 +1578,18 @@ export default function AdminDashboardScreen() {
               />
             </View>
 
+            {/* Date filter for check-ins (YYYY-MM-DD or any parsable date) */}
+            <View style={styles.dateFilterRow}>
+              <Text style={styles.dateFilterLabel}>Filter by date</Text>
+              <TextInput
+                style={styles.dateFilterInput}
+                placeholder="YYYY-MM-DD"
+                value={checkInsDateFilter}
+                onChangeText={setCheckInsDateFilter}
+                placeholderTextColor="#9CA3AF"
+              />
+            </View>
+
             <Text style={styles.allCheckInsTitle}>All Check-ins</Text>
 
             {filteredCheckIns.map((checkIn: any) => {
@@ -1352,7 +1661,7 @@ export default function AdminDashboardScreen() {
               {(gymsWithStats || []).map((g: any) => (
                 <View key={g.id} style={styles.payoutRow}>
                   <Text style={styles.payoutGymName}>{g.name}</Text>
-                  <Text style={styles.payoutAmount}>JOD 0</Text>
+                  <Text style={styles.payoutAmount}>JOD {g.totalPayout?.toFixed(2) || '0.00'}</Text>
                 </View>
               ))}
 
@@ -1445,7 +1754,9 @@ export default function AdminDashboardScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingGymId ? 'Edit Gym' : 'Add New Gym'}</Text>
+              <Text style={styles.modalTitle}>
+                {editingGymId ? 'Edit Gym' : gymCreationStep === 'details' ? 'Add Gym Details' : gymCreationStep === 'pricing' ? 'Pricing' : 'Review'}
+              </Text>
               <TouchableOpacity onPress={() => {
                 setShowAddGymModal(false);
                 resetGymForm();
@@ -1454,7 +1765,21 @@ export default function AdminDashboardScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Step Indicator */}
+            {!editingGymId && (
+              <View style={styles.stepIndicator}>
+                <View style={[styles.stepDot, gymCreationStep === 'details' && styles.stepDotActive]} />
+                <View style={styles.stepLine} />
+                <View style={[styles.stepDot, gymCreationStep === 'pricing' && styles.stepDotActive]} />
+                <View style={styles.stepLine} />
+                <View style={[styles.stepDot, gymCreationStep === 'review' && styles.stepDotActive]} />
+              </View>
+            )}
+
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {/* Details Step */}
+              {(gymCreationStep === 'details' || editingGymId) && (
+                <>
               <Text style={styles.label}>Gym Name *</Text>
               <TextInput
                 style={styles.input}
@@ -1723,6 +2048,22 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.locationSummaryMuted}>No logo selected</Text>
               )}
 
+              <TouchableOpacity
+                style={[styles.uploadButton, { marginTop: 8 }]}
+                onPress={handleUploadGymImages}
+                disabled={isUploadingGymImages}
+              >
+                <ImageIcon size={20} color="#fff" />
+                <Text style={styles.uploadButtonText}>
+                  {isUploadingGymImages ? 'Uploading Images...' : 'Upload Images'}
+                </Text>
+              </TouchableOpacity>
+              {Array.isArray(newGym.gymImages) && newGym.gymImages.length > 0 && (
+                <Text style={styles.locationSummaryMuted}>
+                  {newGym.gymImages.length} image{newGym.gymImages.length === 1 ? '' : 's'} uploaded
+                </Text>
+              )}
+
               <Text style={styles.label}>Owner Email *</Text>
               <TextInput
                 style={styles.input}
@@ -1800,27 +2141,145 @@ export default function AdminDashboardScreen() {
                   </View>
                 </>
               )}
+                </>
+              )}
 
-              <TouchableOpacity
-                style={[styles.submitButton, isCreatingGym && { opacity: 0.6 }]}
-                onPress={handleAddGym}
-                disabled={isCreatingGym}
-              >
-                {isCreatingGym ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>{editingGymId ? 'Save Changes' : 'Add Gym'}</Text>
-                )}
-              </TouchableOpacity>
+              {/* Pricing Step */}
+              {!editingGymId && gymCreationStep === 'pricing' && (
+                <>
+                  <Text style={styles.sectionTitle}>Membership Model</Text>
+                  <View style={styles.radioContainer}>
+                    <TouchableOpacity
+                      style={styles.radioRow}
+                      onPress={() => setNewGym({ ...newGym, membershipModel: 'pay_per_visit' })}
+                    >
+                      <View style={styles.radio}>
+                        {newGym.membershipModel === 'pay_per_visit' && <View style={styles.radioSelected} />}
+                      </View>
+                      <Text style={styles.radioLabel}>Pay-Per-Visit</Text>
+                    </TouchableOpacity>
+                  </View>
 
+                  <Text style={styles.label}>Price Per Visit *</Text>
+                  <Text style={styles.helperText}>Amount XPASS pays the gym per check-in (JOD)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={newGym.pricePerVisit}
+                    onChangeText={(text) => setNewGym({ ...newGym, pricePerVisit: text.replace(/[^0-9.]/g, '') })}
+                    placeholder="2"
+                    keyboardType="decimal-pad"
+                  />
+                </>
+              )}
+
+              {/* Review Step */}
+              {!editingGymId && gymCreationStep === 'review' && (
+                <>
+                  <Text style={styles.sectionTitle}>Review Gym Details</Text>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Gym Name:</Text>
+                    <Text style={styles.reviewValue}>{newGym.name}</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Address:</Text>
+                    <Text style={styles.reviewValue}>{newGym.address}</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>City:</Text>
+                    <Text style={styles.reviewValue}>{newGym.city}</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Category:</Text>
+                    <Text style={styles.reviewValue}>{newGym.category.toUpperCase()}</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Membership Model:</Text>
+                    <Text style={styles.reviewValue}>Pay-Per-Visit</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Price Per Visit:</Text>
+                    <Text style={styles.reviewValue}>{newGym.pricePerVisit} JOD</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Owner Name:</Text>
+                    <Text style={styles.reviewValue}>{newGym.ownerName}</Text>
+                  </View>
+                  
+                  <View style={styles.reviewSection}>
+                    <Text style={styles.reviewLabel}>Owner Email:</Text>
+                    <Text style={styles.reviewValue}>{newGym.email}</Text>
+                  </View>
+                </>
+              )}
+
+              {/* Navigation Buttons */}
+              {!editingGymId && (
+                <View style={styles.stepButtons}>
+                  {gymCreationStep !== 'details' && (
+                    <TouchableOpacity
+                      style={styles.backButton}
+                      onPress={handleBackStep}
+                    >
+                      <Text style={styles.backButtonText}>
+                        {gymCreationStep === 'review' ? 'Back to Pricing' : 'Back to Facilities'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {gymCreationStep !== 'review' ? (
+                    <TouchableOpacity
+                      style={[styles.nextButton, gymCreationStep === 'details' && styles.nextButtonFull]}
+                      onPress={handleNextStep}
+                    >
+                      <Text style={styles.nextButtonText}>
+                        {gymCreationStep === 'details' ? 'Continue to Pricing' : 'Continue to Review'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.submitButton, isCreatingGym && { opacity: 0.6 }]}
+                      onPress={handleAddGym}
+                      disabled={isCreatingGym}
+                    >
+                      {isCreatingGym ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.submitButtonText}>Add Gym</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {/* Edit Mode Submit Button */}
               {editingGymId && (
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={handleDeleteGym}
-                  disabled={isCreatingGym}
-                >
-                  <Text style={styles.deleteButtonText}>Delete Gym</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={[styles.submitButton, isCreatingGym && { opacity: 0.6 }]}
+                    onPress={handleAddGym}
+                    disabled={isCreatingGym}
+                  >
+                    {isCreatingGym ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Save Changes</Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={handleDeleteGym}
+                    disabled={isCreatingGym}
+                  >
+                    <Text style={styles.deleteButtonText}>Delete Gym</Text>
+                  </TouchableOpacity>
+                </>
               )}
             </ScrollView>
           </View>
@@ -2033,7 +2492,7 @@ export default function AdminDashboardScreen() {
                 </View>
               ) : (
                 <View style={styles.bannersList}>
-                  {spotlightBanners.map((banner) => (
+                  {spotlightBanners.map((banner, index) => (
                     <View key={banner.id} style={styles.bannerCard}>
                       <Image
                         source={{ uri: banner.imageUrl }}
@@ -2049,7 +2508,24 @@ export default function AdminDashboardScreen() {
                             Link: {banner.linkUrl}
                           </Text>
                         ) : null}
-                        <Text style={styles.bannerOrder}>Order: {banner.order}</Text>
+                        <View style={styles.bannerOrderRow}>
+                          <Text style={styles.bannerOrderLabel}>Position</Text>
+                          <TextInput
+                            style={styles.bannerOrderInput}
+                            keyboardType="number-pad"
+                            defaultValue={
+                              typeof banner.order === 'number'
+                                ? String(banner.order)
+                                : String(index)
+                            }
+                            onEndEditing={(e) =>
+                              handleUpdateSpotlightOrder(
+                                banner.id,
+                                e.nativeEvent.text || String(index)
+                              )
+                            }
+                          />
+                        </View>
                       </View>
                       <TouchableOpacity
                         style={styles.deleteBannerButton}
@@ -2430,6 +2906,32 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     paddingVertical: 2,
   },
+  userFilterRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    marginBottom: 12,
+  },
+  userFilterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+  },
+  userFilterChipActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
+  userFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#4B5563',
+  },
+  userFilterChipTextActive: {
+    color: '#FFFFFF',
+  },
   activityCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -2463,6 +2965,27 @@ const styles = StyleSheet.create({
   activityTime: {
     fontSize: 13,
     color: '#9CA3AF',
+  },
+  dateFilterRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: 12,
+    gap: 8,
+  },
+  dateFilterLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  dateFilterInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1F2937',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
   tierBadge: {
     paddingHorizontal: 10,
@@ -2951,10 +3474,11 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
   },
   logoPreview: {
-    width: '100%',
+    width: 160,
     height: 160,
     borderRadius: 12,
     marginTop: 12,
+    alignSelf: 'flex-start',
   },
   mapModalContent: {
     backgroundColor: '#fff',
@@ -3210,6 +3734,132 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 8,
     textAlign: 'center' as const,
+  },
+  bannerOrderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginTop: 8,
+    gap: 8,
+  },
+  bannerOrderLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  bannerOrderInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 13,
+    color: '#111827',
+    textAlign: 'right' as const,
+  },
+  stepIndicator: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EFEFEF',
+  },
+  stepDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#D1D5DB',
+  },
+  stepDotActive: {
+    backgroundColor: '#DC2626',
+  },
+  stepLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: '#D1D5DB',
+    marginHorizontal: 8,
+  },
+  stepButtons: {
+    flexDirection: 'row' as const,
+    gap: 12,
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  backButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+  },
+  backButtonText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  nextButton: {
+    flex: 1,
+    backgroundColor: '#DC2626',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+  },
+  nextButtonFull: {
+    flex: 1,
+  },
+  nextButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  radioContainer: {
+    marginBottom: 24,
+  },
+  radioRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: 12,
+  },
+  radio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#DC2626',
+    marginRight: 12,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  radioSelected: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#DC2626',
+  },
+  radioLabel: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '500' as const,
+  },
+  reviewSection: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  reviewLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 4,
+    fontWeight: '500' as const,
+  },
+  reviewValue: {
+    fontSize: 16,
+    color: '#1F2937',
+    fontWeight: '600' as const,
   },
   spotlightButton: {
     flexDirection: 'row' as const,

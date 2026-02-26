@@ -182,17 +182,6 @@ export default function ProfileScreen() {
 
             <View style={styles.divider} />
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/payment-methods')}>
-              <CreditCard size={20} color={Colors.text} />
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>Payment Methods</Text>
-                <Text style={styles.menuSubtitle}>Apple Pay • Visa</Text>
-              </View>
-              <ChevronRight size={20} color={Colors.textSecondary} />
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications')}>
               <Bell size={20} color={Colors.text} />
               <View style={styles.menuContent}>

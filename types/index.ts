@@ -45,6 +45,9 @@ export interface Gym {
   hours: string;
   imageUrl: string;
   allowedTiers: SubscriptionTier[];
+  membershipModel?: 'pay_per_visit' | string; // Pricing model
+  pricePerVisit?: number; // Amount XPASS pays gym per check-in (JOD)
+  gymImages?: string[]; // Additional gallery images for the gym
 }
 
 export interface CheckIn {
@@ -53,6 +56,7 @@ export interface CheckIn {
   gymId: string;
   timestamp: Date;
   subscriptionId: string;
+  payoutAmount?: number; // Amount earned by gym for this check-in (stored at check-in time)
 }
 
 export interface ChatMessage {

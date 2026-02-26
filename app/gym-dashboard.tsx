@@ -139,11 +139,17 @@ export default function GymDashboardScreen() {
   }, [checkIns]);
 
   const stats = useMemo(() => {
+    // Calculate monthly earnings from check-ins with payoutAmount
+    const monthlyEarnings = checkIns.reduce((sum: number, ci: any) => {
+      return sum + (ci.payoutAmount || 0);
+    }, 0);
+
     return {
       totalToday: todayCheckIns.length,
       totalAll: checkIns.length,
+      monthlyEarnings: monthlyEarnings,
     };
-  }, [checkIns.length, todayCheckIns.length]);
+  }, [checkIns, todayCheckIns.length]);
 
   const onRefresh = () => {
     if (actualGymId) {
@@ -357,23 +363,31 @@ export default function GymDashboardScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Pricing Info Card */}
+          {gym.pricePerVisit && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Pricing</Text>
+              <View style={styles.row}>
+                <Text style={styles.rowLeft}>Price Per Visit:</Text>
+                <Text style={styles.rowRight}>JOD {gym.pricePerVisit.toFixed(2)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLeft}>Membership Model:</Text>
+                <Text style={styles.rowRight}>{gym.membershipModel === 'pay_per_visit' ? 'Pay-Per-Visit' : gym.membershipModel || 'N/A'}</Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Monthly Payouts</Text>
-
-            {payments.length === 0 ? (
-              <Text style={styles.muted}>No payouts available yet</Text>
-            ) : (
-              payments.slice(0, 2).map((p: any, idx: number) => (
-                <View key={`${p.id || idx}`} style={styles.row}>
-                  <Text style={styles.rowLeft}>{p.label || p.month || '—'}</Text>
-                  <Text style={styles.rowRight}>JOD {p.amount || 0}</Text>
-                </View>
-              ))
-            )}
-
-            <TouchableOpacity style={styles.secondaryCta} activeOpacity={0.9} onPress={() => setActiveTab('payments')}>
-              <Text style={styles.secondaryCtaText}>View All</Text>
-            </TouchableOpacity>
+            <Text style={styles.cardTitle}>Monthly Earnings</Text>
+            <View style={styles.row}>
+              <Text style={styles.rowLeft}>Total Earnings:</Text>
+              <Text style={styles.rowRight}>JOD {stats.monthlyEarnings?.toFixed(2) || '0.00'}</Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={styles.rowLeft}>Total Check-ins:</Text>
+              <Text style={styles.rowRight}>{stats.totalAll}</Text>
+            </View>
           </View>
 
           <TouchableOpacity

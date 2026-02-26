@@ -62,7 +62,7 @@ export default function ReferFriendScreen() {
   const handleShare = async () => {
     try {
       const result = await Share.share({
-        message: `Join XPASS with my referral code and get 10 JDS credit! Use code: ${referralCode}\n\n${referralLink}`,
+        message: `Join XPASS with my referral code! Use code: ${referralCode}\n\n${referralLink}`,
         title: 'Join XPASS',
       });
     } catch (error: any) {
@@ -144,7 +144,7 @@ export default function ReferFriendScreen() {
             <View style={styles.infoItem}>
               <View style={styles.infoBullet} />
               <Text style={styles.infoText}>
-                When they sign up using your code, you both get 10 JDS credit
+                When they sign up using your code, you get 10 JDS credit
               </Text>
             </View>
             <View style={styles.infoItem}>

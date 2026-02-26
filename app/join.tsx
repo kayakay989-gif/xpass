@@ -32,7 +32,7 @@ export default function JoinScreen() {
           />
           <Text style={styles.title}>Join XPASS</Text>
           <Text style={styles.subtitle}>
-            Create an account to activate your referral and earn <Text style={styles.bold}>10 JDS</Text> credit.
+            Create an account to activate your referral. The person who referred you will earn <Text style={styles.bold}>10 JDS</Text> credit.
           </Text>
 
           <Text style={styles.label}>Referral code</Text>

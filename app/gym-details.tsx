@@ -15,6 +15,8 @@ import { firestoreGyms } from '@/lib/firestore';
 import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 import Colors from '@/constants/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Location from 'expo-location';
+import { calculateDistance, formatDistance } from '@/lib/distance';
 
 export default function GymDetailsScreen() {
   const router = useRouter();
@@ -22,12 +24,68 @@ export default function GymDetailsScreen() {
   const { gymId } = useLocalSearchParams<{ gymId?: string }>();
   const [gym, setGym] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [distance, setDistance] = useState<number | null>(null);
 
   useEffect(() => {
     if (gymId) {
       loadGymDetails();
     }
   }, [gymId]);
+
+  // Request location permission and get user's current location
+  useEffect(() => {
+    let cancelled = false;
+
+    const requestLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        
+        if (cancelled) return;
+
+        if (status !== 'granted') {
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        if (cancelled) return;
+
+        setUserLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+      } catch (error) {
+        console.error('[GymDetails] Error getting location:', error);
+      }
+    };
+
+    requestLocation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Calculate distance when gym and user location are available
+  useEffect(() => {
+    if (gym && userLocation) {
+      const gymLat = typeof gym.latitude === 'string' ? parseFloat(gym.latitude) : gym.latitude;
+      const gymLon = typeof gym.longitude === 'string' ? parseFloat(gym.longitude) : gym.longitude;
+      
+      if (Number.isFinite(gymLat) && Number.isFinite(gymLon)) {
+        const calculatedDistance = calculateDistance(
+          userLocation.latitude,
+          userLocation.longitude,
+          gymLat,
+          gymLon
+        );
+        setDistance(calculatedDistance);
+      }
+    }
+  }, [gym, userLocation]);
 
   const loadGymDetails = async () => {
     if (!gymId) return;
@@ -110,6 +168,13 @@ export default function GymDetailsScreen() {
   const tier = getGymTier(gym);
   const badge = getTierBadgeColors(tier);
   const tierLabel = getTierLabel(tier);
+  const galleryImages: string[] = Array.isArray((gym as any).gymImages)
+    ? (gym as any).gymImages
+    : [];
+  const heroImage =
+    (galleryImages.length > 0 && galleryImages[0]) ||
+    gym.imageUrl ||
+    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
 
   return (
     <>
@@ -128,12 +193,31 @@ export default function GymDetailsScreen() {
         }}
       />
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Gym Image */}
+        {/* Gym Image / Gallery hero */}
         <Image
-          source={{ uri: gym.imageUrl || 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800' }}
+          source={{ uri: heroImage }}
           style={styles.gymImage}
           resizeMode="cover"
         />
+
+        {/* Gym Image Gallery */}
+        {galleryImages.length > 1 && (
+          <View style={styles.gallerySection}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              {galleryImages.map((url, index) => (
+                <Image
+                  key={`${url}-${index}`}
+                  source={{ uri: url }}
+                  style={styles.galleryImage}
+                  resizeMode="cover"
+                />
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Gym Info Card */}
         <View style={styles.infoCard}>
@@ -149,7 +233,12 @@ export default function GymDetailsScreen() {
           {/* Address */}
           <View style={styles.infoRow}>
             <MapPin size={18} color={Colors.textSecondary} />
-            <Text style={styles.infoText}>{gym.address}</Text>
+            <View style={styles.addressContainer}>
+              <Text style={styles.infoText}>{gym.address}</Text>
+              {distance !== null && (
+                <Text style={styles.distanceText}>{formatDistance(distance)} away</Text>
+              )}
+            </View>
           </View>
 
           {/* City */}
@@ -258,6 +347,18 @@ const styles = StyleSheet.create({
     height: 250,
     backgroundColor: Colors.surface,
   },
+  gallerySection: {
+    backgroundColor: Colors.background,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  galleryImage: {
+    width: 140,
+    height: 100,
+    borderRadius: 12,
+    marginRight: 8,
+    backgroundColor: Colors.surface,
+  },
   infoCard: {
     backgroundColor: Colors.white,
     padding: 20,
@@ -294,10 +395,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 8,
   },
+  addressContainer: {
+    flex: 1,
+  },
   infoText: {
     fontSize: 16,
     color: Colors.textSecondary,
-    flex: 1,
+  },
+  distanceText: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '600',
+    marginTop: 4,
   },
   section: {
     backgroundColor: Colors.white,

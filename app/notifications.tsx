@@ -173,9 +173,9 @@ export default function NotificationsScreen() {
 
             <View style={styles.preferenceItem}>
               <View style={styles.preferenceInfo}>
-                <Text style={styles.preferenceLabel}>Check-in Reminders</Text>
+                <Text style={styles.preferenceLabel}>Check-in Notifications</Text>
                 <Text style={styles.preferenceDescription}>
-                  Reminders to check in at gyms
+                  Reminders of check-ins
                 </Text>
               </View>
               <Switch

@@ -20,11 +20,31 @@ function categoryToTier(category: any): SubscriptionTier {
 }
 
 export function getGymTier(gym: Partial<Gym>): SubscriptionTier {
-  const allowed = Array.isArray(gym.allowedTiers) ? gym.allowedTiers.map(normalizeTier).filter(Boolean) as SubscriptionTier[] : [];
+  // IMPORTANT:
+  // The visible “Silver / Gold / Diamond / Elite” plan of a gym should
+  // come from the gym’s category (the plan selected in the admin panel),
+  // not from `allowedTiers` (which describes which subscription tiers can access it).
+  //
+  // This ensures:
+  // - The badge on the gym card always shows the plan chosen when the gym was created.
+  // - The tier filters (Silver / Gold / Diamond / Elite) match exactly what is shown
+  //   on the badge, because they also call `getGymTier`.
+  //
+  // If for any reason category is missing, fall back to allowedTiers.
+  if (gym.category) {
+    return categoryToTier(gym.category);
+  }
+
+  const allowed = Array.isArray((gym as any).allowedTiers)
+    ? (gym as any).allowedTiers.map(normalizeTier).filter(Boolean) as SubscriptionTier[]
+    : [];
+
   for (const t of TIER_ORDER) {
     if (allowed.includes(t)) return t;
   }
-  return categoryToTier(gym.category);
+
+  // Last resort: default to Silver
+  return 'silver';
 }
 
 export function getTierLabel(tier: SubscriptionTier): string {

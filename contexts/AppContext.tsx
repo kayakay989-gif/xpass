@@ -5,6 +5,7 @@ import { trpc } from '@/lib/trpc';
 import { useAuth } from './AuthContext';
 import { firestoreGyms } from '@/lib/firestore';
 import { config } from '@/lib/config';
+import { getGymTier } from '@/lib/gym-tier';
 
 // Pricing table (TOTAL price for duration) based on provided spec
 const TOTAL_PRICES: Record<SubscriptionDuration, Record<SubscriptionTier, number>> = {
@@ -117,8 +118,16 @@ export const [AppProvider, useApp] = createContextHook(() => {
   }, [userId, createSubscriptionMutation]);
 
   const filteredGyms = useMemo(() => {
+    if (!gyms) return [];
+
+    // If no specific tier is selected, return all gyms.
     if (selectedGymFilter === 'all') return gyms;
-    return gyms.filter(gym => gym.allowedTiers.includes(selectedGymFilter));
+
+    const selectedTier = selectedGymFilter as SubscriptionTier;
+
+    // Filter by the same tier logic used for badges (`getGymTier`),
+    // so the list and the label are always consistent.
+    return gyms.filter((gym: any) => getGymTier(gym) === selectedTier);
   }, [gyms, selectedGymFilter]);
 
   return useMemo(() => {

@@ -105,18 +105,26 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   // Load user profile from Firestore
-  const loadUserProfile = useCallback(async (uid: string) => {
+  const loadUserProfile = useCallback(async (uid: string, firebaseAuthUser?: FirebaseUser | null) => {
     try {
-      const firebaseAuthUser = auth.currentUser;
+      // Use the passed firebaseAuthUser or get current user
+      const currentAuthUser = firebaseAuthUser || auth.currentUser;
+      
+      // CRITICAL: Verify the UID matches the authenticated user to prevent user switching
+      if (currentAuthUser && currentAuthUser.uid !== uid) {
+        console.error('[AuthContext] UID mismatch! Expected:', uid, 'Got:', currentAuthUser.uid);
+        return null;
+      }
+      
       const userDoc = await getDoc(doc(db, 'users', uid));
       
       if (userDoc.exists()) {
         const userData = firestoreDataToUser(uid, userDoc.data());
         
         // Sync Firebase Auth displayName with Firestore if they differ
-        if (firebaseAuthUser && firebaseAuthUser.displayName !== userData.name && userData.name) {
+        if (currentAuthUser && currentAuthUser.displayName !== userData.name && userData.name) {
           try {
-            await updateProfile(firebaseAuthUser, { displayName: userData.name });
+            await updateProfile(currentAuthUser, { displayName: userData.name });
           } catch (error) {
             console.warn('[AuthContext] Failed to sync displayName:', error);
           }
@@ -126,12 +134,43 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return userData;
       } else {
         // Create user profile if it doesn't exist
-        if (firebaseAuthUser) {
+        // BUT: Check if a user document exists with the same email (might be admin account)
+        if (currentAuthUser && currentAuthUser.email) {
+          // Check if user exists by email (in case of admin account with different UID)
+          const usersRef = collection(db, 'users');
+          const emailQuery = query(usersRef, where('email', '==', currentAuthUser.email));
+          const emailSnap = await getDocs(emailQuery);
+          
+          if (!emailSnap.empty) {
+            // User exists with same email - this might be an admin account
+            // Use the existing user data but update the UID mapping
+            const existingUserDoc = emailSnap.docs[0];
+            const existingData = existingUserDoc.data();
+            const existingUid = existingUserDoc.id;
+            
+            console.warn(`[AuthContext] User with email ${currentAuthUser.email} exists with UID ${existingUid}, but Firebase Auth has UID ${uid}. This might be an admin account.`);
+            
+            // If the existing user has admin role, preserve it by updating the existing document
+            if (existingData.role === 'admin' && existingData.status === 'active') {
+              console.warn(`[AuthContext] Preserving admin account for ${currentAuthUser.email}`);
+              // Update existing admin document with new UID reference
+              await updateDoc(doc(db, 'users', existingUid), {
+                // Keep all existing admin fields
+                // Note: This is a workaround - ideally UIDs should match
+              });
+              // Load the existing admin user
+              const adminUser = firestoreDataToUser(existingUid, existingData);
+              setUser(adminUser);
+              return adminUser;
+            }
+          }
+          
+          // No existing user found - create new user profile
           const newUser: User = {
             id: uid,
-            name: firebaseAuthUser.displayName || '',
-            email: firebaseAuthUser.email || '',
-            phone: firebaseAuthUser.phoneNumber || '',
+            name: currentAuthUser.displayName || '',
+            email: currentAuthUser.email || '',
+            phone: currentAuthUser.phoneNumber || '',
             referralCode: generateReferralCode(),
             walletBalance: 0,
             createdAt: new Date(),
@@ -159,10 +198,23 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
+          // CRITICAL: Verify auth.currentUser matches to prevent race conditions
+          const currentUser = auth.currentUser;
+          if (currentUser && currentUser.uid !== firebaseUser.uid) {
+            console.error('[AuthContext] Auth state mismatch! onAuthStateChanged:', firebaseUser.uid, 'currentUser:', currentUser.uid);
+            // Wait a bit and re-check
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const recheckUser = auth.currentUser;
+            if (!recheckUser || recheckUser.uid !== firebaseUser.uid) {
+              console.error('[AuthContext] Auth state still mismatched after wait');
+              return;
+            }
+          }
+          
           setFirebaseUser(firebaseUser);
           setIsGuest(false);
-          // Always load profile from Firestore first (source of truth)
-          const profile = await loadUserProfile(firebaseUser.uid);
+          // Always load profile from Firestore first (source of truth) - pass firebaseUser to ensure consistency
+          const profile = await loadUserProfile(firebaseUser.uid, firebaseUser);
           // If profile loaded successfully, ensure Firebase Auth displayName matches
           if (profile && profile.name && firebaseUser.displayName !== profile.name) {
             try {
@@ -205,12 +257,49 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const loginWithEmail = useCallback(async (email: string, password: string): Promise<void> => {
     try {
       const normalizedEmail = (email || '').trim();
+      if (!normalizedEmail) {
+        throw new Error('Email is required');
+      }
+      if (!password) {
+        throw new Error('Password is required');
+      }
+      
+      console.log('[AuthContext] Attempting email/password login for:', normalizedEmail);
       const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+      
+      // Verify the user was actually signed in
+      if (!userCredential || !userCredential.user) {
+        throw new Error('Login failed: No user returned');
+      }
+      
       // User profile will be loaded by onAuthStateChanged
-      console.log('[AuthContext] Login successful:', userCredential.user.uid);
+      // Wait for auth state to update before proceeding
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Double-check auth state
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.uid !== userCredential.user.uid) {
+        console.error('[AuthContext] Auth state mismatch after login. Expected:', userCredential.user.uid, 'Got:', currentUser?.uid);
+        throw new Error('Login verification failed: Auth state mismatch');
+      }
+      
+      console.log('[AuthContext] Login successful:', userCredential.user.uid, 'Email:', userCredential.user.email);
     } catch (error: any) {
       console.error('[AuthContext] Login error:', error);
-      throw error;
+      // Provide more specific error messages
+      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+        throw new Error('Invalid email or password. Please check your credentials and try again.');
+      } else if (error.code === 'auth/invalid-email') {
+        throw new Error('Invalid email address. Please enter a valid email.');
+      } else if (error.code === 'auth/user-disabled') {
+        throw new Error('This account has been disabled. Please contact support.');
+      } else if (error.code === 'auth/too-many-requests') {
+        throw new Error('Too many failed login attempts. Please try again later.');
+      } else if (error.message) {
+        throw error;
+      } else {
+        throw new Error('Login failed. Please check your email and password and try again.');
+      }
     }
   }, []);
 
@@ -257,26 +346,61 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         });
       }
 
-      // Create user profile in Firestore
-      const newUser: User = {
-        id: userCredential.user.uid,
-        name,
-        email: normalizedEmail,
-        phone: phone || '',
-        age: age,
-        referralCode: generateReferralCode(),
-        referredBy,
-        walletBalance: initialWalletBalance,
-        createdAt: new Date(),
-      };
+      // Check if user document already exists (e.g., admin account being used for signup)
+      const existingUserDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+      
+      if (existingUserDoc.exists()) {
+        // User document exists - preserve admin role and other important fields
+        const existingData = existingUserDoc.data();
+        const updatedUser: User = {
+          id: userCredential.user.uid,
+          name: name || existingData.name || '',
+          email: normalizedEmail || existingData.email || '',
+          phone: phone || existingData.phone || '',
+          age: age || existingData.age,
+          referralCode: existingData.referralCode || generateReferralCode(),
+          referredBy: referredBy || existingData.referredBy,
+          walletBalance: existingData.walletBalance !== undefined ? existingData.walletBalance : initialWalletBalance,
+          photoUrl: existingData.photoUrl || '',
+          createdAt: existingData.createdAt?.toDate() || new Date(),
+        };
+        
+        // Update user document, preserving role and status if they exist
+        await updateDoc(doc(db, 'users', userCredential.user.uid), {
+          name: updatedUser.name,
+          email: updatedUser.email,
+          phone: updatedUser.phone,
+          age: updatedUser.age,
+          referredBy: updatedUser.referredBy,
+          // Preserve role and status if they exist (for admin accounts)
+          ...(existingData.role && { role: existingData.role }),
+          ...(existingData.status && { status: existingData.status }),
+        });
+        
+        setUser(updatedUser);
+        console.log('[AuthContext] Sign up successful (existing user updated):', userCredential.user.uid);
+      } else {
+        // Create new user profile in Firestore
+        const newUser: User = {
+          id: userCredential.user.uid,
+          name,
+          email: normalizedEmail,
+          phone: phone || '',
+          age: age,
+          referralCode: generateReferralCode(),
+          referredBy,
+          walletBalance: initialWalletBalance,
+          createdAt: new Date(),
+        };
 
-      await setDoc(doc(db, 'users', userCredential.user.uid), {
-        ...newUser,
-        createdAt: serverTimestamp(),
-      });
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          ...newUser,
+          createdAt: serverTimestamp(),
+        });
 
-      setUser(newUser);
-      console.log('[AuthContext] Sign up successful:', userCredential.user.uid);
+        setUser(newUser);
+        console.log('[AuthContext] Sign up successful (new user):', userCredential.user.uid);
+      }
     } catch (error: any) {
       console.error('[AuthContext] Sign up error:', error);
       throw error;

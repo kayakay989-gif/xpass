@@ -68,7 +68,10 @@ export const firestoreUsers = {
         referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
         walletBalance: data.walletBalance || 0,
         createdAt: timestampToDate(data.createdAt),
-      };
+        // Optional admin fields (used by the admin dashboard for filtering)
+        // Kept flexible so we don't depend on a strict User type including them.
+        ...(typeof (data as any).status === 'string' && { status: (data as any).status }),
+      } as any;
     });
   },
 };
@@ -223,6 +226,7 @@ export const firestoreCheckIns = {
         gymId: data.gymId,
         timestamp: timestampToDate(data.timestamp),
         subscriptionId: data.subscriptionId,
+        payoutAmount: data.payoutAmount || 0,
       };
     });
     
@@ -247,6 +251,7 @@ export const firestoreCheckIns = {
         gymId: data.gymId,
         timestamp: timestampToDate(data.timestamp),
         subscriptionId: data.subscriptionId,
+        payoutAmount: data.payoutAmount || 0,
       };
     });
     
@@ -264,6 +269,7 @@ export const firestoreCheckIns = {
         gymId: data.gymId,
         timestamp: timestampToDate(data.timestamp),
         subscriptionId: data.subscriptionId,
+        payoutAmount: data.payoutAmount || 0,
       };
     });
   },

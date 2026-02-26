@@ -61,9 +61,15 @@ export default function LoginScreen() {
     setIsLoading(true);
     try {
       await signUpWithEmail(email.trim(), password, name, `+962${phone}`, referral.trim() || undefined, ageNum);
-      Alert.alert('Success', 'Account created successfully!', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)/home') }
-      ]);
+      // After successful signup, switch to login mode and ask user to log in
+      setMode('login');
+      setPassword('');
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Account created successfully!\n\nPlease log in with your new credentials.');
+      } else {
+        Alert.alert('Success', 'Account created successfully! Please log in with your new credentials.');
+      }
     } catch (error: any) {
       console.error('Sign up error:', error);
       let errorMessage = 'Failed to create account. Please try again.';
