@@ -168,12 +168,19 @@ export default function GymDetailsScreen() {
   const tier = getGymTier(gym);
   const badge = getTierBadgeColors(tier);
   const tierLabel = getTierLabel(tier);
-  const galleryImages: string[] = Array.isArray((gym as any).gymImages)
+  const rawGallery: string[] = Array.isArray((gym as any).gymImages)
     ? (gym as any).gymImages
     : [];
+  const galleryImages: string[] = rawGallery.filter(
+    (url) => typeof url === 'string' && !url.startsWith('blob:')
+  );
+  const safeLogo =
+    typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+      ? gym.imageUrl
+      : null;
   const heroImage =
     (galleryImages.length > 0 && galleryImages[0]) ||
-    gym.imageUrl ||
+    safeLogo ||
     'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
 
   return (

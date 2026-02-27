@@ -424,7 +424,15 @@ export default function GymDashboardScreen() {
           <Text style={styles.screenTitle}>Profile</Text>
 
           <View style={styles.profileCard}>
-            <Image source={{ uri: gym.imageUrl || 'https://placehold.co/80x80/png?text=Gym' }} style={styles.profileLogo} />
+            <Image
+              source={{
+                uri:
+                  typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+                    ? gym.imageUrl
+                    : 'https://placehold.co/80x80/png?text=Gym',
+              }}
+              style={styles.profileLogo}
+            />
             <View style={{ flex: 1 }}>
               <Text style={styles.profileName}>{gym.name}</Text>
               <Text style={styles.profileSub}>{ownerEmail || '—'}</Text>

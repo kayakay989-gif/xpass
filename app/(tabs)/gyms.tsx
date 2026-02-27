@@ -114,7 +114,12 @@ export default function GymsScreen() {
             }}
           >
             <Image 
-              source={{ uri: gym.imageUrl }} 
+              source={{
+                uri:
+                  typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+                    ? gym.imageUrl
+                    : 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
+              }} 
               style={styles.gymImage}
               resizeMode="cover"
             />

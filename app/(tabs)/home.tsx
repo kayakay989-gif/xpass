@@ -10,6 +10,7 @@ import { getGymTier, getTierLabel } from '@/lib/gym-tier';
 import { firestoreSpotlightBanners } from '@/lib/firestore';
 import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
+import { CITY_FILTER_OPTIONS } from '@/constants/cities';
 
 type ViewMode = 'map' | 'list';
 
@@ -29,19 +30,21 @@ export default function HomeScreen() {
   }, [firebaseUser, isGuest, isLoadingAuth, router]);
 
   useEffect(() => {
-    const loadBanners = async () => {
-      try {
-        setIsLoadingBanners(true);
-        const banners = await firestoreSpotlightBanners.getAll();
-        
+    setIsLoadingBanners(true);
+    const unsubscribe = firestoreSpotlightBanners.subscribeToAll(
+      (banners) => {
+        console.log('[Home] Received spotlight banners:', banners);
         setSpotlightBanners(banners);
-      } catch (error) {
-        console.error('[Home] Error loading spotlight banners:', error);
-      } finally {
+        setIsLoadingBanners(false);
+      },
+      (error) => {
+        console.error('[Home] Error subscribing to spotlight banners:', error);
         setIsLoadingBanners(false);
       }
+    );
+    return () => {
+      unsubscribe();
     };
-    loadBanners();
   }, []);
 
   // Request location permission and get user's current location
@@ -177,11 +180,7 @@ export default function HomeScreen() {
     return tier.charAt(0).toUpperCase() + tier.slice(1);
   };
 
-  const cityOptions = useMemo(() => {
-    // Fixed cities list: only Amman, Irbid, Aqaba, Madaba
-    const fixedCities = ['Amman', 'Irbid', 'Aqaba', 'Madaba'];
-    return ['all', ...fixedCities];
-  }, []);
+  const cityOptions = useMemo(() => CITY_FILTER_OPTIONS, []);
 
   // Fixed facilities list as per requirements
   const facilityOptions = useMemo(() => {
@@ -370,17 +369,25 @@ export default function HomeScreen() {
             <ActivityIndicator size="large" color={Colors.primary} />
           ) : filteredGyms.length > 0 ? (
             filteredGyms.map((gym) => (
-              <TouchableOpacity 
-                key={gym.id} 
-                style={styles.gymCard}
-                onPress={() => {
-                  router.push({
-                    pathname: '/gym-details',
-                    params: { gymId: gym.id },
-                  } as any);
+            <TouchableOpacity 
+              key={gym.id} 
+              style={styles.gymCard}
+              onPress={() => {
+                router.push({
+                  pathname: '/gym-details',
+                  params: { gymId: gym.id },
+                } as any);
+              }}
+            >
+              <Image
+                source={{
+                  uri:
+                    typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+                      ? gym.imageUrl
+                      : 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
                 }}
-              >
-                <Image source={{ uri: gym.imageUrl }} style={styles.gymImage} />
+                style={styles.gymImage}
+              />
                 <View style={styles.gymInfo}>
                   <View style={styles.gymHeader}>
                     <Text style={styles.gymName}>{gym.name}</Text>

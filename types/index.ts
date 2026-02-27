@@ -73,6 +73,7 @@ export interface SpotlightBanner {
   linkUrl?: string;
   isActive: boolean;
   order: number;
+  position?: number; // Alias for order (carousel position)
   createdAt: Date;
   updatedAt: Date;
 }

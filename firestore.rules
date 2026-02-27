@@ -57,6 +57,14 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
+
+    // Spotlight banners shown in user and admin flows
+    match /spotlightBanners/{bannerId} {
+      // Readable by everyone (used on public home screen)
+      allow read: if true;
+      // Only admins can create/update/delete spotlight banners
+      allow write: if isAdmin();
+    }
   }
 }
 

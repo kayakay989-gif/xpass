@@ -11,7 +11,8 @@ import {
   orderBy,
   limit,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightBanner } from '@/types';
@@ -411,19 +412,23 @@ export const firestoreSpotlightBanners = {
       );
       
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
+      const banners = snapshot.docs.map(doc => {
         const data = doc.data();
+        const order = (data as any).order ?? (data as any).position ?? 0;
         return {
           id: doc.id,
           imageUrl: data.imageUrl,
           title: data.title,
           linkUrl: data.linkUrl,
           isActive: data.isActive,
-          order: data.order || 0,
+          order,
+          position: order,
           createdAt: timestampToDate(data.createdAt),
           updatedAt: timestampToDate(data.updatedAt),
         };
       });
+      console.log('[Firestore] spotlightBanners.getAll -> banners:', banners);
+      return banners;
     } catch (error: any) {
       // If index doesn't exist, try without orderBy
       if (error?.code === 'failed-precondition') {
@@ -434,19 +439,23 @@ export const firestoreSpotlightBanners = {
         const snapshot = await getDocs(q);
         const banners = snapshot.docs.map(doc => {
           const data = doc.data();
+          const order = (data as any).order ?? (data as any).position ?? 0;
           return {
             id: doc.id,
             imageUrl: data.imageUrl,
             title: data.title,
             linkUrl: data.linkUrl,
             isActive: data.isActive,
-            order: data.order || 0,
+            order,
+            position: order,
             createdAt: timestampToDate(data.createdAt),
             updatedAt: timestampToDate(data.updatedAt),
           };
         });
         // Sort in memory
-        return banners.sort((a, b) => a.order - b.order);
+        const sorted = banners.sort((a, b) => a.order - b.order);
+        console.log('[Firestore] spotlightBanners.getAll (fallback) -> banners:', sorted);
+        return sorted;
       }
       throw error;
     }
@@ -469,6 +478,50 @@ export const firestoreSpotlightBanners = {
 
   async delete(bannerId: string): Promise<void> {
     await deleteDoc(doc(db, 'spotlightBanners', bannerId));
+  },
+
+  // Real-time subscription helper
+  subscribeToAll(
+    onChange: (banners: SpotlightBanner[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    const q = query(
+      spotlightBannersCollection,
+      where('isActive', '==', true)
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const banners = snapshot.docs.map(doc => {
+          const data = doc.data();
+          const order = (data as any).order ?? (data as any).position ?? 0;
+          return {
+            id: doc.id,
+            imageUrl: data.imageUrl,
+            title: data.title,
+            linkUrl: data.linkUrl,
+            isActive: data.isActive,
+            order,
+            position: order,
+            createdAt: timestampToDate(data.createdAt),
+            updatedAt: timestampToDate(data.updatedAt),
+          };
+        }).sort((a, b) => a.order - b.order);
+
+        console.log('[Firestore] spotlightBanners.subscribeToAll -> banners:', banners);
+        if (banners.length === 0) {
+          console.log('[Firestore] spotlightBanners.subscribeToAll -> no active banners');
+        }
+        onChange(banners);
+      },
+      (error) => {
+        console.error('[Firestore] spotlightBanners.subscribeToAll error:', error);
+        onError?.(error);
+      }
+    );
+
+    return unsubscribe;
   },
 };
 

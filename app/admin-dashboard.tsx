@@ -43,6 +43,7 @@ import * as Clipboard from 'expo-clipboard';
 import GymLocationPicker from '@/components/GymLocationPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
+import { FIXED_CITIES } from '@/constants/cities';
 
 type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'spotlight';
 
@@ -97,6 +98,7 @@ export default function AdminDashboardScreen() {
     gymImages: [] as string[],
   });
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
+  const [isCityModalVisible, setIsCityModalVisible] = useState(false);
   const [tempLocation, setTempLocation] = useState({
     latitude: 31.963158,
     longitude: 35.930359,
@@ -938,19 +940,75 @@ export default function AdminDashboardScreen() {
   };
 
   const handlePickImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please grant access to your photo library to upload a logo.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-      aspect: [1, 1], // Force square crop for gym logos
-    });
-    if (!result.canceled && result.assets?.length) {
-      setNewGym({ ...newGym, imageUrl: result.assets[0].uri });
+    try {
+      const storage = getStorage(app);
+
+      // Web: use native file input so we can upload directly to storage
+      if (Platform.OS === 'web') {
+        const file = await new Promise<File | null>((resolve) => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.style.display = 'none';
+
+          const handleChange = (e: Event) => {
+            const target = e.target as HTMLInputElement;
+            const f = target.files?.[0] || null;
+            input.removeEventListener('change', handleChange);
+            document.body.removeChild(input);
+            resolve(f);
+          };
+
+          input.addEventListener('change', handleChange);
+          document.body.appendChild(input);
+          input.click();
+        });
+
+        if (!file) return;
+
+        const timestamp = Date.now();
+        const logoId = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          `${timestamp}-${file.name}-logo`
+        );
+        const objectRef = ref(storage, `gymLogos/${logoId}.jpg`);
+        await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
+        const url = await getDownloadURL(objectRef);
+
+        setNewGym((prev) => ({ ...prev, imageUrl: url }));
+      } else {
+        // Native: use ImagePicker, then upload selected image
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Permission needed', 'Please grant access to your photo library to upload a logo.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          quality: 0.8,
+          aspect: [1, 1], // Force square crop for gym logos
+        });
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+
+        const uri = result.assets[0].uri;
+        const resp = await fetch(uri);
+        const blob = await resp.blob();
+
+        const timestamp = Date.now();
+        const logoId = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          `${timestamp}-native-logo`
+        );
+        const objectRef = ref(storage, `gymLogos/${logoId}.jpg`);
+        await uploadBytes(objectRef, blob, { contentType: blob.type || 'image/jpeg' });
+        const url = await getDownloadURL(objectRef);
+
+        setNewGym((prev) => ({ ...prev, imageUrl: url }));
+      }
+    } catch (error: any) {
+      console.error('[Admin] Error uploading gym logo:', error);
+      Alert.alert('Error', error?.message || 'Failed to upload logo. Please try again.');
     }
   };
 
@@ -1066,6 +1124,7 @@ export default function AdminDashboardScreen() {
         linkUrl: '',
         isActive: true,
         order: spotlightBanners.length,
+        position: spotlightBanners.length,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -1097,12 +1156,17 @@ export default function AdminDashboardScreen() {
     // Optimistic local update
     setSpotlightBanners((prev) =>
       [...prev]
-        .map((b) => (b.id === bannerId ? { ...b, order: parsed } : b))
+        .map((b) =>
+          b.id === bannerId ? { ...b, order: parsed, position: parsed } : b
+        )
         .sort((a, b) => (a.order || 0) - (b.order || 0))
     );
 
     try {
-      await firestoreSpotlightBanners.update(bannerId, { order: parsed });
+      await firestoreSpotlightBanners.update(bannerId, {
+        order: parsed,
+        position: parsed,
+      });
     } catch (error: any) {
       console.error('[Admin] Failed to update spotlight banner order:', error);
       Alert.alert('Error', error?.message || 'Failed to update banner position. Please try again.');
@@ -1460,10 +1524,16 @@ export default function AdminDashboardScreen() {
 
             <Text style={styles.listCount}>Showing {filteredGyms.length} gyms</Text>
 
-            {filteredGyms.map((gym: any) => (
+            {filteredGyms.map((gym: any) => {
+              const logoUri =
+                typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+                  ? gym.imageUrl
+                  : 'https://placehold.co/140x90/png?text=Gym';
+
+              return (
               <View key={gym.id} style={styles.gymRowCard}>
                 <Image
-                  source={{ uri: gym.imageUrl || 'https://placehold.co/140x90/png?text=Gym' }}
+                  source={{ uri: logoUri }}
                   style={styles.gymThumb}
                 />
                 <View style={styles.gymRowInfo}>
@@ -1490,7 +1560,7 @@ export default function AdminDashboardScreen() {
                   </View>
                 </View>
               </View>
-            ))}
+            );})}
           </View>
         )}
 
@@ -1797,12 +1867,15 @@ export default function AdminDashboardScreen() {
               />
 
               <Text style={styles.label}>City *</Text>
-              <TextInput
-                style={styles.input}
-                value={newGym.city}
-                onChangeText={(text) => setNewGym({ ...newGym, city: text })}
-                placeholder="Enter city"
-              />
+              <TouchableOpacity
+                style={styles.selectInput}
+                onPress={() => setIsCityModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={newGym.city ? styles.selectInputText : styles.selectInputPlaceholder}>
+                  {newGym.city || 'Select city'}
+                </Text>
+              </TouchableOpacity>
 
               <Text style={styles.label}>Location *</Text>
               <TouchableOpacity style={styles.mapButton} onPress={openMapModal}>
@@ -1862,15 +1935,6 @@ export default function AdminDashboardScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-
-              <Text style={styles.label}>Amenities (comma-separated)</Text>
-              <TextInput
-                style={styles.input}
-                value={newGym.amenities}
-                onChangeText={(text) => setNewGym({ ...newGym, amenities: text })}
-                placeholder="Pool, Sauna, Personal Training"
-                multiline
-              />
 
               <Text style={styles.label}>Facilities *</Text>
               <Text style={styles.helperText}>Select facilities available at this gym</Text>
@@ -2042,7 +2106,7 @@ export default function AdminDashboardScreen() {
                 <ImageIcon size={20} color="#fff" />
                 <Text style={styles.uploadButtonText}>Upload Logo</Text>
               </TouchableOpacity>
-              {newGym.imageUrl ? (
+              {newGym.imageUrl && !newGym.imageUrl.startsWith('blob:') ? (
                 <Image source={{ uri: newGym.imageUrl }} style={styles.logoPreview} resizeMode="cover" />
               ) : (
                 <Text style={styles.locationSummaryMuted}>No logo selected</Text>
@@ -2284,6 +2348,54 @@ export default function AdminDashboardScreen() {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* City Picker Modal */}
+      <Modal
+        visible={isCityModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setIsCityModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.filterOverlay}
+          activeOpacity={1}
+          onPress={() => setIsCityModalVisible(false)}
+        >
+          <View style={styles.filterSheet}>
+            <Text style={styles.filterSheetTitle}>City</Text>
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {FIXED_CITIES.map((city) => (
+                <TouchableOpacity
+                  key={city}
+                  style={[
+                    styles.filterOption,
+                    newGym.city === city && styles.filterOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setNewGym({ ...newGym, city });
+                    setIsCityModalVisible(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.filterOptionText,
+                      newGym.city === city && styles.filterOptionTextSelected,
+                    ]}
+                  >
+                    {city}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.filterClose}
+              onPress={() => setIsCityModalVisible(false)}
+            >
+              <Text style={styles.filterCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </Modal>
 
       {/* Map Picker Modal */}
