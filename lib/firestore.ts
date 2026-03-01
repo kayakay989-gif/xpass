@@ -15,7 +15,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightBanner } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage } from '@/types';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -399,129 +399,114 @@ export const firestoreGymOwners = {
   },
 };
 
-// Spotlight Banners collection
-export const spotlightBannersCollection = collection(db, 'spotlightBanners');
+// Spotlight Images collection
+export const spotlightImagesCollection = collection(db, 'spotlightImages');
 
-export const firestoreSpotlightBanners = {
-  async getAll(): Promise<SpotlightBanner[]> {
-    try {
-      const q = query(
-        spotlightBannersCollection,
-        where('isActive', '==', true),
-        orderBy('order', 'asc')
-      );
-      
-      const snapshot = await getDocs(q);
-      const banners = snapshot.docs.map(doc => {
-        const data = doc.data();
-        const order = (data as any).order ?? (data as any).position ?? 0;
-        return {
-          id: doc.id,
-          imageUrl: data.imageUrl,
-          title: data.title,
-          linkUrl: data.linkUrl,
-          isActive: data.isActive,
-          order,
-          position: order,
-          createdAt: timestampToDate(data.createdAt),
-          updatedAt: timestampToDate(data.updatedAt),
-        };
-      });
-      console.log('[Firestore] spotlightBanners.getAll -> banners:', banners);
-      return banners;
-    } catch (error: any) {
-      // If index doesn't exist, try without orderBy
-      if (error?.code === 'failed-precondition') {
-        const q = query(
-          spotlightBannersCollection,
-          where('isActive', '==', true)
-        );
-        const snapshot = await getDocs(q);
-        const banners = snapshot.docs.map(doc => {
-          const data = doc.data();
-          const order = (data as any).order ?? (data as any).position ?? 0;
-          return {
-            id: doc.id,
-            imageUrl: data.imageUrl,
-            title: data.title,
-            linkUrl: data.linkUrl,
-            isActive: data.isActive,
-            order,
-            position: order,
-            createdAt: timestampToDate(data.createdAt),
-            updatedAt: timestampToDate(data.updatedAt),
-          };
-        });
-        // Sort in memory
-        const sorted = banners.sort((a, b) => a.order - b.order);
-        console.log('[Firestore] spotlightBanners.getAll (fallback) -> banners:', sorted);
-        return sorted;
-      }
-      throw error;
-    }
+export const firestoreSpotlightImages = {
+  // For admin: return all spotlight images ordered by position
+  async getAll(): Promise<SpotlightImage[]> {
+    const q = query(spotlightImagesCollection, orderBy('position', 'asc'));
+    const snapshot = await getDocs(q);
+    const images: SpotlightImage[] = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data() as any;
+      return {
+        id: docSnap.id,
+        imageUrl: data.imageUrl,
+        position: typeof data.position === 'number' ? data.position : 0,
+        isActive: !!data.isActive,
+        createdAt: timestampToDate(data.createdAt),
+        updatedAt: data.updatedAt ? timestampToDate(data.updatedAt) : undefined,
+      };
+    });
+    console.log('[Firestore] spotlightImages.getAll -> images:', images);
+    return images.sort((a, b) => a.position - b.position);
   },
 
-  async create(banner: SpotlightBanner): Promise<void> {
-    await setDoc(doc(db, 'spotlightBanners', banner.id), {
-      ...banner,
+  async create(image: SpotlightImage): Promise<void> {
+    await setDoc(doc(db, 'spotlightImages', image.id), {
+      imageUrl: image.imageUrl,
+      position: image.position,
+      isActive: image.isActive,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   },
 
-  async update(bannerId: string, updates: Partial<SpotlightBanner>): Promise<void> {
-    await updateDoc(doc(db, 'spotlightBanners', bannerId), {
+  async update(imageId: string, updates: Partial<SpotlightImage>): Promise<void> {
+    await updateDoc(doc(db, 'spotlightImages', imageId), {
       ...updates,
       updatedAt: serverTimestamp(),
     });
   },
 
-  async delete(bannerId: string): Promise<void> {
-    await deleteDoc(doc(db, 'spotlightBanners', bannerId));
+  async delete(imageId: string): Promise<void> {
+    await deleteDoc(doc(db, 'spotlightImages', imageId));
   },
 
-  // Real-time subscription helper
-  subscribeToAll(
-    onChange: (banners: SpotlightBanner[]) => void,
+  // Real-time subscription helper for active images (used by user Home)
+  subscribeToAllActive(
+    onChange: (images: SpotlightImage[]) => void,
     onError?: (error: any) => void
   ): () => void {
-    const q = query(
-      spotlightBannersCollection,
-      where('isActive', '==', true)
+    // Primary query: filter active + order by position
+    const orderedQuery = query(
+      spotlightImagesCollection,
+      where('isActive', '==', true),
+      orderBy('position', 'asc')
     );
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const banners = snapshot.docs.map(doc => {
-          const data = doc.data();
-          const order = (data as any).order ?? (data as any).position ?? 0;
-          return {
-            id: doc.id,
-            imageUrl: data.imageUrl,
-            title: data.title,
-            linkUrl: data.linkUrl,
-            isActive: data.isActive,
-            order,
-            position: order,
-            createdAt: timestampToDate(data.createdAt),
-            updatedAt: timestampToDate(data.updatedAt),
-          };
-        }).sort((a, b) => a.order - b.order);
+    let unsubscribe: () => void;
 
-        console.log('[Firestore] spotlightBanners.subscribeToAll -> banners:', banners);
-        if (banners.length === 0) {
-          console.log('[Firestore] spotlightBanners.subscribeToAll -> no active banners');
+    const attachListener = (q: any, isFallback: boolean) => {
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const images: SpotlightImage[] = snapshot.docs
+            .map((docSnap) => {
+              const data = docSnap.data() as any;
+              return {
+                id: docSnap.id,
+                imageUrl: data.imageUrl,
+                position: typeof data.position === 'number' ? data.position : 0,
+                isActive: !!data.isActive,
+                createdAt: timestampToDate(data.createdAt),
+                updatedAt: data.updatedAt ? timestampToDate(data.updatedAt) : undefined,
+              };
+            })
+            .sort((a, b) => a.position - b.position);
+
+          console.log(
+            `[Firestore] spotlightImages.subscribeToAllActive${
+              isFallback ? ' (fallback)' : ''
+            } -> images:`,
+            images
+          );
+          onChange(images);
+        },
+        (error) => {
+          // If index is missing for the ordered query, fall back to a simple where query
+          if (!isFallback && error?.code === 'failed-precondition') {
+            console.warn(
+              '[Firestore] spotlightImages.subscribeToAllActive missing index, falling back without orderBy'
+            );
+            const simpleQuery = query(
+              spotlightImagesCollection,
+              where('isActive', '==', true)
+            );
+            attachListener(simpleQuery, true);
+            return;
+          }
+          console.error('[Firestore] spotlightImages.subscribeToAllActive error:', error);
+          onError?.(error);
         }
-        onChange(banners);
-      },
-      (error) => {
-        console.error('[Firestore] spotlightBanners.subscribeToAll error:', error);
-        onError?.(error);
-      }
-    );
+      );
+    };
 
-    return unsubscribe;
+    attachListener(orderedQuery, false);
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   },
 };
 
@@ -532,6 +517,6 @@ export default {
   gyms: firestoreGyms,
   checkIns: firestoreCheckIns,
   gymOwners: firestoreGymOwners,
-  spotlightBanners: firestoreSpotlightBanners,
+  spotlightImages: firestoreSpotlightImages,
 };
 

@@ -43,6 +43,17 @@ export interface Gym {
   amenities: string[];
   facilities?: string[]; // New field for facilities filter
   hours: string;
+   // Optional detailed timings and open days
+  // Stored as a free-form object on the gym document, used mainly by the admin UI
+  // Example shape:
+  // timings: {
+  //   men: { from: '6:00 AM', to: '10:00 PM' },
+  //   women: { from: '6:00 AM', to: '10:00 PM' },
+  //   mixed: { from: '6:00 AM', to: '10:00 PM' }
+  // }
+  // openDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+  timings?: any;
+  openDays?: string[];
   imageUrl: string;
   allowedTiers: SubscriptionTier[];
   membershipModel?: 'pay_per_visit' | string; // Pricing model
@@ -66,16 +77,13 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
-export interface SpotlightBanner {
+export interface SpotlightImage {
   id: string;
   imageUrl: string;
-  title?: string;
-  linkUrl?: string;
+  position: number;
   isActive: boolean;
-  order: number;
-  position?: number; // Alias for order (carousel position)
   createdAt: Date;
-  updatedAt: Date;
+  updatedAt?: Date;
 }
 
 export type PaymentStatus = 'pending' | 'processing' | 'succeeded' | 'failed' | 'canceled';

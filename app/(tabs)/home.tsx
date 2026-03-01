@@ -7,7 +7,7 @@ import Colors from '@/constants/colors';
 import { useState, useMemo, useEffect } from 'react';
 import MapViewComponent from '@/components/MapView';
 import { getGymTier, getTierLabel } from '@/lib/gym-tier';
-import { firestoreSpotlightBanners } from '@/lib/firestore';
+import { firestoreSpotlightImages } from '@/lib/firestore';
 import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
 import { CITY_FILTER_OPTIONS } from '@/constants/cities';
@@ -31,14 +31,14 @@ export default function HomeScreen() {
 
   useEffect(() => {
     setIsLoadingBanners(true);
-    const unsubscribe = firestoreSpotlightBanners.subscribeToAll(
-      (banners) => {
-        console.log('[Home] Received spotlight banners:', banners);
-        setSpotlightBanners(banners);
+    const unsubscribe = firestoreSpotlightImages.subscribeToAllActive(
+      (images) => {
+        console.log('[Home] Received spotlight images:', images);
+        setSpotlightBanners(images);
         setIsLoadingBanners(false);
       },
       (error) => {
-        console.error('[Home] Error subscribing to spotlight banners:', error);
+        console.error('[Home] Error subscribing to spotlight images:', error);
         setIsLoadingBanners(false);
       }
     );

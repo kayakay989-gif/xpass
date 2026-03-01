@@ -4,6 +4,7 @@ import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { X, CheckCircle, XCircle } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
 
 export default function QRScannerScreen() {
@@ -11,7 +12,27 @@ export default function QRScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState<boolean>(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const { checkIn } = useApp();
+  const { checkIn, subscription } = useApp();
+  const { isGuest } = useAuth();
+
+  if (isGuest || !subscription) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.permissionContainer}>
+          <Text style={styles.permissionTitle}>Subscription Required</Text>
+          <Text style={styles.permissionText}>
+            You need an active subscription to use the QR scanner and check in to gyms.
+          </Text>
+          <TouchableOpacity
+            style={styles.permissionButton}
+            onPress={() => router.push('/(tabs)/subscription')}
+          >
+            <Text style={styles.permissionButtonText}>Subscribe Now</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   if (!permission) {
     return <View style={styles.container} />;

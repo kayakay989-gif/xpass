@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, Platform } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Edit, User as UserIcon, ChevronLeft, LogOut } from 'lucide-react-native';
@@ -106,6 +107,23 @@ export default function ProfileScreen() {
       showAlert('Error', e?.message || 'Failed to log out.');
     } finally {
       router.replace('/splash');
+    }
+  };
+
+  const openURL = async (url: string) => {
+    console.log('[Profile] openURL called with:', url);
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        console.log('[Profile] Opening in web browser');
+        window.open(url, '_blank');
+      } else {
+        console.log('[Profile] Opening with WebBrowser');
+        await WebBrowser.openBrowserAsync(url);
+      }
+      console.log('[Profile] URL opened successfully');
+    } catch (error: any) {
+      console.error('[Profile] Failed to open URL:', error);
+      showAlert('Error', 'Unable to open this URL.');
     }
   };
 
@@ -238,7 +256,18 @@ export default function ProfileScreen() {
 
             <View style={styles.divider} />
 
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity 
+              style={styles.menuItem}
+              activeOpacity={0.7}
+              onPressIn={() => {
+                console.log('[Profile] Terms & Conditions - Touch detected');
+              }}
+              onPress={() => {
+                console.log('[Profile] Terms & Conditions - onPress fired');
+                Alert.alert('Test', 'Button works! Opening URL...');
+                openURL('https://xpassjo.com/terms-and-conditions');
+              }}
+            >
               <FileText size={20} color={Colors.text} />
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>Terms & Conditions</Text>
@@ -248,7 +277,18 @@ export default function ProfileScreen() {
 
             <View style={styles.divider} />
 
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity 
+              style={styles.menuItem}
+              activeOpacity={0.7}
+              onPressIn={() => {
+                console.log('[Profile] Privacy Policy - Touch detected');
+              }}
+              onPress={() => {
+                console.log('[Profile] Privacy Policy - onPress fired');
+                Alert.alert('Test', 'Button works! Opening URL...');
+                openURL('https://xpassjo.com/privacy-policy');
+              }}
+            >
               <Shield size={20} color={Colors.text} />
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>Privacy Policy</Text>

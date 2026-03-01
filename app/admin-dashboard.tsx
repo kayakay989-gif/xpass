@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightBanners } from '@/lib/firestore';
+import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightImages } from '@/lib/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app } from '@/lib/firebase';
 import {
@@ -45,7 +45,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
 import { FIXED_CITIES } from '@/constants/cities';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'spotlight';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
 
 const TIER_COLORS = {
   silver: '#C0C0C0',
@@ -61,8 +61,7 @@ export default function AdminDashboardScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
-  const [showSpotlightModal, setShowSpotlightModal] = useState<boolean>(false);
-  const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
+  const [spotlightImages, setSpotlightImages] = useState<any[]>([]);
   const [isLoadingSpotlight, setIsLoadingSpotlight] = useState(false);
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const [editingGymId, setEditingGymId] = useState<string | null>(null);
@@ -89,6 +88,7 @@ export default function AdminDashboardScreen() {
     },
     menOnly: false,
     womenOnly: false,
+    openDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as string[],
     imageUrl: '',
     allowedTiers: [] as SubscriptionTier[],
     email: '',
@@ -187,15 +187,15 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  // Load spotlight banners
-  const loadSpotlightBanners = useCallback(async () => {
+  // Load spotlight images for admin panel
+  const loadSpotlightImages = useCallback(async () => {
     try {
       setIsLoadingSpotlight(true);
-      const banners = await firestoreSpotlightBanners.getAll();
-      setSpotlightBanners(banners);
+      const images = await firestoreSpotlightImages.getAll();
+      setSpotlightImages(images);
     } catch (error) {
-      console.error('[Admin] Error loading spotlight banners:', error);
-      Alert.alert('Error', 'Failed to load spotlight banners');
+      console.error('[Admin] Error loading spotlight images:', error);
+      Alert.alert('Error', 'Failed to load spotlight images');
     } finally {
       setIsLoadingSpotlight(false);
     }
@@ -204,14 +204,8 @@ export default function AdminDashboardScreen() {
   // Load data on mount and when refreshing
   useEffect(() => {
     loadData();
+    loadSpotlightImages();
   }, []);
-
-  // Load spotlight banners when modal opens
-  useEffect(() => {
-    if (showSpotlightModal) {
-      loadSpotlightBanners();
-    }
-  }, [showSpotlightModal, loadSpotlightBanners]);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
@@ -393,6 +387,7 @@ export default function AdminDashboardScreen() {
       },
       menOnly: false,
       womenOnly: false,
+      openDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       imageUrl: '',
       allowedTiers: [],
       email: '',
@@ -447,6 +442,9 @@ export default function AdminDashboardScreen() {
         },
         menOnly: gym.menOnly || false,
         womenOnly: gym.womenOnly || false,
+        openDays: Array.isArray(gym.openDays)
+          ? gym.openDays
+          : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
         imageUrl: gym.imageUrl || '',
         allowedTiers: Array.isArray(gym.allowedTiers) ? gym.allowedTiers : [],
         // Prefer values stored on the gym doc (if present), then try gymOwners lookup below.
@@ -571,6 +569,7 @@ export default function AdminDashboardScreen() {
   const handleAddGym = async () => {
     console.log('[Admin] Add gym button clicked');
     console.log('[Admin] Form data:', newGym);
+    const isEditing = !!editingGymId;
     
     // Final validation before submission
     if (!validateDetailsStep() || !validatePricingStep()) {
@@ -600,7 +599,7 @@ export default function AdminDashboardScreen() {
       ownerName: newGym.ownerName?.trim() || undefined,
     };
 
-    console.log('[Admin] Submitting gym data:', gymData);
+    console.log('[Admin] Submitting gym data (isEditing=%s):', isEditing, gymData);
     
     setIsCreatingGym(true);
     try {
@@ -630,6 +629,9 @@ export default function AdminDashboardScreen() {
         timings: newGym.timings,
         menOnly: newGym.menOnly,
         womenOnly: newGym.womenOnly,
+        openDays: Array.isArray(newGym.openDays) && newGym.openDays.length > 0
+          ? newGym.openDays
+          : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
         imageUrl:
           gymData.imageUrl ||
           'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
@@ -941,6 +943,10 @@ export default function AdminDashboardScreen() {
 
   const handlePickImage = async () => {
     try {
+      // Ensure gallery upload state is reset so its button label is correct
+      if (isUploadingGymImages) {
+        setIsUploadingGymImages(false);
+      }
       const storage = getStorage(app);
 
       // Web: use native file input so we can upload directly to storage
@@ -1032,30 +1038,12 @@ export default function AdminDashboardScreen() {
             const target = e.target as HTMLInputElement;
             const file = target.files?.[0] || null;
             input.removeEventListener('change', handleChange);
-            input.removeEventListener('cancel', handleCancel);
             document.body.removeChild(input);
             resolve(file);
           };
-          
-          const handleCancel = () => {
-            input.removeEventListener('change', handleChange);
-            input.removeEventListener('cancel', handleCancel);
-            document.body.removeChild(input);
-            resolve(null);
-          };
-          
           input.addEventListener('change', handleChange);
           document.body.appendChild(input);
           input.click();
-          
-          // Handle cancellation (when user closes file picker)
-          setTimeout(() => {
-            if (document.body.contains(input)) {
-              input.removeEventListener('change', handleChange);
-              document.body.removeChild(input);
-              resolve(null);
-            }
-          }, 100);
         });
         
         if (!file) {
@@ -1066,8 +1054,11 @@ export default function AdminDashboardScreen() {
         console.log('[Admin] Uploading file:', file.name, file.size);
         const storage = getStorage(app);
         const timestamp = Date.now();
-        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${timestamp}-${file.name}`);
-        const objectRef = ref(storage, `spotlightBanners/${bannerId}.jpg`);
+        const bannerId = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          `${timestamp}-${file.name}`
+        );
+        const objectRef = ref(storage, `spotlightImages/${bannerId}.jpg`);
         
         console.log('[Admin] Uploading to storage:', objectRef.fullPath);
         await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
@@ -1096,8 +1087,11 @@ export default function AdminDashboardScreen() {
         console.log('[Admin] Uploading image from mobile:', result.assets[0].uri);
         const storage = getStorage(app);
         const timestamp = Date.now();
-        const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${timestamp}-spotlight`);
-        const objectRef = ref(storage, `spotlightBanners/${bannerId}.jpg`);
+        const bannerId = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          `${timestamp}-spotlight`
+        );
+        const objectRef = ref(storage, `spotlightImages/${bannerId}.jpg`);
         const response = await fetch(result.assets[0].uri);
         const blob = await response.blob();
         console.log('[Admin] Uploading to storage:', objectRef.fullPath);
@@ -1116,24 +1110,29 @@ export default function AdminDashboardScreen() {
       // Create banner in Firestore
       console.log('[Admin] Creating banner in Firestore...');
       const timestamp = Date.now();
-      const bannerId = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${timestamp}-${imageUri}`);
-      const newBanner = {
-        id: bannerId,
+      const imageId = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `${timestamp}-${imageUri}`
+      );
+      const currentPositions = spotlightImages.map((img: any) =>
+        typeof img.position === 'number' ? img.position : 0
+      );
+      const nextPosition =
+        currentPositions.length > 0 ? Math.max(...currentPositions) + 1 : 1;
+
+      const newImage = {
+        id: imageId,
         imageUrl: imageUri,
-        title: '',
-        linkUrl: '',
+        position: nextPosition,
         isActive: true,
-        order: spotlightBanners.length,
-        position: spotlightBanners.length,
         createdAt: new Date(),
-        updatedAt: new Date(),
       };
 
-      console.log('[Admin] Banner data:', newBanner);
-      await firestoreSpotlightBanners.create(newBanner);
-      console.log('[Admin] Banner created, reloading list...');
-      await loadSpotlightBanners();
-      Alert.alert('Success', 'Spotlight banner uploaded successfully!');
+      console.log('[Admin] Spotlight image data:', newImage);
+      await firestoreSpotlightImages.create(newImage as any);
+      console.log('[Admin] Spotlight image created, reloading list...');
+      await loadSpotlightImages();
+      Alert.alert('Success', 'Spotlight image uploaded successfully!');
     } catch (error: any) {
       console.error('[Admin] Error uploading spotlight banner:', error);
       console.error('[Admin] Error details:', {
@@ -1153,25 +1152,50 @@ export default function AdminDashboardScreen() {
     const parsed = parseInt(trimmed, 10);
     if (!Number.isFinite(parsed) || parsed < 0) return;
 
-    // Optimistic local update
-    setSpotlightBanners((prev) =>
-      [...prev]
-        .map((b) =>
-          b.id === bannerId ? { ...b, order: parsed, position: parsed } : b
-        )
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
-    );
-
     try {
-      await firestoreSpotlightBanners.update(bannerId, {
-        order: parsed,
-        position: parsed,
+      setSpotlightImages((prev) => {
+        const list = [...prev].sort(
+          (a, b) => (a.position || 0) - (b.position || 0)
+        );
+        const currentIndex = list.findIndex((img) => img.id === bannerId);
+        if (currentIndex === -1) return prev;
+
+        const clamped =
+          parsed < 1
+            ? 1
+            : parsed > list.length
+            ? list.length
+            : parsed;
+
+        const [moved] = list.splice(currentIndex, 1);
+        list.splice(clamped - 1, 0, moved);
+
+        const reseq = list.map((img, index) => ({
+          ...img,
+          position: index + 1,
+        }));
+
+        // Persist new positions
+        Promise.all(
+          reseq.map((img) =>
+            firestoreSpotlightImages.update(img.id, {
+              position: img.position,
+            })
+          )
+        ).catch((error) => {
+          console.error(
+            '[Admin] Failed to persist spotlight image reorder:',
+            error
+          );
+        });
+
+        return reseq;
       });
     } catch (error: any) {
       console.error('[Admin] Failed to update spotlight banner order:', error);
       Alert.alert('Error', error?.message || 'Failed to update banner position. Please try again.');
       // Reload from server to ensure consistency
-      loadSpotlightBanners();
+      loadSpotlightImages();
     }
   };
 
@@ -1187,8 +1211,8 @@ export default function AdminDashboardScreen() {
           onPress: async () => {
             try {
               // Delete from Firestore
-              await firestoreSpotlightBanners.delete(bannerId);
-              
+              await firestoreSpotlightImages.delete(bannerId);
+
               // Try to delete from Storage (if it's a Firebase Storage URL)
               try {
                 if (imageUrl.includes('firebasestorage')) {
@@ -1201,8 +1225,15 @@ export default function AdminDashboardScreen() {
                 // Continue even if storage deletion fails
               }
 
-              await loadSpotlightBanners();
-              Alert.alert('Success', 'Banner deleted successfully!');
+              // Re-fetch and resequence positions
+              await loadSpotlightImages();
+              setSpotlightImages((prev) =>
+                [...prev]
+                  .filter((img) => img.id !== bannerId)
+                  .sort((a, b) => (a.position || 0) - (b.position || 0))
+                  .map((img, index) => ({ ...img, position: index + 1 }))
+              );
+              Alert.alert('Success', 'Spotlight image deleted successfully!');
             } catch (error: any) {
               console.error('[Admin] Error deleting banner:', error);
               Alert.alert('Error', error?.message || 'Failed to delete banner. Please try again.');
@@ -1514,15 +1545,130 @@ export default function AdminDashboardScreen() {
               </View>
             )}
 
-            <TouchableOpacity
-              style={styles.spotlightButton}
-              onPress={() => setShowSpotlightModal(true)}
-            >
-              <ImageIcon size={18} color="#fff" />
-              <Text style={styles.spotlightButtonText}>Spotlight Images</Text>
-            </TouchableOpacity>
-
             <Text style={styles.listCount}>Showing {filteredGyms.length} gyms</Text>
+
+            {/* Spotlight Images Management */}
+            <View style={styles.spotlightPanel}>
+              <Text style={styles.sectionTitle}>Spotlight Images</Text>
+              <Text style={styles.spotlightDescription}>
+                Manage promotional banners shown in the user home carousel.
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.uploadBannerButton,
+                  isUploadingBanner && styles.uploadBannerButtonDisabled,
+                ]}
+                onPress={handleUploadSpotlightBanner}
+                disabled={isUploadingBanner}
+              >
+                {isUploadingBanner ? (
+                  <>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.uploadBannerButtonText}>Uploading...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={20} color="#fff" />
+                    <Text style={styles.uploadBannerButtonText}>Upload New Banner</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {isLoadingSpotlight ? (
+                <View style={styles.loadingCard}>
+                  <ActivityIndicator size="large" color="#DC2626" />
+                  <Text style={styles.loadingText}>Loading spotlight images...</Text>
+                </View>
+              ) : spotlightImages.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <ImageIcon size={48} color="#9CA3AF" />
+                  <Text style={styles.emptyText}>No spotlight images</Text>
+                  <Text style={styles.emptySubtext}>
+                    Upload a banner to display in the user home carousel.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.bannersList}>
+                  {spotlightImages.map((img, index) => (
+                    <View key={img.id} style={styles.bannerCard}>
+                      <Image
+                        source={{ uri: img.imageUrl }}
+                        style={styles.bannerPreview}
+                        resizeMode="cover"
+                      />
+                      <View style={styles.bannerInfo}>
+                        <View style={styles.bannerOrderRow}>
+                          <Text style={styles.bannerOrderLabel}>Position</Text>
+                          <TextInput
+                            style={styles.bannerOrderInput}
+                            keyboardType="number-pad"
+                            defaultValue={
+                              typeof img.position === 'number'
+                                ? String(img.position)
+                                : String(index + 1)
+                            }
+                            onEndEditing={(e) =>
+                              handleUpdateSpotlightOrder(
+                                img.id,
+                                e.nativeEvent.text || String(index + 1)
+                              )
+                            }
+                          />
+                        </View>
+                        <View style={styles.bannerActiveRow}>
+                          <Text style={styles.bannerOrderLabel}>
+                            {img.isActive ? 'Active' : 'Inactive'}
+                          </Text>
+                          <TouchableOpacity
+                            style={[
+                              styles.activeToggle,
+                              img.isActive && styles.activeToggleOn,
+                            ]}
+                            onPress={async () => {
+                              const next = !img.isActive;
+                              setSpotlightImages((prev) =>
+                                prev.map((it) =>
+                                  it.id === img.id ? { ...it, isActive: next } : it
+                                )
+                              );
+                              try {
+                                await firestoreSpotlightImages.update(img.id, {
+                                  isActive: next,
+                                });
+                              } catch (error) {
+                                console.error(
+                                  '[Admin] Failed to toggle spotlight image active flag:',
+                                  error
+                                );
+                                loadSpotlightImages();
+                              }
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.activeToggleText,
+                                img.isActive && styles.activeToggleTextOn,
+                              ]}
+                            >
+                              {img.isActive ? 'ON' : 'OFF'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.deleteBannerButton}
+                        onPress={() =>
+                          handleDeleteSpotlightBanner(img.id, img.imageUrl)
+                        }
+                      >
+                        <X size={18} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
 
             {filteredGyms.map((gym: any) => {
               const logoUri =
@@ -1868,11 +2014,11 @@ export default function AdminDashboardScreen() {
 
               <Text style={styles.label}>City *</Text>
               <TouchableOpacity
-                style={styles.selectInput}
+                style={styles.input}
                 onPress={() => setIsCityModalVisible(true)}
                 activeOpacity={0.8}
               >
-                <Text style={newGym.city ? styles.selectInputText : styles.selectInputPlaceholder}>
+                <Text style={newGym.city ? styles.inputText : styles.inputPlaceholder}>
                   {newGym.city || 'Select city'}
                 </Text>
               </TouchableOpacity>
@@ -1989,30 +2135,118 @@ export default function AdminDashboardScreen() {
               <View style={styles.timingRow}>
                 <Text style={styles.timingLabel}>Men</Text>
                 <View style={styles.timingInputs}>
-                  <TextInput
-                    style={styles.timingInput}
-                    value={newGym.timings.men.from}
-                    onChangeText={(text) =>
-                      setNewGym({
-                        ...newGym,
-                        timings: { ...newGym.timings, men: { ...newGym.timings.men, from: text } },
-                      })
-                    }
-                    placeholder="From"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                  <TextInput
-                    style={styles.timingInput}
-                    value={newGym.timings.men.to}
-                    onChangeText={(text) =>
-                      setNewGym({
-                        ...newGym,
-                        timings: { ...newGym.timings, men: { ...newGym.timings.men, to: text } },
-                      })
-                    }
-                    placeholder="To"
-                    placeholderTextColor="#9CA3AF"
-                  />
+                  <View style={styles.timingField}>
+                    <TextInput
+                      style={styles.timingInput}
+                      value={newGym.timings.men.from}
+                      onChangeText={(text) =>
+                        setNewGym({
+                          ...newGym,
+                          timings: {
+                            ...newGym.timings,
+                            men: { ...newGym.timings.men, from: text },
+                          },
+                        })
+                      }
+                      placeholder="From"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.periodToggleRow}>
+                      {(['AM', 'PM'] as const).map((period) => {
+                        const current = (newGym.timings.men.from || '').trim().split(/\s+/).pop()?.toUpperCase();
+                        const isSelected = current === period;
+                        return (
+                          <TouchableOpacity
+                            key={`men-from-${period}`}
+                            style={[
+                              styles.periodButton,
+                              isSelected && styles.periodButtonActive,
+                            ]}
+                            onPress={() =>
+                              setNewGym((prev) => {
+                                const currentValue = prev.timings.men.from || '';
+                                const parts = currentValue.trim().split(/\s+/);
+                                const base = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+                                const next = base ? `${base} ${period}` : period;
+                                return {
+                                  ...prev,
+                                  timings: {
+                                    ...prev.timings,
+                                    men: { ...prev.timings.men, from: next },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.periodButtonText,
+                                isSelected && styles.periodButtonTextActive,
+                              ]}
+                            >
+                              {period}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={styles.timingField}>
+                    <TextInput
+                      style={styles.timingInput}
+                      value={newGym.timings.men.to}
+                      onChangeText={(text) =>
+                        setNewGym({
+                          ...newGym,
+                          timings: {
+                            ...newGym.timings,
+                            men: { ...newGym.timings.men, to: text },
+                          },
+                        })
+                      }
+                      placeholder="To"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.periodToggleRow}>
+                      {(['AM', 'PM'] as const).map((period) => {
+                        const current = (newGym.timings.men.to || '').trim().split(/\s+/).pop()?.toUpperCase();
+                        const isSelected = current === period;
+                        return (
+                          <TouchableOpacity
+                            key={`men-to-${period}`}
+                            style={[
+                              styles.periodButton,
+                              isSelected && styles.periodButtonActive,
+                            ]}
+                            onPress={() =>
+                              setNewGym((prev) => {
+                                const currentValue = prev.timings.men.to || '';
+                                const parts = currentValue.trim().split(/\s+/);
+                                const base = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+                                const next = base ? `${base} ${period}` : period;
+                                return {
+                                  ...prev,
+                                  timings: {
+                                    ...prev.timings,
+                                    men: { ...prev.timings.men, to: next },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.periodButtonText,
+                                isSelected && styles.periodButtonTextActive,
+                              ]}
+                            >
+                              {period}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 </View>
               </View>
 
@@ -2020,30 +2254,118 @@ export default function AdminDashboardScreen() {
               <View style={styles.timingRow}>
                 <Text style={styles.timingLabel}>Women</Text>
                 <View style={styles.timingInputs}>
-                  <TextInput
-                    style={styles.timingInput}
-                    value={newGym.timings.women.from}
-                    onChangeText={(text) =>
-                      setNewGym({
-                        ...newGym,
-                        timings: { ...newGym.timings, women: { ...newGym.timings.women, from: text } },
-                      })
-                    }
-                    placeholder="From"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                  <TextInput
-                    style={styles.timingInput}
-                    value={newGym.timings.women.to}
-                    onChangeText={(text) =>
-                      setNewGym({
-                        ...newGym,
-                        timings: { ...newGym.timings, women: { ...newGym.timings.women, to: text } },
-                      })
-                    }
-                    placeholder="To"
-                    placeholderTextColor="#9CA3AF"
-                  />
+                  <View style={styles.timingField}>
+                    <TextInput
+                      style={styles.timingInput}
+                      value={newGym.timings.women.from}
+                      onChangeText={(text) =>
+                        setNewGym({
+                          ...newGym,
+                          timings: {
+                            ...newGym.timings,
+                            women: { ...newGym.timings.women, from: text },
+                          },
+                        })
+                      }
+                      placeholder="From"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.periodToggleRow}>
+                      {(['AM', 'PM'] as const).map((period) => {
+                        const current = (newGym.timings.women.from || '').trim().split(/\s+/).pop()?.toUpperCase();
+                        const isSelected = current === period;
+                        return (
+                          <TouchableOpacity
+                            key={`women-from-${period}`}
+                            style={[
+                              styles.periodButton,
+                              isSelected && styles.periodButtonActive,
+                            ]}
+                            onPress={() =>
+                              setNewGym((prev) => {
+                                const currentValue = prev.timings.women.from || '';
+                                const parts = currentValue.trim().split(/\s+/);
+                                const base = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+                                const next = base ? `${base} ${period}` : period;
+                                return {
+                                  ...prev,
+                                  timings: {
+                                    ...prev.timings,
+                                    women: { ...prev.timings.women, from: next },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.periodButtonText,
+                                isSelected && styles.periodButtonTextActive,
+                              ]}
+                            >
+                              {period}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={styles.timingField}>
+                    <TextInput
+                      style={styles.timingInput}
+                      value={newGym.timings.women.to}
+                      onChangeText={(text) =>
+                        setNewGym({
+                          ...newGym,
+                          timings: {
+                            ...newGym.timings,
+                            women: { ...newGym.timings.women, to: text },
+                          },
+                        })
+                      }
+                      placeholder="To"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.periodToggleRow}>
+                      {(['AM', 'PM'] as const).map((period) => {
+                        const current = (newGym.timings.women.to || '').trim().split(/\s+/).pop()?.toUpperCase();
+                        const isSelected = current === period;
+                        return (
+                          <TouchableOpacity
+                            key={`women-to-${period}`}
+                            style={[
+                              styles.periodButton,
+                              isSelected && styles.periodButtonActive,
+                            ]}
+                            onPress={() =>
+                              setNewGym((prev) => {
+                                const currentValue = prev.timings.women.to || '';
+                                const parts = currentValue.trim().split(/\s+/);
+                                const base = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+                                const next = base ? `${base} ${period}` : period;
+                                return {
+                                  ...prev,
+                                  timings: {
+                                    ...prev.timings,
+                                    women: { ...prev.timings.women, to: next },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.periodButtonText,
+                                isSelected && styles.periodButtonTextActive,
+                              ]}
+                            >
+                              {period}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 </View>
               </View>
 
@@ -2051,38 +2373,172 @@ export default function AdminDashboardScreen() {
               <View style={styles.timingRow}>
                 <Text style={styles.timingLabel}>Mixed</Text>
                 <View style={styles.timingInputs}>
-                  <TextInput
-                    style={styles.timingInput}
-                    value={newGym.timings.mixed.from}
-                    onChangeText={(text) =>
-                      setNewGym({
-                        ...newGym,
-                        timings: { ...newGym.timings, mixed: { ...newGym.timings.mixed, from: text } },
-                      })
-                    }
-                    placeholder="From"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                  <TextInput
-                    style={styles.timingInput}
-                    value={newGym.timings.mixed.to}
-                    onChangeText={(text) =>
-                      setNewGym({
-                        ...newGym,
-                        timings: { ...newGym.timings, mixed: { ...newGym.timings.mixed, to: text } },
-                      })
-                    }
-                    placeholder="To"
-                    placeholderTextColor="#9CA3AF"
-                  />
+                  <View style={styles.timingField}>
+                    <TextInput
+                      style={styles.timingInput}
+                      value={newGym.timings.mixed.from}
+                      onChangeText={(text) =>
+                        setNewGym({
+                          ...newGym,
+                          timings: {
+                            ...newGym.timings,
+                            mixed: { ...newGym.timings.mixed, from: text },
+                          },
+                        })
+                      }
+                      placeholder="From"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.periodToggleRow}>
+                      {(['AM', 'PM'] as const).map((period) => {
+                        const current = (newGym.timings.mixed.from || '').trim().split(/\s+/).pop()?.toUpperCase();
+                        const isSelected = current === period;
+                        return (
+                          <TouchableOpacity
+                            key={`mixed-from-${period}`}
+                            style={[
+                              styles.periodButton,
+                              isSelected && styles.periodButtonActive,
+                            ]}
+                            onPress={() =>
+                              setNewGym((prev) => {
+                                const currentValue = prev.timings.mixed.from || '';
+                                const parts = currentValue.trim().split(/\s+/);
+                                const base = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+                                const next = base ? `${base} ${period}` : period;
+                                return {
+                                  ...prev,
+                                  timings: {
+                                    ...prev.timings,
+                                    mixed: { ...prev.timings.mixed, from: next },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.periodButtonText,
+                                isSelected && styles.periodButtonTextActive,
+                              ]}
+                            >
+                              {period}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={styles.timingField}>
+                    <TextInput
+                      style={styles.timingInput}
+                      value={newGym.timings.mixed.to}
+                      onChangeText={(text) =>
+                        setNewGym({
+                          ...newGym,
+                          timings: {
+                            ...newGym.timings,
+                            mixed: { ...newGym.timings.mixed, to: text },
+                          },
+                        })
+                      }
+                      placeholder="To"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                    <View style={styles.periodToggleRow}>
+                      {(['AM', 'PM'] as const).map((period) => {
+                        const current = (newGym.timings.mixed.to || '').trim().split(/\s+/).pop()?.toUpperCase();
+                        const isSelected = current === period;
+                        return (
+                          <TouchableOpacity
+                            key={`mixed-to-${period}`}
+                            style={[
+                              styles.periodButton,
+                              isSelected && styles.periodButtonActive,
+                            ]}
+                            onPress={() =>
+                              setNewGym((prev) => {
+                                const currentValue = prev.timings.mixed.to || '';
+                                const parts = currentValue.trim().split(/\s+/);
+                                const base = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0] || '';
+                                const next = base ? `${base} ${period}` : period;
+                                return {
+                                  ...prev,
+                                  timings: {
+                                    ...prev.timings,
+                                    mixed: { ...prev.timings.mixed, to: next },
+                                  },
+                                };
+                              })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.periodButtonText,
+                                isSelected && styles.periodButtonTextActive,
+                              ]}
+                            >
+                              {period}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 </View>
+              </View>
+
+              {/* Open Days */}
+              <Text style={[styles.label, { marginTop: 16 }]}>Open Days</Text>
+              <Text style={styles.helperText}>Select the days of the week the gym is open</Text>
+              <View style={styles.openDaysContainer}>
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => {
+                  const isSelected = newGym.openDays?.includes(day);
+                  return (
+                    <TouchableOpacity
+                      key={day}
+                      style={[
+                        styles.openDayButton,
+                        isSelected && styles.openDayButtonActive,
+                      ]}
+                      onPress={() =>
+                        setNewGym((prev) => {
+                          const current = prev.openDays || [];
+                          const exists = current.includes(day);
+                          const next = exists
+                            ? current.filter((d) => d !== day)
+                            : [...current, day];
+                          return { ...prev, openDays: next };
+                        })
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.openDayText,
+                          isSelected && styles.openDayTextActive,
+                        ]}
+                      >
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               {/* Access Checkboxes */}
               <View style={styles.checkboxContainer}>
                 <TouchableOpacity
                   style={styles.checkboxRow}
-                  onPress={() => setNewGym({ ...newGym, menOnly: !newGym.menOnly })}
+                  onPress={() =>
+                    setNewGym((prev) => {
+                      const nextMenOnly = !prev.menOnly;
+                      return {
+                        ...prev,
+                        menOnly: nextMenOnly,
+                        womenOnly: nextMenOnly ? false : prev.womenOnly,
+                      };
+                    })
+                  }
                 >
                   <View style={[styles.checkbox, newGym.menOnly && styles.checkboxChecked]}>
                     {newGym.menOnly && <Text style={styles.checkmark}>✓</Text>}
@@ -2092,7 +2548,16 @@ export default function AdminDashboardScreen() {
 
                 <TouchableOpacity
                   style={styles.checkboxRow}
-                  onPress={() => setNewGym({ ...newGym, womenOnly: !newGym.womenOnly })}
+                  onPress={() =>
+                    setNewGym((prev) => {
+                      const nextWomenOnly = !prev.womenOnly;
+                      return {
+                        ...prev,
+                        womenOnly: nextWomenOnly,
+                        menOnly: nextWomenOnly ? false : prev.menOnly,
+                      };
+                    })
+                  }
                 >
                   <View style={[styles.checkbox, newGym.womenOnly && styles.checkboxChecked]}>
                     {newGym.womenOnly && <Text style={styles.checkmark}>✓</Text>}
@@ -2107,7 +2572,19 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.uploadButtonText}>Upload Logo</Text>
               </TouchableOpacity>
               {newGym.imageUrl && !newGym.imageUrl.startsWith('blob:') ? (
-                <Image source={{ uri: newGym.imageUrl }} style={styles.logoPreview} resizeMode="cover" />
+                <View style={styles.logoWrapper}>
+                  <Image
+                    source={{ uri: newGym.imageUrl }}
+                    style={styles.logoPreview}
+                    resizeMode="cover"
+                  />
+                  <TouchableOpacity
+                    style={styles.logoRemoveButton}
+                    onPress={() => setNewGym((prev) => ({ ...prev, imageUrl: '' }))}
+                  >
+                    <X size={14} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
               ) : (
                 <Text style={styles.locationSummaryMuted}>No logo selected</Text>
               )}
@@ -2230,7 +2707,7 @@ export default function AdminDashboardScreen() {
                     style={styles.input}
                     value={newGym.pricePerVisit}
                     onChangeText={(text) => setNewGym({ ...newGym, pricePerVisit: text.replace(/[^0-9.]/g, '') })}
-                    placeholder="2"
+                    placeholder="Enter price per visit"
                     keyboardType="decimal-pad"
                   />
                 </>
@@ -2357,45 +2834,37 @@ export default function AdminDashboardScreen() {
         transparent={true}
         onRequestClose={() => setIsCityModalVisible(false)}
       >
-        <TouchableOpacity
-          style={styles.filterOverlay}
-          activeOpacity={1}
-          onPress={() => setIsCityModalVisible(false)}
-        >
-          <View style={styles.filterSheet}>
-            <Text style={styles.filterSheetTitle}>City</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.cityModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select City</Text>
+              <TouchableOpacity onPress={() => setIsCityModalVisible(false)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
             <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
-              {FIXED_CITIES.map((city) => (
-                <TouchableOpacity
-                  key={city}
-                  style={[
-                    styles.filterOption,
-                    newGym.city === city && styles.filterOptionSelected,
-                  ]}
-                  onPress={() => {
-                    setNewGym({ ...newGym, city });
-                    setIsCityModalVisible(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      newGym.city === city && styles.filterOptionTextSelected,
-                    ]}
+              {FIXED_CITIES.map((city) => {
+                const isSelected = newGym.city === city;
+                return (
+                  <TouchableOpacity
+                    key={city}
+                    style={[styles.cityOption, isSelected && styles.cityOptionSelected]}
+                    onPress={() => {
+                      setNewGym({ ...newGym, city });
+                      setIsCityModalVisible(false);
+                    }}
                   >
-                    {city}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[styles.cityOptionText, isSelected && styles.cityOptionTextSelected]}
+                    >
+                      {city}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
-            <TouchableOpacity
-              style={styles.filterClose}
-              onPress={() => setIsCityModalVisible(false)}
-            >
-              <Text style={styles.filterCloseText}>Close</Text>
-            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* Map Picker Modal */}
@@ -2556,103 +3025,6 @@ export default function AdminDashboardScreen() {
         </View>
       </Modal>
 
-      {/* Spotlight Banners Modal */}
-      <Modal
-        visible={showSpotlightModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSpotlightModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Spotlight Images</Text>
-              <TouchableOpacity onPress={() => setShowSpotlightModal(false)}>
-                <X size={24} color="#111827" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={false}>
-              <TouchableOpacity
-                style={[styles.uploadBannerButton, isUploadingBanner && styles.uploadBannerButtonDisabled]}
-                onPress={handleUploadSpotlightBanner}
-                disabled={isUploadingBanner}
-              >
-                {isUploadingBanner ? (
-                  <>
-                    <ActivityIndicator size="small" color="#fff" />
-                    <Text style={styles.uploadBannerButtonText}>Uploading...</Text>
-                  </>
-                ) : (
-                  <>
-                    <Plus size={20} color="#fff" />
-                    <Text style={styles.uploadBannerButtonText}>Upload New Banner</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {isLoadingSpotlight ? (
-                <View style={styles.loadingCard}>
-                  <ActivityIndicator size="large" color="#DC2626" />
-                  <Text style={styles.loadingText}>Loading banners...</Text>
-                </View>
-              ) : spotlightBanners.length === 0 ? (
-                <View style={styles.emptyCard}>
-                  <ImageIcon size={48} color="#9CA3AF" />
-                  <Text style={styles.emptyText}>No spotlight banners</Text>
-                  <Text style={styles.emptySubtext}>Upload a banner to display in the spotlight section</Text>
-                </View>
-              ) : (
-                <View style={styles.bannersList}>
-                  {spotlightBanners.map((banner, index) => (
-                    <View key={banner.id} style={styles.bannerCard}>
-                      <Image
-                        source={{ uri: banner.imageUrl }}
-                        style={styles.bannerPreview}
-                        resizeMode="cover"
-                      />
-                      <View style={styles.bannerInfo}>
-                        <Text style={styles.bannerTitle} numberOfLines={1}>
-                          {banner.title || 'No title'}
-                        </Text>
-                        {banner.linkUrl ? (
-                          <Text style={styles.bannerLink} numberOfLines={1}>
-                            Link: {banner.linkUrl}
-                          </Text>
-                        ) : null}
-                        <View style={styles.bannerOrderRow}>
-                          <Text style={styles.bannerOrderLabel}>Position</Text>
-                          <TextInput
-                            style={styles.bannerOrderInput}
-                            keyboardType="number-pad"
-                            defaultValue={
-                              typeof banner.order === 'number'
-                                ? String(banner.order)
-                                : String(index)
-                            }
-                            onEndEditing={(e) =>
-                              handleUpdateSpotlightOrder(
-                                banner.id,
-                                e.nativeEvent.text || String(index)
-                              )
-                            }
-                          />
-                        </View>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.deleteBannerButton}
-                        onPress={() => handleDeleteSpotlightBanner(banner.id, banner.imageUrl)}
-                      >
-                        <X size={18} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -3499,6 +3871,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     gap: 8,
   },
+  timingField: {
+    flex: 1,
+  },
   timingInput: {
     flex: 1,
     backgroundColor: '#F9FAFB',
@@ -3509,6 +3884,40 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: '#111827',
+  },
+  periodToggleRow: {
+    flexDirection: 'row' as const,
+    gap: 6,
+    marginTop: 6,
+  },
+  periodButton: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+    alignItems: 'center' as const,
+  },
+  periodButtonActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
+  periodButtonText: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: '#4B5563',
+  },
+  periodButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  inputText: {
+    fontSize: 14,
+    color: '#111827',
+  },
+  inputPlaceholder: {
+    fontSize: 14,
+    color: '#9CA3AF',
   },
   checkboxContainer: {
     marginTop: 16,
@@ -3542,6 +3951,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600' as const,
     color: '#111827',
+  },
+  openDaysContainer: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginTop: 8,
+  },
+  openDayButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  openDayButtonActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
+  openDayText: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    color: '#4B5563',
+  },
+  openDayTextActive: {
+    color: '#FFFFFF',
   },
   submitButton: {
     backgroundColor: '#DC2626',
@@ -3585,18 +4020,53 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600' as const,
   },
+  logoWrapper: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
   logoPreview: {
     width: 160,
     height: 160,
     borderRadius: 12,
-    marginTop: 12,
-    alignSelf: 'flex-start',
+  },
+  logoRemoveButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
   },
   mapModalContent: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     height: '85%',
+  },
+  cityModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    width: '90%',
+    maxHeight: '70%',
+  },
+  cityOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  cityOptionSelected: {
+    backgroundColor: '#F3F4F6',
+  },
+  cityOptionText: {
+    fontSize: 14,
+    color: '#111827',
+  },
+  cityOptionTextSelected: {
+    fontWeight: '600' as const,
   },
   mapFooter: {
     padding: 16,
@@ -3973,22 +4443,13 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     fontWeight: '600' as const,
   },
-  spotlightButton: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 8,
-    backgroundColor: '#9333EA',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 16,
+  spotlightPanel: {
+    marginTop: 24,
   },
-  spotlightButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700' as const,
+  spotlightDescription: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
   },
   uploadBannerButton: {
     flexDirection: 'row' as const,
@@ -4036,15 +4497,6 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: '#111827',
     marginBottom: 4,
-  },
-  bannerLink: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  bannerOrder: {
-    fontSize: 11,
-    color: '#9CA3AF',
   },
   deleteBannerButton: {
     width: 40,

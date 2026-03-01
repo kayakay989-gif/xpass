@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, TextInput, RefreshControl } from 'react-native';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MapPin, Search, Filter } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
@@ -102,6 +102,26 @@ export default function GymsScreen() {
           const tier = getGymTier(gym);
           const badge = getTierBadgeColors(tier);
           const label = getTierLabel(tier);
+          const rawGallery: string[] = Array.isArray((gym as any).gymImages)
+            ? (gym as any).gymImages
+            : [];
+          const galleryImages: string[] = rawGallery.filter(
+            (url) => typeof url === 'string' && !url.startsWith('blob:')
+          );
+          const heroImage =
+            (galleryImages.length > 0 && galleryImages[0]) ||
+            'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
+          const logoUrl =
+            typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+              ? gym.imageUrl
+              : null;
+          const facilities: string[] =
+            Array.isArray((gym as any).facilities) && (gym as any).facilities.length > 0
+              ? (gym as any).facilities
+              : Array.isArray((gym as any).amenities)
+              ? (gym as any).amenities
+              : [];
+
           return (
           <TouchableOpacity 
             key={gym.id} 
@@ -113,16 +133,22 @@ export default function GymsScreen() {
               } as any);
             }}
           >
-            <Image 
-              source={{
-                uri:
-                  typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
-                    ? gym.imageUrl
-                    : 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
-              }} 
-              style={styles.gymImage}
-              resizeMode="cover"
-            />
+            <View style={styles.gymImageWrapper}>
+              <Image 
+                source={{ uri: heroImage }} 
+                style={styles.gymImage}
+                resizeMode="cover"
+              />
+              {logoUrl && (
+                <View style={styles.gymLogoBadge}>
+                  <Image
+                    source={{ uri: logoUrl }}
+                    style={styles.gymLogoImage}
+                    resizeMode="cover"
+                  />
+                </View>
+              )}
+            </View>
             <View style={styles.gymInfo}>
               <View style={styles.gymHeader}>
                 <Text style={styles.gymName}>{gym.name}</Text>
@@ -136,18 +162,20 @@ export default function GymsScreen() {
                 <Text style={styles.locationText}>{gym.address}</Text>
               </View>
 
-              <View style={styles.amenitiesRow}>
-                {gym.amenities.slice(0, 3).map((amenity, index) => (
-                  <View key={index} style={styles.amenityTag}>
-                    <Text style={styles.amenityText}>{amenity}</Text>
-                  </View>
-                ))}
-                {gym.amenities.length > 3 && (
-                  <View style={styles.amenityTag}>
-                    <Text style={styles.moreAmenities}>+{gym.amenities.length - 3}</Text>
-                  </View>
-                )}
-              </View>
+              {facilities.length > 0 && (
+                <View style={styles.amenitiesRow}>
+                  {facilities.slice(0, 3).map((amenity, index) => (
+                    <View key={index} style={styles.amenityTag}>
+                      <Text style={styles.amenityText}>{amenity}</Text>
+                    </View>
+                  ))}
+                  {facilities.length > 3 && (
+                    <View style={styles.amenityTag}>
+                      <Text style={styles.moreAmenities}>+{facilities.length - 3}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
 
               <Text style={styles.hoursText}>{gym.hours}</Text>
             </View>
@@ -239,10 +267,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  gymImageWrapper: {
+    position: 'relative',
+  },
   gymImage: {
     width: '100%',
     height: 160,
     backgroundColor: Colors.surface,
+  },
+  gymLogoBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.white,
+    backgroundColor: Colors.background,
+  },
+  gymLogoImage: {
+    width: '100%',
+    height: '100%',
   },
   gymInfo: {
     padding: 16,

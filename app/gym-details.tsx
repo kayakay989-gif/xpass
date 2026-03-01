@@ -8,15 +8,19 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { MapPin, Clock, ChevronLeft, QrCode } from 'lucide-react-native';
+import { MapPin, Clock, ChevronLeft, QrCode, X } from 'lucide-react-native';
 import { firestoreGyms } from '@/lib/firestore';
 import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 import Colors from '@/constants/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
+import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 
 export default function GymDetailsScreen() {
   const router = useRouter();
@@ -26,6 +30,9 @@ export default function GymDetailsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const { isGuest, firebaseUser } = useAuth();
+  const { subscription } = useApp();
 
   useEffect(() => {
     if (gymId) {
@@ -182,6 +189,35 @@ export default function GymDetailsScreen() {
     (galleryImages.length > 0 && galleryImages[0]) ||
     safeLogo ||
     'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
+  const facilities: string[] =
+    Array.isArray((gym as any).facilities) && (gym as any).facilities.length > 0
+      ? (gym as any).facilities
+      : Array.isArray((gym as any).amenities)
+      ? (gym as any).amenities
+      : [];
+  const timings: any = (gym as any).timings || {};
+  const openDays: string[] = Array.isArray((gym as any).openDays)
+    ? (gym as any).openDays
+    : [];
+  const hasMenTimings = !!(timings.men && (timings.men.from || timings.men.to));
+  const hasWomenTimings = !!(timings.women && (timings.women.from || timings.women.to));
+  const hasMixedTimings = !!(timings.mixed && (timings.mixed.from || timings.mixed.to));
+  const menOnly = !!(gym as any).menOnly;
+  const womenOnly = !!(gym as any).womenOnly;
+
+  const renderTimingLine = (label: string, value: any) => {
+    const from: string = (value?.from || '').trim();
+    const to: string = (value?.to || '').trim();
+    if (!from && !to) return null;
+    const text = from && to ? `${from} – ${to}` : from || to;
+    if (!text) return null;
+    return (
+      <View style={styles.timingRow}>
+        <Text style={styles.timingLabel}>{label}</Text>
+        <Text style={styles.timingValue}>{text}</Text>
+      </View>
+    );
+  };
 
   return (
     <>
@@ -201,11 +237,16 @@ export default function GymDetailsScreen() {
       />
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Gym Image / Gallery hero */}
-        <Image
-          source={{ uri: heroImage }}
-          style={styles.gymImage}
-          resizeMode="cover"
-        />
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => setSelectedImage(heroImage)}
+        >
+          <Image
+            source={{ uri: heroImage }}
+            style={styles.gymImage}
+            resizeMode="cover"
+          />
+        </TouchableOpacity>
 
         {/* Gym Image Gallery */}
         {galleryImages.length > 1 && (
@@ -215,12 +256,17 @@ export default function GymDetailsScreen() {
               showsHorizontalScrollIndicator={false}
             >
               {galleryImages.map((url, index) => (
-                <Image
+                <TouchableOpacity
                   key={`${url}-${index}`}
-                  source={{ uri: url }}
-                  style={styles.galleryImage}
-                  resizeMode="cover"
-                />
+                  activeOpacity={0.9}
+                  onPress={() => setSelectedImage(url)}
+                >
+                  <Image
+                    source={{ uri: url }}
+                    style={styles.galleryImage}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
@@ -256,19 +302,14 @@ export default function GymDetailsScreen() {
             </View>
           )}
 
-          {/* Hours */}
-          <View style={styles.infoRow}>
-            <Clock size={18} color={Colors.textSecondary} />
-            <Text style={styles.infoText}>{gym.hours || '6:00 AM - 10:00 PM'}</Text>
-          </View>
         </View>
 
         {/* Facilities Section */}
-        {gym.amenities && gym.amenities.length > 0 && (
+        {facilities.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Facilities</Text>
             <View style={styles.facilitiesGrid}>
-              {gym.amenities.map((amenity: string, index: number) => (
+              {facilities.map((amenity: string, index: number) => (
                 <View key={index} style={styles.facilityTag}>
                   <Text style={styles.facilityText}>{amenity}</Text>
                 </View>
@@ -300,10 +341,65 @@ export default function GymDetailsScreen() {
           </View>
         )}
 
+        {/* Timings & Access */}
+        {(hasMenTimings ||
+          hasWomenTimings ||
+          hasMixedTimings ||
+          openDays.length > 0 ||
+          menOnly ||
+          womenOnly) && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Timings & Access</Text>
+
+            {openDays.length > 0 && (
+              <View style={styles.timingRow}>
+                <Text style={styles.timingLabel}>Open Days</Text>
+                <Text style={styles.timingValue}>{openDays.join(', ')}</Text>
+              </View>
+            )}
+
+            {renderTimingLine('Men', timings.men)}
+            {renderTimingLine('Women', timings.women)}
+            {renderTimingLine('Mixed', timings.mixed)}
+
+            {(menOnly || womenOnly) && (
+              <View style={styles.accessPillsRow}>
+                {menOnly && (
+                  <View style={styles.accessPill}>
+                    <Text style={styles.accessPillText}>Men only</Text>
+                  </View>
+                )}
+                {womenOnly && (
+                  <View style={styles.accessPill}>
+                    <Text style={styles.accessPillText}>Women only</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Check-in Button */}
         <TouchableOpacity
           style={styles.checkInButton}
           onPress={() => {
+            if (isGuest || !firebaseUser) {
+              Alert.alert(
+                'Account Required',
+                'Please log in and subscribe to check in to gyms.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Log In', onPress: () => router.push('/login' as any) },
+                ]
+              );
+              return;
+            }
+
+            if (!subscription) {
+              router.push('/(tabs)/subscription' as any);
+              return;
+            }
+
             router.push({
               pathname: '/qr-scanner',
               params: { gymId: gym.id },
@@ -314,6 +410,31 @@ export default function GymDetailsScreen() {
           <Text style={styles.checkInButtonText}>Check In</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Fullscreen Image Modal */}
+      <Modal
+        visible={selectedImage !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedImage(null)}
+      >
+        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
+          <TouchableOpacity
+            style={[styles.modalCloseButton, { top: insets.top + 10 }]}
+            onPress={() => setSelectedImage(null)}
+            activeOpacity={0.8}
+          >
+            <X size={24} color={Colors.white} />
+          </TouchableOpacity>
+          {selectedImage && (
+            <Image
+              source={{ uri: selectedImage }}
+              style={styles.fullscreenImage}
+              resizeMode="contain"
+            />
+          )}
+        </View>
+      </Modal>
     </>
   );
 }
@@ -444,6 +565,38 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontWeight: '500',
   },
+  timingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  timingLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  timingValue: {
+    fontSize: 14,
+    color: Colors.text,
+  },
+  accessPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  accessPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: Colors.surface,
+  },
+  accessPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
   tiersRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -473,5 +626,27 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 18,
     fontWeight: '700',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 1000,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
   },
 });
