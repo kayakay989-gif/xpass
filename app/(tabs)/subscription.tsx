@@ -2,6 +2,7 @@ import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, Alert, Pla
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -118,6 +119,7 @@ const DURATIONS = [
 
 export default function SubscriptionScreen() {
   const { user, firebaseUser, isGuest } = useAuth();
+  const { subscription } = useApp();
   const router = useRouter();
   const [selectedDuration, setSelectedDuration] = useState<number>(1);
   const insets = useSafeAreaInsets();
@@ -154,18 +156,77 @@ export default function SubscriptionScreen() {
     return selectedDuration > 0 ? Math.round(total / selectedDuration) : 0;
   };
 
-  const handleSelectPackage = (tier: string) => {
-    const totalPrice = getTotalPrice(tier as Package['tier']);
-    console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
+  // Get button label and action based on subscription status
+  const getPackageButtonInfo = (tier: Package['tier']) => {
+    const currentTier = subscription?.tier;
+    const isActive = subscription?.isActive && subscription?.endDate > new Date();
     
-    router.push({
-      pathname: '/payment',
-      params: {
-        tier,
-        duration: selectedDuration.toString(),
-        price: totalPrice.toString(),
+    // If user has this tier active
+    if (isActive && currentTier === tier) {
+      return {
+        label: 'Active',
+        disabled: true,
+        action: null,
+      };
+    }
+    
+    // If user has a different tier active
+    if (isActive && currentTier) {
+      const tierLevels: Record<Package['tier'], number> = {
+        silver: 1,
+        gold: 2,
+        diamond: 3,
+        elite: 4,
+      };
+      
+      const currentLevel = tierLevels[currentTier];
+      const targetLevel = tierLevels[tier];
+      
+      if (targetLevel > currentLevel) {
+        // Upgrade
+        return {
+          label: 'Upgrade',
+          disabled: false,
+          action: () => {
+            const totalPrice = getTotalPrice(tier);
+            router.push({
+              pathname: '/payment',
+              params: {
+                tier,
+                duration: selectedDuration.toString(),
+                price: totalPrice.toString(),
+                isUpgrade: 'true',
+              },
+            });
+          },
+        };
+      } else {
+        // Downgrade (not allowed or optional)
+        return {
+          label: 'Downgrade not available',
+          disabled: true,
+          action: null,
+        };
+      }
+    }
+    
+    // No active subscription - show Select Package
+    return {
+      label: 'Select Package',
+      disabled: false,
+      action: () => {
+        const totalPrice = getTotalPrice(tier);
+        console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
+        router.push({
+          pathname: '/payment',
+          params: {
+            tier,
+            duration: selectedDuration.toString(),
+            price: totalPrice.toString(),
+          },
+        });
       },
-    });
+    };
   };
 
   return (
@@ -273,16 +334,30 @@ export default function SubscriptionScreen() {
                 )}
               </View>
               
-              <TouchableOpacity onPress={() => handleSelectPackage(pkg.tier)} activeOpacity={0.9}>
-                <LinearGradient
-                  colors={pkg.buttonColors}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.selectButton}
-                >
-                  <Text style={[styles.selectButtonText, { color: theme.buttonText }]}>Select Package</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              {(() => {
+                const buttonInfo = getPackageButtonInfo(pkg.tier);
+                return (
+                  <TouchableOpacity 
+                    onPress={buttonInfo.action || undefined} 
+                    activeOpacity={buttonInfo.disabled ? 1 : 0.9}
+                    disabled={buttonInfo.disabled}
+                  >
+                    <LinearGradient
+                      colors={buttonInfo.disabled ? ['#E5E7EB', '#E5E7EB'] : pkg.buttonColors}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[styles.selectButton, buttonInfo.disabled && styles.selectButtonDisabled]}
+                    >
+                      <Text style={[
+                        styles.selectButtonText, 
+                        { color: buttonInfo.disabled ? '#9CA3AF' : theme.buttonText }
+                      ]}>
+                        {buttonInfo.label}
+                      </Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                );
+              })()}
             </View>
           </View>
         )})}
@@ -444,6 +519,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
+  },
+  selectButtonDisabled: {
+    opacity: 0.6,
   },
   selectButtonText: {
     fontSize: 16,

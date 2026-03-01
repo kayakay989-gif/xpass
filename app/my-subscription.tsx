@@ -1,16 +1,50 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
+import { trpc } from '@/lib/trpc';
 import Colors from '@/constants/colors';
 
 export default function MySubscriptionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { subscription } = useApp();
+  const { subscription, subscriptionQuery } = useApp();
+  
+  const cancelMutation = trpc.subscriptions.cancel.useMutation({
+    onSuccess: () => {
+      Alert.alert('Success', 'Your subscription has been cancelled.');
+      subscriptionQuery?.refetch();
+      router.replace('/(tabs)/home');
+    },
+    onError: (error) => {
+      Alert.alert('Error', error.message || 'Failed to cancel subscription. Please try again.');
+    },
+  });
+
+  const handleCancelSubscription = () => {
+    if (!subscription) return;
+    
+    Alert.alert(
+      'Cancel Subscription',
+      'Are you sure you want to cancel your subscription? You will lose access to all gyms when your current subscription expires.',
+      [
+        { text: 'Keep Subscription', style: 'cancel' },
+        {
+          text: 'Cancel Subscription',
+          style: 'destructive',
+          onPress: () => {
+            cancelMutation.mutate({
+              userId: user?.id || '',
+              subscriptionId: subscription.id,
+            });
+          },
+        },
+      ]
+    );
+  };
 
   const goBackOrHome = () => {
     const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
@@ -152,8 +186,10 @@ export default function MySubscriptionScreen() {
             Subscription auto renews on {getExpiryDate()}
           </Text>
 
-          <TouchableOpacity>
-            <Text style={styles.cancelText}>Cancel Subscription</Text>
+          <TouchableOpacity onPress={handleCancelSubscription} disabled={cancelMutation.isPending}>
+            <Text style={styles.cancelText}>
+              {cancelMutation.isPending ? 'Cancelling...' : 'Cancel Subscription'}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       </View>

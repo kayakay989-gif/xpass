@@ -8,6 +8,7 @@ import checkInsCreate from "./routes/checkIns/create/route";
 import checkInsList from "./routes/checkIns/list/route";
 import subscriptionsGetCurrent from "./routes/subscriptions/getCurrent/route";
 import subscriptionsCreate from "./routes/subscriptions/create/route";
+import subscriptionsCancel from "./routes/subscriptions/cancel/route";
 import usersGet from "./routes/users/get/route";
 import usersUpdateWallet from "./routes/users/updateWallet/route";
 import paymentsInitiate3ds from "./routes/payments/initiate3ds/route";
@@ -51,6 +52,7 @@ const checkInsRouter = createTRPCRouter({
 const subscriptionsRouter = createTRPCRouter({
   getCurrent: subscriptionsGetCurrent,
   create: subscriptionsCreate,
+  cancel: subscriptionsCancel,
 });
 
 const usersRouter = createTRPCRouter({

@@ -62,6 +62,26 @@ export const firestoreUsers = {
 
 // Subscriptions collection
 export const firestoreSubscriptions = {
+  async getById(subscriptionId: string): Promise<Subscription | null> {
+    const doc = await adminDb.collection('subscriptions').doc(subscriptionId).get();
+    if (!doc.exists) return null;
+    const data = doc.data();
+    if (!data) return null;
+    return {
+      id: doc.id,
+      userId: data.userId,
+      tier: data.tier,
+      duration: data.duration,
+      startDate: timestampToDate(data.startDate),
+      endDate: timestampToDate(data.endDate),
+      monthlyPrice: data.monthlyPrice,
+      totalPrice: data.totalPrice,
+      visitsUsed: data.visitsUsed || 0,
+      maxVisitsPerMonth: data.maxVisitsPerMonth,
+      isActive: data.isActive,
+    };
+  },
+
   async getByUserId(userId: string): Promise<Subscription | null> {
     // Note: orderBy on createdAt requires a composite index if used with where clauses
     // For now, we'll get all active subscriptions and sort in memory

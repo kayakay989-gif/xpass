@@ -235,8 +235,11 @@ export default function ProfileEditScreen() {
         if (!firebaseUser || !auth.currentUser) {
           throw new Error('Please log in to verify your phone.');
         }
-        const credential = PhoneAuthProvider.credential(verificationId, otp);
+        console.log('[ProfileEdit] Verifying OTP with verificationId:', verificationId.substring(0, 10) + '...');
+        const credential = PhoneAuthProvider.credential(verificationId, otp.trim());
+        console.log('[ProfileEdit] Credential created, updating phone number...');
         await updatePhoneNumber(auth.currentUser, credential);
+        console.log('[ProfileEdit] Phone number updated successfully');
       }
 
       // Update profile data (name, email, and phone if changed)

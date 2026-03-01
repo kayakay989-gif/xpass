@@ -256,7 +256,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   // Email/Password Login
   const loginWithEmail = useCallback(async (email: string, password: string): Promise<void> => {
     try {
-      const normalizedEmail = (email || '').trim();
+      const normalizedEmail = (email || '').trim().toLowerCase();
       if (!normalizedEmail) {
         throw new Error('Email is required');
       }
@@ -265,6 +265,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       
       console.log('[AuthContext] Attempting email/password login for:', normalizedEmail);
+      
+      // Wait for any pending auth state changes to complete
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
       
       // Verify the user was actually signed in
@@ -272,16 +276,26 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Login failed: No user returned');
       }
       
-      // User profile will be loaded by onAuthStateChanged
-      // Wait for auth state to update before proceeding
-      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log('[AuthContext] Sign-in successful, waiting for auth state update...');
       
-      // Double-check auth state
-      const currentUser = auth.currentUser;
-      if (!currentUser || currentUser.uid !== userCredential.user.uid) {
-        console.error('[AuthContext] Auth state mismatch after login. Expected:', userCredential.user.uid, 'Got:', currentUser?.uid);
-        throw new Error('Login verification failed: Auth state mismatch');
-      }
+      // Wait for onAuthStateChanged to fire and update state
+      // Use a promise that resolves when auth state is confirmed
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Auth state update timeout'));
+        }, 5000);
+        
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          clearTimeout(timeout);
+          unsubscribe();
+          if (firebaseUser && firebaseUser.uid === userCredential.user.uid) {
+            console.log('[AuthContext] Auth state confirmed:', firebaseUser.uid);
+            resolve();
+          } else {
+            reject(new Error('Auth state mismatch'));
+          }
+        });
+      });
       
       console.log('[AuthContext] Login successful:', userCredential.user.uid, 'Email:', userCredential.user.email);
     } catch (error: any) {

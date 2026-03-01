@@ -142,6 +142,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
       checkIn,
       createSubscription,
       refetchGyms,
+      subscriptionQuery,
       isLoading: subscriptionQuery.isLoading || isGymsLoading || checkInsQuery.isLoading,
       isCheckingIn: checkInMutation.isPending,
     };
@@ -155,6 +156,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
     checkIn,
     createSubscription,
     refetchGyms,
+    subscriptionQuery,
     subscriptionQuery.isLoading,
     isGymsLoading,
     checkInsQuery.isLoading,

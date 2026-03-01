@@ -106,13 +106,28 @@ export default function SecurityScreen() {
     }
     setIsVerifying(true);
     try {
-      const credential = PhoneAuthProvider.credential(verificationId, otp);
+      console.log('[Security] Verifying OTP with verificationId:', verificationId.substring(0, 10) + '...');
+      const credential = PhoneAuthProvider.credential(verificationId, otp.trim());
+      console.log('[Security] Credential created, updating phone number...');
       await updatePhoneNumber(auth.currentUser, credential);
+      console.log('[Security] Phone number updated, updating profile data...');
       await updateProfileData({ phone: fullPhone });
+      console.log('[Security] Phone verification successful');
       Alert.alert('Phone verified', 'Your phone number was updated.');
+      setOtp('');
+      setOtpSent(false);
+      setVerificationId('');
     } catch (error: any) {
       console.error('[Security] OTP verify failed:', error);
-      showAlert('Error', error?.message || 'Verification failed.');
+      let errorMessage = 'Verification failed.';
+      if (error?.code === 'auth/invalid-verification-code') {
+        errorMessage = 'Invalid OTP code. Please check and try again.';
+      } else if (error?.code === 'auth/code-expired') {
+        errorMessage = 'OTP code has expired. Please request a new code.';
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      showAlert('Error', errorMessage);
     } finally {
       setIsVerifying(false);
     }
