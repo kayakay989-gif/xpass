@@ -37,6 +37,7 @@ import {
   Tag,
   Edit,
   Trash2,
+  ArrowLeft,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GymCategory, SubscriptionTier } from '@/types';
@@ -49,7 +50,7 @@ import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
 import { FIXED_CITIES } from '@/constants/cities';
 import { trpc } from '@/lib/trpc';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'coupons';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
 
 const TIER_COLORS = {
   silver: '#C0C0C0',
@@ -60,7 +61,7 @@ const TIER_COLORS = {
 } as const;
 
 // Coupons Management Component
-function CouponsManagementSection() {
+function CouponsManagementSection({ onClose }: { onClose: () => void }) {
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [editingCoupon, setEditingCoupon] = useState<any>(null);
   const [couponForm, setCouponForm] = useState({
@@ -190,16 +191,20 @@ function CouponsManagementSection() {
   return (
     <View style={styles.content}>
       <View style={styles.pageHeader}>
-        <Text style={styles.pageTitle}>Coupons</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <TouchableOpacity onPress={onClose} style={{ padding: 4 }}>
+            <ArrowLeft size={24} color="#111827" />
+          </TouchableOpacity>
+          <Text style={styles.pageTitle}>Coupons</Text>
+        </View>
         <TouchableOpacity
-          style={styles.addButton}
+          style={styles.addButtonIcon}
           onPress={() => {
             resetCouponForm();
             setShowCouponModal(true);
           }}
         >
           <Plus size={20} color="#FFFFFF" />
-          <Text style={styles.addButtonText}>New Coupon</Text>
         </TouchableOpacity>
       </View>
 
@@ -415,6 +420,7 @@ export default function AdminDashboardScreen() {
   const router = useRouter();
   const { isLoading: isAuthLoading, isCheckingAdmin, isAdmin, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [showCouponsView, setShowCouponsView] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
   const [spotlightImages, setSpotlightImages] = useState<any[]>([]);
@@ -1672,7 +1678,7 @@ export default function AdminDashboardScreen() {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' && !showCouponsView && (
           <View style={styles.content}>
             <Text style={styles.pageTitle}>Admin Console</Text>
 
@@ -1717,6 +1723,15 @@ export default function AdminDashboardScreen() {
               onPress={() => setShowAddGymModal(true)}
             >
               <Text style={styles.primaryCtaText}>Add a New Gym</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              activeOpacity={0.85}
+              onPress={() => setShowCouponsView(true)}
+            >
+              <Tag size={18} color="#111827" style={{ marginRight: 8 }} />
+              <Text style={styles.secondaryButtonText}>Coupons</Text>
             </TouchableOpacity>
 
             <View style={styles.section}>
@@ -2248,8 +2263,8 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
-        {activeTab === 'coupons' && (
-          <CouponsManagementSection />
+        {showCouponsView && (
+          <CouponsManagementSection onClose={() => setShowCouponsView(false)} />
         )}
       </ScrollView>
 
@@ -2316,19 +2331,6 @@ export default function AdminDashboardScreen() {
           </View>
           <Text style={[styles.bottomTabLabel, activeTab === 'payouts' && styles.bottomTabLabelActive]}>
             Payouts
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.bottomTabItem, activeTab === 'coupons' && styles.bottomTabItemActive]}
-          onPress={() => setActiveTab('coupons')}
-          activeOpacity={0.85}
-        >
-          <View style={[styles.bottomTabIconWrap, activeTab === 'coupons' && styles.bottomTabIconWrapActive]}>
-            <Tag size={20} color={activeTab === 'coupons' ? '#FFFFFF' : '#111827'} />
-          </View>
-          <Text style={[styles.bottomTabLabel, activeTab === 'coupons' && styles.bottomTabLabelActive]}>
-            Coupons
           </Text>
         </TouchableOpacity>
       </View>
@@ -4102,7 +4104,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#DC2626',
     padding: 8,
     borderRadius: 8,
-    marginLeft: 8,
+  },
+  addButtonIcon: {
+    backgroundColor: '#DC2626',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
   },
   modalOverlay: {
     flex: 1,
