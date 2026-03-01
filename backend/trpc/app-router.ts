@@ -26,6 +26,11 @@ import { loginProcedure } from "./routes/auth/login/route";
 import { googleLoginProcedure } from "./routes/auth/googleLogin/route";
 import gymOwnerLogin from "./routes/gymOwners/login/route";
 import gymOwnerGetProfile from "./routes/gymOwners/getProfile/route";
+import couponsGetAll from "./routes/coupons/getAll/route";
+import couponsCreate from "./routes/coupons/create/route";
+import couponsUpdate from "./routes/coupons/update/route";
+import couponsDelete from "./routes/coupons/delete/route";
+import couponsValidate from "./routes/coupons/validate/route";
 
 const exampleRouter = createTRPCRouter({
   hi: hiRoute,
@@ -68,6 +73,14 @@ const adminRouter = createTRPCRouter({
   getStats: adminGetStats,
 });
 
+const couponsRouter = createTRPCRouter({
+  getAll: couponsGetAll,
+  create: couponsCreate,
+  update: couponsUpdate,
+  delete: couponsDelete,
+  validate: couponsValidate,
+});
+
 const authRouter = createTRPCRouter({
   sendOTP: sendOTPProcedure,
   verifyOTP: verifyOTPProcedure,
@@ -91,6 +104,7 @@ export const appRouter = createTRPCRouter({
   admin: adminRouter,
   auth: authRouter,
   gymOwners: gymOwnersRouter,
+  coupons: couponsRouter,
 });
 
 export type AppRouter = typeof appRouter;

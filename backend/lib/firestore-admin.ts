@@ -1,5 +1,5 @@
 import { adminDb } from './firebase-admin';
-import { User, Subscription, Gym, CheckIn, GymOwner } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, Coupon } from '@/types';
 import admin from 'firebase-admin';
 
 // Helper to convert Firestore Timestamp to Date
@@ -396,6 +396,107 @@ export const firestorePayments = {
   },
 };
 
+// Coupons collection
+export const firestoreCoupons = {
+  async getAll(): Promise<Coupon[]> {
+    const snapshot = await adminDb.collection('coupons').orderBy('createdAt', 'desc').get();
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        code: data.code || '',
+        discountPercent: data.discountPercent || 0,
+        isActive: !!data.isActive,
+        createdAt: timestampToDate(data.createdAt),
+        usageLimit: data.usageLimit ?? null,
+        usedCount: data.usedCount || 0,
+        expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+      };
+    });
+  },
+
+  async getByCode(code: string): Promise<Coupon | null> {
+    const upperCode = code.toUpperCase().trim();
+    const snapshot = await adminDb
+      .collection('coupons')
+      .where('code', '==', upperCode)
+      .limit(1)
+      .get();
+    
+    if (snapshot.empty) return null;
+    
+    const doc = snapshot.docs[0];
+    const data = doc.data();
+    return {
+      id: doc.id,
+      code: data.code || '',
+      discountPercent: data.discountPercent || 0,
+      isActive: !!data.isActive,
+      createdAt: timestampToDate(data.createdAt),
+      usageLimit: data.usageLimit ?? null,
+      usedCount: data.usedCount || 0,
+      expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+    };
+  },
+
+  async getById(couponId: string): Promise<Coupon | null> {
+    const doc = await adminDb.collection('coupons').doc(couponId).get();
+    if (!doc.exists) return null;
+    
+    const data = doc.data();
+    if (!data) return null;
+    
+    return {
+      id: doc.id,
+      code: data.code || '',
+      discountPercent: data.discountPercent || 0,
+      isActive: !!data.isActive,
+      createdAt: timestampToDate(data.createdAt),
+      usageLimit: data.usageLimit ?? null,
+      usedCount: data.usedCount || 0,
+      expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+    };
+  },
+
+  async create(coupon: Coupon): Promise<void> {
+    await adminDb.collection('coupons').doc(coupon.id).set({
+      code: coupon.code.toUpperCase().trim(),
+      discountPercent: coupon.discountPercent,
+      isActive: coupon.isActive,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      usageLimit: coupon.usageLimit ?? null,
+      usedCount: coupon.usedCount || 0,
+      expiresAt: coupon.expiresAt ? admin.firestore.Timestamp.fromDate(coupon.expiresAt) : null,
+    });
+  },
+
+  async update(couponId: string, updates: Partial<Coupon>): Promise<void> {
+    const updateData: any = { ...updates };
+    if (updateData.code) {
+      updateData.code = updateData.code.toUpperCase().trim();
+    }
+    if (updateData.expiresAt && updateData.expiresAt instanceof Date) {
+      updateData.expiresAt = admin.firestore.Timestamp.fromDate(updateData.expiresAt);
+    }
+    await adminDb.collection('coupons').doc(couponId).update(updateData);
+  },
+
+  async delete(couponId: string): Promise<void> {
+    await adminDb.collection('coupons').doc(couponId).delete();
+  },
+
+  async incrementUsage(couponId: string): Promise<void> {
+    const couponDoc = await adminDb.collection('coupons').doc(couponId).get();
+    if (!couponDoc.exists) {
+      throw new Error('Coupon not found');
+    }
+    const currentCount = couponDoc.data()?.usedCount || 0;
+    await adminDb.collection('coupons').doc(couponId).update({
+      usedCount: currentCount + 1,
+    });
+  },
+};
+
 // Export all services
 export default {
   users: firestoreUsers,
@@ -404,5 +505,6 @@ export default {
   checkIns: firestoreCheckIns,
   gymOwners: firestoreGymOwners,
   payments: firestorePayments,
+  coupons: firestoreCoupons,
 };
 

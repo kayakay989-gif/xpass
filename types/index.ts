@@ -114,3 +114,14 @@ export interface GymOwner {
   name?: string;
   createdAt: Date;
 }
+
+export interface Coupon {
+  id: string;
+  code: string; // uppercase unique coupon code
+  discountPercent: number; // 1 - 100
+  isActive: boolean;
+  createdAt: Date;
+  usageLimit: number | null; // optional, null means unlimited
+  usedCount: number;
+  expiresAt: Date | null; // optional expiration date
+}

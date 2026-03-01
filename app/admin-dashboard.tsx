@@ -34,6 +34,9 @@ import {
   Copy,
   CheckCircle,
   Download,
+  Tag,
+  Edit,
+  Trash2,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GymCategory, SubscriptionTier } from '@/types';
@@ -44,8 +47,9 @@ import GymLocationPicker from '@/components/GymLocationPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
 import { FIXED_CITIES } from '@/constants/cities';
+import { trpc } from '@/lib/trpc';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'coupons';
 
 const TIER_COLORS = {
   silver: '#C0C0C0',
@@ -54,6 +58,358 @@ const TIER_COLORS = {
   elite: '#9333EA',
   none: '#9CA3AF',
 } as const;
+
+// Coupons Management Component
+function CouponsManagementSection() {
+  const [showCouponModal, setShowCouponModal] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState<any>(null);
+  const [couponForm, setCouponForm] = useState({
+    code: '',
+    discountPercent: '',
+    isActive: true,
+    usageLimit: '',
+    expiresAt: '',
+  });
+
+  const { data: coupons, refetch: refetchCoupons, isLoading } = trpc.coupons.getAll.useQuery();
+  const createMutation = trpc.coupons.create.useMutation({
+    onSuccess: () => {
+      refetchCoupons();
+      setShowCouponModal(false);
+      resetCouponForm();
+      Alert.alert('Success', 'Coupon created successfully');
+    },
+    onError: (error) => {
+      Alert.alert('Error', error.message);
+    },
+  });
+  const updateMutation = trpc.coupons.update.useMutation({
+    onSuccess: () => {
+      refetchCoupons();
+      setShowCouponModal(false);
+      setEditingCoupon(null);
+      resetCouponForm();
+      Alert.alert('Success', 'Coupon updated successfully');
+    },
+    onError: (error) => {
+      Alert.alert('Error', error.message);
+    },
+  });
+  const deleteMutation = trpc.coupons.delete.useMutation({
+    onSuccess: () => {
+      refetchCoupons();
+      Alert.alert('Success', 'Coupon deleted successfully');
+    },
+    onError: (error) => {
+      Alert.alert('Error', error.message);
+    },
+  });
+
+  const resetCouponForm = () => {
+    setCouponForm({
+      code: '',
+      discountPercent: '',
+      isActive: true,
+      usageLimit: '',
+      expiresAt: '',
+    });
+    setEditingCoupon(null);
+  };
+
+  const handleSaveCoupon = () => {
+    const discountPercent = parseFloat(couponForm.discountPercent);
+    if (isNaN(discountPercent) || discountPercent < 1 || discountPercent > 100) {
+      Alert.alert('Error', 'Discount must be between 1 and 100');
+      return;
+    }
+
+    const usageLimit = couponForm.usageLimit ? parseInt(couponForm.usageLimit) : null;
+    if (couponForm.usageLimit && (isNaN(usageLimit!) || usageLimit! < 1)) {
+      Alert.alert('Error', 'Usage limit must be a positive number');
+      return;
+    }
+
+    const expiresAt = couponForm.expiresAt ? new Date(couponForm.expiresAt) : null;
+    if (expiresAt && expiresAt < new Date()) {
+      Alert.alert('Error', 'Expiration date must be in the future');
+      return;
+    }
+
+    if (editingCoupon) {
+      updateMutation.mutate({
+        couponId: editingCoupon.id,
+        code: couponForm.code,
+        discountPercent,
+        isActive: couponForm.isActive,
+        usageLimit,
+        expiresAt,
+      });
+    } else {
+      createMutation.mutate({
+        code: couponForm.code,
+        discountPercent,
+        isActive: couponForm.isActive,
+        usageLimit,
+        expiresAt,
+      });
+    }
+  };
+
+  const handleEditCoupon = (coupon: any) => {
+    setEditingCoupon(coupon);
+    setCouponForm({
+      code: coupon.code,
+      discountPercent: coupon.discountPercent.toString(),
+      isActive: coupon.isActive,
+      usageLimit: coupon.usageLimit?.toString() || '',
+      expiresAt: coupon.expiresAt
+        ? new Date(coupon.expiresAt).toISOString().split('T')[0]
+        : '',
+    });
+    setShowCouponModal(true);
+  };
+
+  const handleDeleteCoupon = (couponId: string) => {
+    Alert.alert('Delete Coupon', 'Are you sure you want to delete this coupon?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => deleteMutation.mutate({ couponId }),
+      },
+    ]);
+  };
+
+  const toggleCouponActive = (coupon: any) => {
+    updateMutation.mutate({
+      couponId: coupon.id,
+      isActive: !coupon.isActive,
+    });
+  };
+
+  return (
+    <View style={styles.content}>
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageTitle}>Coupons</Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => {
+            resetCouponForm();
+            setShowCouponModal(true);
+          }}
+        >
+          <Plus size={20} color="#FFFFFF" />
+          <Text style={styles.addButtonText}>New Coupon</Text>
+        </TouchableOpacity>
+      </View>
+
+      {isLoading ? (
+        <ActivityIndicator size="large" color="#111827" style={{ marginTop: 40 }} />
+      ) : (
+        <ScrollView style={styles.couponsList} showsVerticalScrollIndicator={false}>
+          {coupons && coupons.length > 0 ? (
+            coupons.map((coupon: any) => {
+              const isExpired = coupon.expiresAt && new Date(coupon.expiresAt) < new Date();
+              const isLimitReached =
+                coupon.usageLimit !== null && coupon.usedCount >= coupon.usageLimit;
+
+              return (
+                <View key={coupon.id} style={styles.couponCard}>
+                  <View style={styles.couponHeader}>
+                    <View style={styles.couponCodeRow}>
+                      <Text style={styles.couponCode}>{coupon.code}</Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.activeToggle,
+                          coupon.isActive && styles.activeToggleOn,
+                        ]}
+                        onPress={() => toggleCouponActive(coupon)}
+                      >
+                        <Text
+                          style={[
+                            styles.activeToggleText,
+                            coupon.isActive && styles.activeToggleTextOn,
+                          ]}
+                        >
+                          {coupon.isActive ? 'Active' : 'Inactive'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.couponActions}>
+                      <TouchableOpacity
+                        style={styles.iconButton}
+                        onPress={() => handleEditCoupon(coupon)}
+                      >
+                        <Edit size={18} color="#6B7280" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconButton}
+                        onPress={() => handleDeleteCoupon(coupon.id)}
+                      >
+                        <Trash2 size={18} color="#DC2626" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={styles.couponDetails}>
+                    <View style={styles.couponDetailRow}>
+                      <Text style={styles.couponDetailLabel}>Discount:</Text>
+                      <Text style={styles.couponDetailValue}>
+                        {coupon.discountPercent}%
+                      </Text>
+                    </View>
+                    <View style={styles.couponDetailRow}>
+                      <Text style={styles.couponDetailLabel}>Used:</Text>
+                      <Text style={styles.couponDetailValue}>
+                        {coupon.usedCount}
+                        {coupon.usageLimit !== null ? ` / ${coupon.usageLimit}` : ' / ∞'}
+                      </Text>
+                    </View>
+                    {coupon.expiresAt && (
+                      <View style={styles.couponDetailRow}>
+                        <Text style={styles.couponDetailLabel}>Expires:</Text>
+                        <Text
+                          style={[
+                            styles.couponDetailValue,
+                            isExpired && styles.expiredText,
+                          ]}
+                        >
+                          {new Date(coupon.expiresAt).toLocaleDateString()}
+                          {isExpired && ' (Expired)'}
+                        </Text>
+                      </View>
+                    )}
+                    {(isExpired || isLimitReached) && (
+                      <View style={styles.warningBadge}>
+                        <Text style={styles.warningText}>
+                          {isExpired
+                            ? 'Expired'
+                            : isLimitReached
+                            ? 'Limit Reached'
+                            : ''}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <View style={styles.emptyState}>
+              <Tag size={48} color="#9CA3AF" />
+              <Text style={styles.emptyTitle}>No coupons</Text>
+              <Text style={styles.emptyText}>Create your first coupon to get started.</Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      {/* Coupon Modal */}
+      <Modal
+        visible={showCouponModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setShowCouponModal(false);
+          resetCouponForm();
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {editingCoupon ? 'Edit Coupon' : 'Create Coupon'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCouponModal(false);
+                  resetCouponForm();
+                }}
+              >
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.label}>Coupon Code *</Text>
+              <TextInput
+                style={styles.input}
+                value={couponForm.code}
+                onChangeText={(text) =>
+                  setCouponForm({ ...couponForm, code: text.toUpperCase() })
+                }
+                placeholder="e.g., WELCOME10"
+                placeholderTextColor="#9CA3AF"
+                editable={!editingCoupon}
+              />
+
+              <Text style={styles.label}>Discount % (1-100) *</Text>
+              <TextInput
+                style={styles.input}
+                value={couponForm.discountPercent}
+                onChangeText={(text) =>
+                  setCouponForm({ ...couponForm, discountPercent: text })
+                }
+                placeholder="e.g., 10"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.label}>Usage Limit (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={couponForm.usageLimit}
+                onChangeText={(text) =>
+                  setCouponForm({ ...couponForm, usageLimit: text })
+                }
+                placeholder="Leave empty for unlimited"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.label}>Expiration Date (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={couponForm.expiresAt}
+                onChangeText={(text) =>
+                  setCouponForm({ ...couponForm, expiresAt: text })
+                }
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor="#9CA3AF"
+              />
+
+              <View style={styles.checkboxRow}>
+                <TouchableOpacity
+                  style={styles.checkbox}
+                  onPress={() =>
+                    setCouponForm({ ...couponForm, isActive: !couponForm.isActive })
+                  }
+                >
+                  {couponForm.isActive && <CheckCircle size={20} color="#111827" />}
+                </TouchableOpacity>
+                <Text style={styles.checkboxLabel}>Active</Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.saveButton}
+                onPress={handleSaveCoupon}
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
+                {createMutation.isPending || updateMutation.isPending ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.saveButtonText}>
+                    {editingCoupon ? 'Update Coupon' : 'Create Coupon'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
@@ -1891,6 +2247,10 @@ export default function AdminDashboardScreen() {
             </View>
           </View>
         )}
+
+        {activeTab === 'coupons' && (
+          <CouponsManagementSection />
+        )}
       </ScrollView>
 
       <View style={styles.bottomTabs}>
@@ -1956,6 +2316,19 @@ export default function AdminDashboardScreen() {
           </View>
           <Text style={[styles.bottomTabLabel, activeTab === 'payouts' && styles.bottomTabLabelActive]}>
             Payouts
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'coupons' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('coupons')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'coupons' && styles.bottomTabIconWrapActive]}>
+            <Tag size={20} color={activeTab === 'coupons' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'coupons' && styles.bottomTabLabelActive]}>
+            Coupons
           </Text>
         </TouchableOpacity>
       </View>
@@ -4537,5 +4910,134 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     marginBottom: 8,
+  },
+  // Coupon styles
+  pageHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: 20,
+  },
+  couponsList: {
+    flex: 1,
+  },
+  couponCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  couponHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'flex-start' as const,
+    marginBottom: 12,
+  },
+  couponCodeRow: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  couponCode: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: '#111827',
+    letterSpacing: 1,
+  },
+  activeToggle: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+  },
+  activeToggleOn: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  activeToggleText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#6B7280',
+  },
+  activeToggleTextOn: {
+    color: '#FFFFFF',
+  },
+  couponActions: {
+    flexDirection: 'row' as const,
+    gap: 8,
+  },
+  iconButton: {
+    padding: 8,
+  },
+  couponDetails: {
+    gap: 8,
+  },
+  couponDetailRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+  },
+  couponDetailLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  couponDetailValue: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#111827',
+  },
+  expiredText: {
+    color: '#DC2626',
+  },
+  warningBadge: {
+    alignSelf: 'flex-start' as const,
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  warningText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#DC2626',
+  },
+  checkboxRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    borderRadius: 4,
+    marginRight: 8,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: '#374151',
+  },
+  saveButton: {
+    backgroundColor: '#111827',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
 });

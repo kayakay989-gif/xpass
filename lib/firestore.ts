@@ -15,7 +15,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage, Coupon } from '@/types';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -510,6 +510,84 @@ export const firestoreSpotlightImages = {
   },
 };
 
+// Coupons collection
+export const couponsCollection = collection(db, 'coupons');
+
+export const firestoreCoupons = {
+  async getAll(): Promise<Coupon[]> {
+    const q = query(couponsCollection, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((docSnap) => {
+      const data = docSnap.data() as any;
+      return {
+        id: docSnap.id,
+        code: data.code || '',
+        discountPercent: data.discountPercent || 0,
+        isActive: !!data.isActive,
+        createdAt: timestampToDate(data.createdAt),
+        usageLimit: data.usageLimit ?? null,
+        usedCount: data.usedCount || 0,
+        expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+      };
+    });
+  },
+
+  async getByCode(code: string): Promise<Coupon | null> {
+    const upperCode = code.toUpperCase().trim();
+    const q = query(couponsCollection, where('code', '==', upperCode), limit(1));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    
+    const docSnap = snapshot.docs[0];
+    const data = docSnap.data() as any;
+    return {
+      id: docSnap.id,
+      code: data.code || '',
+      discountPercent: data.discountPercent || 0,
+      isActive: !!data.isActive,
+      createdAt: timestampToDate(data.createdAt),
+      usageLimit: data.usageLimit ?? null,
+      usedCount: data.usedCount || 0,
+      expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+    };
+  },
+
+  async create(coupon: Coupon): Promise<void> {
+    await setDoc(doc(db, 'coupons', coupon.id), {
+      code: coupon.code.toUpperCase().trim(),
+      discountPercent: coupon.discountPercent,
+      isActive: coupon.isActive,
+      createdAt: serverTimestamp(),
+      usageLimit: coupon.usageLimit ?? null,
+      usedCount: coupon.usedCount || 0,
+      expiresAt: coupon.expiresAt ? coupon.expiresAt : null,
+    });
+  },
+
+  async update(couponId: string, updates: Partial<Coupon>): Promise<void> {
+    const updateData: any = { ...updates };
+    if (updateData.code) {
+      updateData.code = updateData.code.toUpperCase().trim();
+    }
+    await updateDoc(doc(db, 'coupons', couponId), updateData);
+  },
+
+  async delete(couponId: string): Promise<void> {
+    await deleteDoc(doc(db, 'coupons', couponId));
+  },
+
+  async incrementUsage(couponId: string): Promise<void> {
+    const couponDoc = await getDoc(doc(db, 'coupons', couponId));
+    if (!couponDoc.exists()) {
+      throw new Error('Coupon not found');
+    }
+    const currentCount = couponDoc.data()?.usedCount || 0;
+    await updateDoc(doc(db, 'coupons', couponId), {
+      usedCount: currentCount + 1,
+    });
+  },
+};
+
 // Export all services
 export default {
   users: firestoreUsers,
@@ -518,5 +596,6 @@ export default {
   checkIns: firestoreCheckIns,
   gymOwners: firestoreGymOwners,
   spotlightImages: firestoreSpotlightImages,
+  coupons: firestoreCoupons,
 };
 

@@ -26,6 +26,10 @@ export default function PaymentScreen() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [authTransactionId, setAuthTransactionId] = useState<string | null>(null);
   const [showNativeContinueButton, setShowNativeContinueButton] = useState<boolean>(false);
+  const [couponCode, setCouponCode] = useState<string>('');
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const [couponError, setCouponError] = useState<string>('');
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState<boolean>(false);
 
   const initiateAuthMutation = trpc.payments.initiate3ds.useMutation({
     onError: (error) => {
@@ -73,6 +77,17 @@ export default function PaymentScreen() {
     },
   });
   
+  const validateCouponQuery = trpc.coupons.validate.useQuery(
+    {
+      code: couponCode.toUpperCase().trim(),
+      originalPrice: parseFloat(price) || 0,
+    },
+    {
+      enabled: false, // Manual trigger
+      retry: false,
+    }
+  );
+
   const payWith3dsMutation = trpc.payments.payWith3ds.useMutation({
     onError: (error) => {
       console.error('[Payment] Pay with 3DS mutation error:', error);
@@ -88,6 +103,30 @@ export default function PaymentScreen() {
       console.log('[Payment] Pay with 3DS mutation success:', data);
       setPaymentProcessing(false);
       setStatusMessage('');
+      
+      if (data.isFree) {
+        Alert.alert(
+          'Subscription Activated',
+          `Your ${tier} subscription has been activated for ${duration} month(s) using coupon!`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/(tabs)/home'),
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Payment Successful',
+          `Your ${tier} subscription has been activated for ${duration} month(s)!`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/(tabs)/home'),
+            },
+          ]
+        );
+      }
     },
   });
 
@@ -159,18 +198,36 @@ export default function PaymentScreen() {
       expiryMonth: month,
       expiryYear: year,
       currency: 'JOD',
+      couponCode: appliedCoupon?.coupon?.code || undefined,
     });
+  };
 
-    Alert.alert(
-      'Payment Successful',
-      `Your ${tier} subscription has been activated for ${duration} month(s)!`,
-      [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/(tabs)/home'),
-        },
-      ]
-    );
+  const handleFreeCheckout = async () => {
+    if (!appliedCoupon || !appliedCoupon.isFree) {
+      return;
+    }
+
+    setPaymentProcessing(true);
+    setStatusMessage('Activating subscription...');
+
+    try {
+      const orderId = `order-${Date.now()}`;
+      
+      await payWith3dsMutation.mutateAsync({
+        userId: user!.id,
+        tier: tier as any,
+        duration: parseInt(duration) as any,
+        orderId,
+        authenticationTransactionId: '',
+        currency: 'JOD',
+        couponCode: appliedCoupon.coupon.code,
+        // No card details needed for 100% discount
+      });
+    } catch (error: any) {
+      setPaymentProcessing(false);
+      setStatusMessage('');
+      Alert.alert('Error', error.message || 'Failed to activate subscription');
+    }
   };
 
   const handlePayment = async () => {
@@ -182,7 +239,15 @@ export default function PaymentScreen() {
       expiryDate,
       cvvLength: cvv.length,
       cardholderNameLength: cardholderName.length,
+      hasCoupon: !!appliedCoupon,
+      isFree: appliedCoupon?.isFree,
     });
+
+    // If 100% discount, skip payment gateway
+    if (appliedCoupon?.isFree) {
+      await handleFreeCheckout();
+      return;
+    }
 
     if (!isCardValid()) {
       console.warn('[Payment] Card validation failed');
@@ -572,6 +637,47 @@ export default function PaymentScreen() {
     }
   };
 
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) {
+      setCouponError('Please enter a coupon code');
+      return;
+    }
+
+    setIsValidatingCoupon(true);
+    setCouponError('');
+
+    try {
+      const result = await validateCouponQuery.refetch();
+      const data = result.data;
+
+      if (data?.valid) {
+        setAppliedCoupon(data);
+        setCouponError('');
+      } else {
+        setAppliedCoupon(null);
+        setCouponError(data?.error || 'Invalid coupon code');
+      }
+    } catch (error: any) {
+      setAppliedCoupon(null);
+      setCouponError(error.message || 'Failed to validate coupon');
+    } finally {
+      setIsValidatingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setCouponCode('');
+    setAppliedCoupon(null);
+    setCouponError('');
+  };
+
+  const getFinalPrice = () => {
+    if (appliedCoupon) {
+      return appliedCoupon.finalPrice;
+    }
+    return parseFloat(price) || 0;
+  };
+
   const getTierName = () => {
     const tierNames: Record<string, string> = {
       silver: 'Silver Package',
@@ -610,24 +716,96 @@ export default function PaymentScreen() {
               <Text style={styles.priceLabel}>Total Amount</Text>
               <Text style={styles.price}>{price} JOD</Text>
             </View>
+
+            {/* Coupon Section */}
+            <View style={styles.couponSection}>
+              <Text style={styles.couponLabel}>Have a coupon code?</Text>
+              <View style={styles.couponInputRow}>
+                <TextInput
+                  style={styles.couponInput}
+                  placeholder="Enter coupon code"
+                  placeholderTextColor="#9CA3AF"
+                  value={couponCode}
+                  onChangeText={(text) => {
+                    setCouponCode(text.toUpperCase());
+                    setCouponError('');
+                    setAppliedCoupon(null);
+                  }}
+                  autoCapitalize="characters"
+                />
+                <TouchableOpacity
+                  style={[styles.applyButton, isValidatingCoupon && styles.applyButtonDisabled]}
+                  onPress={handleApplyCoupon}
+                  disabled={!couponCode.trim() || isValidatingCoupon}
+                >
+                  {isValidatingCoupon ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.applyButtonText}>Apply</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {couponError ? (
+                <Text style={styles.couponError}>{couponError}</Text>
+              ) : null}
+              {appliedCoupon && (
+                <View style={styles.couponApplied}>
+                  <Text style={styles.couponAppliedText}>
+                    ✓ {appliedCoupon.coupon.code} applied ({appliedCoupon.coupon.discountPercent}% off)
+                  </Text>
+                  <TouchableOpacity onPress={handleRemoveCoupon}>
+                    <Text style={styles.removeCouponText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Price Breakdown */}
+            {appliedCoupon && (
+              <View style={styles.priceBreakdown}>
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceBreakdownLabel}>Original Price:</Text>
+                  <Text style={styles.priceBreakdownValue}>{price} JOD</Text>
+                </View>
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceBreakdownLabel}>Discount ({appliedCoupon.coupon.discountPercent}%):</Text>
+                  <Text style={[styles.priceBreakdownValue, styles.discountValue]}>
+                    -{appliedCoupon.discountAmount.toFixed(2)} JOD
+                  </Text>
+                </View>
+                <View style={[styles.priceRow, styles.finalPriceRow]}>
+                  <Text style={styles.finalPriceLabel}>Final Price:</Text>
+                  <Text style={styles.finalPriceValue}>
+                    {appliedCoupon.finalPrice.toFixed(2)} JOD
+                  </Text>
+                </View>
+                {appliedCoupon.isFree && (
+                  <View style={styles.freeBadge}>
+                    <Text style={styles.freeBadgeText}>🎉 No payment required!</Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
-          <View style={styles.cardFieldContainer}>
-            <Text style={styles.label}>Cardholder Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="John Smith"
-              placeholderTextColor={Colors.textSecondary}
-              value={cardholderName}
-              onChangeText={setCardholderName}
-              autoCapitalize="words"
-              returnKeyType="next"
-              testID="cardholder-name-input"
-            />
-          </View>
+          {!appliedCoupon?.isFree && (
+            <>
+              <View style={styles.cardFieldContainer}>
+                <Text style={styles.label}>Cardholder Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="John Smith"
+                  placeholderTextColor={Colors.textSecondary}
+                  value={cardholderName}
+                  onChangeText={setCardholderName}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                  testID="cardholder-name-input"
+                />
+              </View>
 
-          <View style={styles.cardFieldContainer}>
-            <Text style={styles.label}>Card Number</Text>
+              <View style={styles.cardFieldContainer}>
+                <Text style={styles.label}>Card Number</Text>
             <TextInput
               style={styles.input}
               placeholder="4242 4242 4242 4242"
@@ -692,20 +870,23 @@ export default function PaymentScreen() {
               />
             </View>
           </View>
+            </>
+          )}
 
           <TouchableOpacity
             style={[
               styles.payButton,
-              (!isCardValid() || paymentProcessing) && styles.payButtonDisabled,
+              ((!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing) && styles.payButtonDisabled,
             ]}
             onPress={() => {
               console.log('[Payment] TouchableOpacity onPress triggered');
               console.log('[Payment] Button state:', {
                 isCardValid: isCardValid(),
                 paymentProcessing,
-                disabled: !isCardValid() || paymentProcessing,
+                hasFreeCoupon: appliedCoupon?.isFree,
+                disabled: (!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing,
               });
-              if (!isCardValid() || paymentProcessing) {
+              if ((!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing) {
                 console.warn('[Payment] Button is disabled, ignoring press');
                 return;
               }
@@ -718,7 +899,7 @@ export default function PaymentScreen() {
             onPressIn={() => {
               console.log('[Payment] Button pressed in - touch detected');
             }}
-            disabled={!isCardValid() || paymentProcessing}
+            disabled={(!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing}
             testID="pay-button"
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -731,7 +912,11 @@ export default function PaymentScreen() {
             ) : (
               <>
                 <CheckCircle2 size={20} color={Colors.white} />
-                <Text style={styles.payButtonText}>Pay {price} JOD</Text>
+                <Text style={styles.payButtonText}>
+                  {appliedCoupon?.isFree
+                    ? 'Activate Free Subscription'
+                    : `Pay ${getFinalPrice().toFixed(2)} JOD`}
+                </Text>
               </>
             )}
           </TouchableOpacity>
@@ -748,10 +933,12 @@ export default function PaymentScreen() {
             </View>
           )}
 
-          <View style={styles.securityNote}>
-            <Text style={styles.securityText}>🔒 Secure Payment</Text>
-            <Text style={styles.securitySubtext}>Your payment information is encrypted and secure</Text>
-          </View>
+          {!appliedCoupon?.isFree && (
+            <View style={styles.securityNote}>
+              <Text style={styles.securityText}>🔒 Secure Payment</Text>
+              <Text style={styles.securitySubtext}>Your payment information is encrypted and secure</Text>
+            </View>
+          )}
         </ScrollView>
 
         {methodHtml && Platform.OS !== 'web' && (
@@ -1003,5 +1190,128 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 15,
     fontWeight: '600' as const,
+  },
+  // Coupon styles
+  couponSection: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  couponLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  couponInputRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+    marginBottom: 8,
+  },
+  couponInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: Colors.text,
+    backgroundColor: Colors.white,
+  },
+  applyButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  applyButtonDisabled: {
+    opacity: 0.6,
+  },
+  applyButtonText: {
+    color: Colors.white,
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  couponError: {
+    fontSize: 12,
+    color: '#DC2626',
+    marginTop: 4,
+  },
+  couponApplied: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#F0FDF4',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  couponAppliedText: {
+    fontSize: 14,
+    color: '#16A34A',
+    fontWeight: '500' as const,
+  },
+  removeCouponText: {
+    fontSize: 14,
+    color: '#DC2626',
+    fontWeight: '600' as const,
+  },
+  priceBreakdown: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  priceRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: 8,
+  },
+  priceBreakdownLabel: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+  },
+  priceBreakdownValue: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  discountValue: {
+    color: '#16A34A',
+  },
+  finalPriceRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  finalPriceLabel: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.text,
+  },
+  finalPriceValue: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: Colors.primary,
+  },
+  freeBadge: {
+    marginTop: 12,
+    backgroundColor: '#FEF3C7',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+  },
+  freeBadgeText: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#92400E',
   },
 });

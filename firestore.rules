@@ -71,6 +71,14 @@ service cloud.firestore {
       // Only admins can create/update/delete spotlight images
       allow write: if isAdmin();
     }
+
+    // Coupons collection
+    match /coupons/{couponId} {
+      // Everyone can read coupons (needed for validation at checkout)
+      allow read: if true;
+      // Only admins can create/update/delete coupons
+      allow write: if isAdmin();
+    }
   }
 }
 
