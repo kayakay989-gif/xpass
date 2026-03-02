@@ -493,6 +493,18 @@ export default function AdminDashboardScreen() {
   const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'inactive'>('all');
   const [checkInsDateFilter, setCheckInsDateFilter] = useState<string>('');
 
+  // Admin payouts (pending / paid)
+  const payoutsQuery = trpc.admin.payouts.getAll.useQuery(undefined, {
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+  });
+
+  const markPaidMutation = trpc.admin.payouts.markPaid.useMutation({
+    onSuccess: () => {
+      payoutsQuery.refetch();
+    },
+  });
+
   // Load data from Firestore directly
   const loadData = async () => {
     try {
@@ -2272,71 +2284,18 @@ export default function AdminDashboardScreen() {
             </Text>
 
             {/* Payouts data */}
-            {(() => {
-              const { data, isLoading: isLoadingPayouts } =
-                trpc.admin.payouts.getAll.useQuery(undefined, {
-                  refetchOnMount: true,
-                  refetchOnWindowFocus: true,
-                });
-              const markPaidMutation = trpc.admin.payouts.markPaid.useMutation({
-                onSuccess: () => {
-                  // Refetch payouts after marking paid
-                  void payoutsQuery.refetch();
-                },
-              });
-
-              const payoutsQuery = trpc.admin.payouts.getAll.useQuery();
-
-              const pending = payoutsQuery.data?.pending || [];
-              const paid = payoutsQuery.data?.paid || [];
-
-              const formatMonth = (monthKey: string) => {
-                const [year, month] = monthKey.split('-').map(Number);
-                if (!year || !month) return monthKey;
-                const date = new Date(year, month - 1, 1);
-                return date.toLocaleDateString('en-US', {
-                  month: 'long',
-                  year: 'numeric',
-                });
-              };
-
-              const formatAmount = (amount: number) => {
-                return `JOD ${amount.toFixed(2)}`;
-              };
-
-              const handleMarkPaid = (payoutId: string) => {
-                const confirmMessage = 'Confirm this payout has been paid?';
-                if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                  if (!window.confirm(confirmMessage)) return;
-                  markPaidMutation.mutate({ payoutId });
-                } else {
-                  Alert.alert('Mark as paid', confirmMessage, [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Confirm',
-                      style: 'destructive',
-                      onPress: () => markPaidMutation.mutate({ payoutId }),
-                    },
-                  ]);
-                }
-              };
-
-              if (isLoadingPayouts) {
-                return (
-                  <View style={styles.loadingCard}>
-                    <ActivityIndicator size="large" color="#DC2626" />
-                    <Text style={styles.loadingText}>Loading payouts...</Text>
-                  </View>
-                );
-              }
-
-              return (
-                <>
+            {payoutsQuery.isLoading ? (
+              <View style={styles.loadingCard}>
+                <ActivityIndicator size="large" color="#DC2626" />
+                <Text style={styles.loadingText}>Loading payouts...</Text>
+              </View>
+            ) : (
+              <>
                   {/* Pending Section */}
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Pending Payouts</Text>
 
-                    {pending.length === 0 ? (
+                    {pendingPayouts.length === 0 ? (
                       <View style={styles.emptyState}>
                         <DollarSign size={40} color="#9CA3AF" />
                         <Text style={styles.emptyTitle}>No pending payouts</Text>
@@ -2345,7 +2304,7 @@ export default function AdminDashboardScreen() {
                         </Text>
                       </View>
                     ) : (
-                      pending.map((payout: any) => (
+                      pendingPayouts.map((payout: any) => (
                         <View key={payout.id} style={styles.payoutCard}>
                           <View style={styles.payoutHeaderRow}>
                             <Text style={styles.payoutGymName}>{payout.gymName}</Text>
@@ -2356,7 +2315,7 @@ export default function AdminDashboardScreen() {
 
                           <View style={styles.payoutMetaRow}>
                             <Text style={styles.payoutLabel}>Month</Text>
-                            <Text style={styles.payoutValue}>{formatMonth(payout.month)}</Text>
+                            <Text style={styles.payoutValue}>{formatPayoutMonth(payout.month)}</Text>
                           </View>
                           <View style={styles.payoutMetaRow}>
                             <Text style={styles.payoutLabel}>Check-ins</Text>
@@ -2364,13 +2323,13 @@ export default function AdminDashboardScreen() {
                           </View>
                           <View style={styles.payoutMetaRow}>
                             <Text style={styles.payoutLabel}>Amount</Text>
-                            <Text style={styles.payoutValue}>{formatAmount(payout.amount)}</Text>
+                            <Text style={styles.payoutValue}>{formatPayoutAmount(payout.amount)}</Text>
                           </View>
 
                           <TouchableOpacity
                             style={styles.markPaidButton}
                             activeOpacity={0.9}
-                            onPress={() => handleMarkPaid(payout.id)}
+                              onPress={() => handleMarkPayoutPaid(payout.id)}
                           >
                             <Text style={styles.markPaidButtonText}>Mark as Paid</Text>
                           </TouchableOpacity>
@@ -2383,7 +2342,7 @@ export default function AdminDashboardScreen() {
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Paid Payouts</Text>
 
-                    {paid.length === 0 ? (
+                    {paidPayouts.length === 0 ? (
                       <View style={styles.emptyState}>
                         <DollarSign size={40} color="#9CA3AF" />
                         <Text style={styles.emptyTitle}>No paid payouts</Text>
@@ -2392,7 +2351,7 @@ export default function AdminDashboardScreen() {
                         </Text>
                       </View>
                     ) : (
-                      paid.map((payout: any) => {
+                      paidPayouts.map((payout: any) => {
                         const paidOn = payout.paidAt || payout.createdAt;
                         return (
                           <View key={payout.id} style={styles.payoutCard}>
@@ -2405,7 +2364,7 @@ export default function AdminDashboardScreen() {
 
                             <View style={styles.payoutMetaRow}>
                               <Text style={styles.payoutLabel}>Month</Text>
-                              <Text style={styles.payoutValue}>{formatMonth(payout.month)}</Text>
+                              <Text style={styles.payoutValue}>{formatPayoutMonth(payout.month)}</Text>
                             </View>
                             <View style={styles.payoutMetaRow}>
                               <Text style={styles.payoutLabel}>Check-ins</Text>
@@ -2413,7 +2372,7 @@ export default function AdminDashboardScreen() {
                             </View>
                             <View style={styles.payoutMetaRow}>
                               <Text style={styles.payoutLabel}>Amount</Text>
-                              <Text style={styles.payoutValue}>{formatAmount(payout.amount)}</Text>
+                              <Text style={styles.payoutValue}>{formatPayoutAmount(payout.amount)}</Text>
                             </View>
                             <View style={styles.payoutMetaRow}>
                               <Text style={styles.payoutLabel}>Paid on</Text>
@@ -2431,9 +2390,8 @@ export default function AdminDashboardScreen() {
                       })
                     )}
                   </View>
-                </>
-              );
-            })()}
+              </>
+            )}
           </View>
         )}
 
