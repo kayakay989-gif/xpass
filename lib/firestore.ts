@@ -82,21 +82,28 @@ export const subscriptionsCollection = collection(db, 'subscriptions');
 
 export const firestoreSubscriptions = {
   async getByUserId(userId: string): Promise<Subscription | null> {
+    // Use simple where filters and sort in memory to avoid requiring a composite Firestore index.
     const q = query(
       subscriptionsCollection,
       where('userId', '==', userId),
       where('isActive', '==', true),
-      orderBy('createdAt', 'desc'),
-      limit(1)
     );
-    
+
     const snapshot = await getDocs(q);
     if (snapshot.empty) return null;
-    
-    const doc = snapshot.docs[0];
-    const data = doc.data();
+
+    // Sort by createdAt in memory (newest first)
+    const sorted = snapshot.docs.sort((a, b) => {
+      const aTime = timestampToDate((a.data() as any).createdAt).getTime();
+      const bTime = timestampToDate((b.data() as any).createdAt).getTime();
+      return bTime - aTime;
+    });
+
+    const newest = sorted[0];
+    const data = newest.data() as any;
+
     return {
-      id: doc.id,
+      id: newest.id,
       userId: data.userId,
       tier: data.tier,
       duration: data.duration,
