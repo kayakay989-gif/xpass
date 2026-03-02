@@ -9,6 +9,9 @@ import {
   RefreshControl,
   Image,
   Alert,
+  Linking,
+  Platform,
+  Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronRight, CreditCard, Filter, Home, User as UserIcon } from 'lucide-react-native';
@@ -28,6 +31,7 @@ export default function GymDashboardScreen() {
   const [gymOwner, setGymOwner] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
 
   // Load data from Firestore
   const loadData = async (gymIdToLoad: string) => {
@@ -393,7 +397,7 @@ export default function GymDashboardScreen() {
           <TouchableOpacity
             style={styles.primaryCta}
             activeOpacity={0.9}
-            onPress={() => Alert.alert('Support', 'Contact support flow goes here.')}
+            onPress={() => setShowSupportModal(true)}
           >
             <Text style={styles.primaryCtaText}>Contact Support</Text>
           </TouchableOpacity>
@@ -478,6 +482,70 @@ export default function GymDashboardScreen() {
       )}
 
       <BottomTabs />
+
+      {/* Support contact modal */}
+      <Modal
+        visible={showSupportModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSupportModal(false)}
+      >
+        <View style={styles.supportOverlay}>
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={() => setShowSupportModal(false)}
+          />
+          <View style={styles.supportSheet}>
+            <Text style={styles.supportTitle}>Contact Support</Text>
+            <Text style={styles.supportSubtitle}>
+              Choose how you’d like to reach XPASS support.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.supportButtonWhatsapp}
+              activeOpacity={0.9}
+              onPress={async () => {
+                const url = 'https://wa.me/962790449173';
+                try {
+                  await Linking.openURL(url);
+                } catch (err) {
+                  Alert.alert('Error', 'Unable to open WhatsApp.');
+                }
+                setShowSupportModal(false);
+              }}
+            >
+              <Text style={styles.supportButtonText}>WhatsApp</Text>
+              <Text style={styles.supportButtonSub}>Chat with support on WhatsApp</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.supportButtonCall}
+              activeOpacity={0.9}
+              onPress={async () => {
+                const url = 'tel:+962790449173';
+                try {
+                  await Linking.openURL(url);
+                } catch (err) {
+                  Alert.alert('Error', 'Unable to start a phone call.');
+                }
+                setShowSupportModal(false);
+              }}
+            >
+              <Text style={styles.supportButtonText}>Call</Text>
+              <Text style={styles.supportButtonSub}>Call +962 7 9044 9173</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.supportCancelButton}
+              activeOpacity={0.85}
+              onPress={() => setShowSupportModal(false)}
+            >
+              <Text style={styles.supportCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -659,6 +727,68 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   logoutText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' as const },
+
+  supportOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    justifyContent: 'flex-end' as const,
+  },
+  supportSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 20,
+  },
+  supportTitle: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 4,
+  },
+  supportSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  supportButtonWhatsapp: {
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#22C55E',
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  supportButtonCall: {
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#111827',
+    marginTop: 4,
+  },
+  supportButtonText: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: '#FFFFFF',
+  },
+  supportButtonSub: {
+    fontSize: 12,
+    color: '#E5E7EB',
+    marginTop: 2,
+  },
+  supportCancelButton: {
+    marginTop: 10,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center' as const,
+    backgroundColor: '#F3F4F6',
+  },
+  supportCancelText: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: '#374151',
+  },
 
   bottomTabs: {
     position: 'absolute' as const,
