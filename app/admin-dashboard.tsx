@@ -505,6 +505,40 @@ export default function AdminDashboardScreen() {
     },
   });
 
+  const pendingPayouts = payoutsQuery.data?.pending || [];
+  const paidPayouts = payoutsQuery.data?.paid || [];
+
+  const formatPayoutMonth = (monthKey: string): string => {
+    const [year, month] = monthKey.split('-').map(Number);
+    if (!year || !month) return monthKey;
+    const date = new Date(year, month - 1, 1);
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      year: 'numeric',
+    });
+  };
+
+  const formatPayoutAmount = (amount: number): string => {
+    return `JOD ${amount.toFixed(2)}`;
+  };
+
+  const handleMarkPayoutPaid = (payoutId: string) => {
+    const confirmMessage = 'Confirm this payout has been paid?';
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (!window.confirm(confirmMessage)) return;
+      markPaidMutation.mutate({ payoutId });
+    } else {
+      Alert.alert('Mark as paid', confirmMessage, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          style: 'destructive',
+          onPress: () => markPaidMutation.mutate({ payoutId }),
+        },
+      ]);
+    }
+  };
+
   // Load data from Firestore directly
   const loadData = async () => {
     try {
