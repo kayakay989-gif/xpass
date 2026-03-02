@@ -96,13 +96,19 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter your email and password');
+      const msg = 'Please enter your email and password';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Error', msg);
+      }
       return;
     }
 
     setIsLoading(true);
     try {
       await loginWithEmail(email.trim(), password);
+      console.log('[Login] Email/password login successful, navigating to home');
       router.replace('/(tabs)/home');
     } catch (error: any) {
       console.error('Login error:', error);
@@ -125,8 +131,12 @@ export default function LoginScreen() {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
-      Alert.alert('Error', errorMessage);
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(errorMessage);
+      } else {
+        Alert.alert('Error', errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }
