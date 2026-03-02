@@ -263,45 +263,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (!password) {
         throw new Error('Password is required');
       }
-      
+
       console.log('[AuthContext] Attempting email/password login for:', normalizedEmail);
-      
-      // Wait for any pending auth state changes to complete
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
+
+      // Simple, reliable sign-in – let onAuthStateChanged drive the rest of the flow
       const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
-      
-      // Verify the user was actually signed in
+
       if (!userCredential || !userCredential.user) {
         throw new Error('Login failed: No user returned');
       }
-      
-      console.log('[AuthContext] Sign-in successful, waiting for auth state update...');
-      
-      // Wait for onAuthStateChanged to fire and update state
-      // Use a promise that resolves when auth state is confirmed
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Auth state update timeout'));
-        }, 5000);
-        
-        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-          clearTimeout(timeout);
-          unsubscribe();
-          if (firebaseUser && firebaseUser.uid === userCredential.user.uid) {
-            console.log('[AuthContext] Auth state confirmed:', firebaseUser.uid);
-            resolve();
-          } else {
-            reject(new Error('Auth state mismatch'));
-          }
-        });
+
+      console.log('[AuthContext] Login successful (Firebase user):', {
+        uid: userCredential.user.uid,
+        email: userCredential.user.email,
       });
-      
-      console.log('[AuthContext] Login successful:', userCredential.user.uid, 'Email:', userCredential.user.email);
+      // onAuthStateChanged listener (set up below) will load the profile and update UI.
     } catch (error: any) {
       console.error('[AuthContext] Login error:', error);
       // Provide more specific error messages
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+      if (
+        error.code === 'auth/invalid-credential' ||
+        error.code === 'auth/wrong-password' ||
+        error.code === 'auth/user-not-found'
+      ) {
         throw new Error('Invalid email or password. Please check your credentials and try again.');
       } else if (error.code === 'auth/invalid-email') {
         throw new Error('Invalid email address. Please enter a valid email.');
@@ -310,7 +294,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       } else if (error.code === 'auth/too-many-requests') {
         throw new Error('Too many failed login attempts. Please try again later.');
       } else if (error.message) {
-        throw error;
+        // Re-throw with the original message so UI can display it.
+        throw new Error(error.message);
       } else {
         throw new Error('Login failed. Please check your email and password and try again.');
       }
