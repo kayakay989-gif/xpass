@@ -2268,27 +2268,172 @@ export default function AdminDashboardScreen() {
           <View style={styles.content}>
             <Text style={styles.pageTitle}>Payouts</Text>
             <Text style={styles.pageSubtitle}>
-              Monthly payouts are calculated from check-ins. (Currently showing placeholders: JOD 0)
+              Monthly payouts are calculated from completed check-ins.
             </Text>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Monthly Payouts</Text>
+            {/* Payouts data */}
+            {(() => {
+              const { data, isLoading: isLoadingPayouts } =
+                trpc.admin.payouts.getAll.useQuery(undefined, {
+                  refetchOnMount: true,
+                  refetchOnWindowFocus: true,
+                });
+              const markPaidMutation = trpc.admin.payouts.markPaid.useMutation({
+                onSuccess: () => {
+                  // Refetch payouts after marking paid
+                  void payoutsQuery.refetch();
+                },
+              });
 
-              {(gymsWithStats || []).map((g: any) => (
-                <View key={g.id} style={styles.payoutRow}>
-                  <Text style={styles.payoutGymName}>{g.name}</Text>
-                  <Text style={styles.payoutAmount}>JOD {g.totalPayout?.toFixed(2) || '0.00'}</Text>
-                </View>
-              ))}
+              const payoutsQuery = trpc.admin.payouts.getAll.useQuery();
 
-              {(gymsWithStats || []).length === 0 && (
-                <View style={styles.emptyState}>
-                  <DollarSign size={48} color="#9CA3AF" />
-                  <Text style={styles.emptyTitle}>No payouts</Text>
-                  <Text style={styles.emptyText}>Add gyms and check-ins to generate payouts.</Text>
-                </View>
-              )}
-            </View>
+              const pending = payoutsQuery.data?.pending || [];
+              const paid = payoutsQuery.data?.paid || [];
+
+              const formatMonth = (monthKey: string) => {
+                const [year, month] = monthKey.split('-').map(Number);
+                if (!year || !month) return monthKey;
+                const date = new Date(year, month - 1, 1);
+                return date.toLocaleDateString('en-US', {
+                  month: 'long',
+                  year: 'numeric',
+                });
+              };
+
+              const formatAmount = (amount: number) => {
+                return `JOD ${amount.toFixed(2)}`;
+              };
+
+              const handleMarkPaid = (payoutId: string) => {
+                const confirmMessage = 'Confirm this payout has been paid?';
+                if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                  if (!window.confirm(confirmMessage)) return;
+                  markPaidMutation.mutate({ payoutId });
+                } else {
+                  Alert.alert('Mark as paid', confirmMessage, [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Confirm',
+                      style: 'destructive',
+                      onPress: () => markPaidMutation.mutate({ payoutId }),
+                    },
+                  ]);
+                }
+              };
+
+              if (isLoadingPayouts) {
+                return (
+                  <View style={styles.loadingCard}>
+                    <ActivityIndicator size="large" color="#DC2626" />
+                    <Text style={styles.loadingText}>Loading payouts...</Text>
+                  </View>
+                );
+              }
+
+              return (
+                <>
+                  {/* Pending Section */}
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Pending Payouts</Text>
+
+                    {pending.length === 0 ? (
+                      <View style={styles.emptyState}>
+                        <DollarSign size={40} color="#9CA3AF" />
+                        <Text style={styles.emptyTitle}>No pending payouts</Text>
+                        <Text style={styles.emptyText}>
+                          When users check in to gyms, payouts will appear here.
+                        </Text>
+                      </View>
+                    ) : (
+                      pending.map((payout: any) => (
+                        <View key={payout.id} style={styles.payoutCard}>
+                          <View style={styles.payoutHeaderRow}>
+                            <Text style={styles.payoutGymName}>{payout.gymName}</Text>
+                            <View style={styles.payoutStatusBadgePending}>
+                              <Text style={styles.payoutStatusTextPending}>Pending</Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.payoutMetaRow}>
+                            <Text style={styles.payoutLabel}>Month</Text>
+                            <Text style={styles.payoutValue}>{formatMonth(payout.month)}</Text>
+                          </View>
+                          <View style={styles.payoutMetaRow}>
+                            <Text style={styles.payoutLabel}>Check-ins</Text>
+                            <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
+                          </View>
+                          <View style={styles.payoutMetaRow}>
+                            <Text style={styles.payoutLabel}>Amount</Text>
+                            <Text style={styles.payoutValue}>{formatAmount(payout.amount)}</Text>
+                          </View>
+
+                          <TouchableOpacity
+                            style={styles.markPaidButton}
+                            activeOpacity={0.9}
+                            onPress={() => handleMarkPaid(payout.id)}
+                          >
+                            <Text style={styles.markPaidButtonText}>Mark as Paid</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))
+                    )}
+                  </View>
+
+                  {/* Paid Section */}
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Paid Payouts</Text>
+
+                    {paid.length === 0 ? (
+                      <View style={styles.emptyState}>
+                        <DollarSign size={40} color="#9CA3AF" />
+                        <Text style={styles.emptyTitle}>No paid payouts</Text>
+                        <Text style={styles.emptyText}>
+                          Once payouts are marked as paid, they will appear here.
+                        </Text>
+                      </View>
+                    ) : (
+                      paid.map((payout: any) => {
+                        const paidOn = payout.paidAt || payout.createdAt;
+                        return (
+                          <View key={payout.id} style={styles.payoutCard}>
+                            <View style={styles.payoutHeaderRow}>
+                              <Text style={styles.payoutGymName}>{payout.gymName}</Text>
+                              <View style={styles.payoutStatusBadgePaid}>
+                                <Text style={styles.payoutStatusTextPaid}>Paid</Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.payoutMetaRow}>
+                              <Text style={styles.payoutLabel}>Month</Text>
+                              <Text style={styles.payoutValue}>{formatMonth(payout.month)}</Text>
+                            </View>
+                            <View style={styles.payoutMetaRow}>
+                              <Text style={styles.payoutLabel}>Check-ins</Text>
+                              <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
+                            </View>
+                            <View style={styles.payoutMetaRow}>
+                              <Text style={styles.payoutLabel}>Amount</Text>
+                              <Text style={styles.payoutValue}>{formatAmount(payout.amount)}</Text>
+                            </View>
+                            <View style={styles.payoutMetaRow}>
+                              <Text style={styles.payoutLabel}>Paid on</Text>
+                              <Text style={styles.payoutValue}>
+                                {new Date(paidOn).toLocaleDateString('en-US', {
+                                  weekday: 'short',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
+                </>
+              );
+            })()}
           </View>
         )}
 
@@ -3661,6 +3806,72 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#111827',
     fontWeight: '800' as const,
+  },
+  payoutCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    padding: 16,
+    marginBottom: 12,
+  },
+  payoutHeaderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginBottom: 8,
+  },
+  payoutStatusBadgePending: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#FEF3C7',
+  },
+  payoutStatusTextPending: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#92400E',
+    textTransform: 'uppercase' as const,
+  },
+  payoutStatusBadgePaid: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#DCFCE7',
+  },
+  payoutStatusTextPaid: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#166534',
+    textTransform: 'uppercase' as const,
+  },
+  payoutMetaRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginTop: 4,
+  },
+  payoutLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500' as const,
+  },
+  payoutValue: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '600' as const,
+  },
+  markPaidButton: {
+    marginTop: 12,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    paddingVertical: 10,
+    alignItems: 'center' as const,
+  },
+  markPaidButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#FFFFFF',
   },
   secondaryButton: {
     marginTop: 12,

@@ -15,7 +15,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage, Coupon } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage, Coupon, Payout } from '@/types';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -327,6 +327,36 @@ export const firestoreCheckIns = {
       timestamp: timestampToDate(data.timestamp),
       subscriptionId: data.subscriptionId,
     };
+  },
+};
+
+// Payouts collection
+export const payoutsCollection = collection(db, 'payouts');
+
+export const firestorePayouts = {
+  async getAll(): Promise<Payout[]> {
+    const snapshot = await getDocs(payoutsCollection);
+    return snapshot.docs.map((doc) => {
+      const data = doc.data() as any;
+      return {
+        id: doc.id,
+        gymId: data.gymId,
+        gymName: data.gymName,
+        month: data.month,
+        totalCheckins: data.totalCheckins || 0,
+        amount: data.amount || 0,
+        status: (data.status as 'pending' | 'paid') || 'pending',
+        paidAt: data.paidAt ? timestampToDate(data.paidAt) : null,
+        createdAt: data.createdAt ? timestampToDate(data.createdAt) : new Date(),
+      };
+    });
+  },
+
+  async markPaid(payoutId: string): Promise<void> {
+    await updateDoc(doc(db, 'payouts', payoutId), {
+      status: 'paid',
+      paidAt: serverTimestamp(),
+    });
   },
 };
 

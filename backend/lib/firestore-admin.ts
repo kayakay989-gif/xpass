@@ -1,5 +1,5 @@
 import { adminDb } from './firebase-admin';
-import { User, Subscription, Gym, CheckIn, GymOwner, Coupon } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, Coupon, Payout } from '@/types';
 import admin from 'firebase-admin';
 
 // Helper to convert Firestore Timestamp to Date
@@ -527,6 +527,45 @@ export const firestoreCoupons = {
     const currentCount = couponDoc.data()?.usedCount || 0;
     await adminDb.collection('coupons').doc(couponId).update({
       usedCount: currentCount + 1,
+    });
+  },
+};
+
+// Payouts collection
+export const firestorePayouts = {
+  async getAll(): Promise<Payout[]> {
+    const snapshot = await adminDb.collection('payouts').get();
+    return snapshot.docs.map((doc) => {
+      const data = doc.data() as any;
+      return {
+        id: doc.id,
+        gymId: data.gymId,
+        gymName: data.gymName,
+        month: data.month,
+        totalCheckins: data.totalCheckins || 0,
+        amount: data.amount || 0,
+        status: (data.status as 'pending' | 'paid') || 'pending',
+        paidAt: data.paidAt ? timestampToDate(data.paidAt) : null,
+        createdAt: data.createdAt ? timestampToDate(data.createdAt) : new Date(),
+      };
+    });
+  },
+
+  async create(payout: Omit<Payout, 'id' | 'createdAt'>): Promise<string> {
+    const ref = adminDb.collection('payouts').doc();
+    await ref.set({
+      ...payout,
+      status: payout.status || 'pending',
+      paidAt: payout.paidAt ? admin.firestore.Timestamp.fromDate(payout.paidAt) : null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return ref.id;
+  },
+
+  async markPaid(payoutId: string): Promise<void> {
+    await adminDb.collection('payouts').doc(payoutId).update({
+      status: 'paid',
+      paidAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   },
 };

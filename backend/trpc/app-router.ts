@@ -20,6 +20,8 @@ import adminGetAllGyms from "./routes/admin/getAllGyms/route";
 import adminCreateGym from "./routes/admin/createGym/route";
 import adminDeleteGym from "./routes/admin/deleteGym/route";
 import adminGetStats from "./routes/admin/getStats/route";
+import adminPayoutsGetAll from "./routes/admin/payouts/getAll/route";
+import adminPayoutsMarkPaid from "./routes/admin/payouts/markPaid/route";
 import { sendOTPProcedure } from "./routes/auth/sendOTP/route";
 import { verifyOTPProcedure } from "./routes/auth/verifyOTP/route";
 import { registerProcedure } from "./routes/auth/register/route";
@@ -66,6 +68,11 @@ const paymentsRouter = createTRPCRouter({
   payWith3ds: paymentsPayWith3ds,
 });
 
+const adminPayoutsRouter = createTRPCRouter({
+  getAll: adminPayoutsGetAll,
+  markPaid: adminPayoutsMarkPaid,
+});
+
 const adminRouter = createTRPCRouter({
   getAllUsers: adminGetAllUsers,
   getAllCheckIns: adminGetAllCheckIns,
@@ -73,6 +80,7 @@ const adminRouter = createTRPCRouter({
   createGym: adminCreateGym,
   deleteGym: adminDeleteGym,
   getStats: adminGetStats,
+  payouts: adminPayoutsRouter,
 });
 
 const couponsRouter = createTRPCRouter({

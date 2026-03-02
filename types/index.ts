@@ -125,3 +125,17 @@ export interface Coupon {
   usedCount: number;
   expiresAt: Date | null; // optional expiration date
 }
+
+export type PayoutStatus = 'pending' | 'paid';
+
+export interface Payout {
+  id: string;
+  gymId: string;
+  gymName: string;
+  month: string; // e.g. "2026-03"
+  totalCheckins: number;
+  amount: number;
+  status: PayoutStatus;
+  paidAt: Date | null;
+  createdAt: Date;
+}
