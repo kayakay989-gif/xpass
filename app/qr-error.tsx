@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, RotateCw } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -7,6 +7,10 @@ import Colors from '@/constants/colors';
 export default function QRErrorScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ message?: string }>();
+  const errorMessage = typeof params.message === 'string' && params.message.trim()
+    ? params.message
+    : 'Check in unsuccessful';
 
   const handleTryAgain = () => {
     router.back();
@@ -31,7 +35,7 @@ export default function QRErrorScreen() {
                 style={styles.icon}
               />
             </View>
-            <Text style={styles.message}>Check in unsuccessful</Text>
+            <Text style={styles.message}>{errorMessage}</Text>
           </View>
 
           <TouchableOpacity style={styles.tryAgainButton} onPress={handleTryAgain}>

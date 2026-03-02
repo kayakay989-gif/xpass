@@ -56,18 +56,44 @@ export default function QRScanScreen() {
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
     if (scanned) return;
-    
+
     setScanned(true);
-    
-    const gymId = data.replace('xpass-gym-', '');
-    const checkInResult = await checkIn(gymId);
-    
-    if (checkInResult.success) {
-      router.push('/qr-success');
-    } else {
-      router.push('/qr-error');
+
+    console.log('[QRScan] QR code scanned (tabs):', data);
+
+    // Parse QR code - expected format: "xpass-gym-{gymId}" or just "{gymId}"
+    let gymId = data;
+    if (data.startsWith('xpass-gym-')) {
+      gymId = data.replace('xpass-gym-', '');
+    } else if (data.startsWith('gym-')) {
+      gymId = data.replace('gym-', '');
     }
-    
+
+    if (!gymId || gymId.trim() === '') {
+      console.error('[QRScan] Invalid QR format:', data);
+      router.push({
+        pathname: '/qr-error',
+        params: { message: 'Invalid QR code. Please scan a valid gym QR code.' },
+      } as any);
+      setScanned(false);
+      return;
+    }
+
+    const checkInResult = await checkIn(gymId);
+    console.log('[QRScan] Check-in result:', checkInResult);
+
+    if (checkInResult.success) {
+      router.push({
+        pathname: '/qr-success',
+        params: { message: checkInResult.message || 'Check in Successful' },
+      } as any);
+    } else {
+      router.push({
+        pathname: '/qr-error',
+        params: { message: checkInResult.message || 'Check in unsuccessful' },
+      } as any);
+    }
+
     setScanned(false);
   };
 

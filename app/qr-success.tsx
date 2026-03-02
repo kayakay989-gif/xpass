@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -7,6 +7,10 @@ import Colors from '@/constants/colors';
 export default function QRSuccessScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ message?: string }>();
+  const successMessage = typeof params.message === 'string' && params.message.trim()
+    ? params.message
+    : 'Check in Successful';
 
   return (
     <>
@@ -27,7 +31,7 @@ export default function QRSuccessScreen() {
                 style={styles.icon}
               />
             </View>
-            <Text style={styles.message}>Check in Successful</Text>
+            <Text style={styles.message}>{successMessage}</Text>
           </View>
         </View>
       </View>

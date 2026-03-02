@@ -422,6 +422,8 @@ export default function AdminDashboardScreen() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showCouponsView, setShowCouponsView] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showTodayCheckIns, setShowTodayCheckIns] = useState<boolean>(false);
+  const [selectedCheckIn, setSelectedCheckIn] = useState<any | null>(null);
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
   const [spotlightImages, setSpotlightImages] = useState<any[]>([]);
   const [isLoadingSpotlight, setIsLoadingSpotlight] = useState(false);
@@ -2098,55 +2100,77 @@ export default function AdminDashboardScreen() {
               if (todayCheckIns.length > 0) {
                 return (
                   <View style={styles.todayCheckInsSection}>
-                    <Text style={styles.sectionTitle}>Check-ins Today: {todayCheckIns.length}</Text>
-                    {todayCheckIns.slice(0, 5).map((checkIn: any) => {
-                      const checkInDate = new Date(checkIn.timestamp);
-                      return (
-                        <View key={checkIn.id} style={styles.checkInCard}>
-                          <View style={styles.checkInHeader}>
-                            <View
-                              style={[
-                                styles.tierBadge,
-                                { backgroundColor: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] + '20' },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.tierText,
-                                  { color: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] },
-                                ]}
-                              >
-                                {checkIn.tier.toUpperCase()}
-                              </Text>
-                            </View>
-                            <View style={styles.checkInInfo}>
-                              <Text style={styles.checkInUser}>{checkIn.userName}</Text>
-                              <Text style={styles.checkInGym}>{checkIn.gymName}</Text>
-                            </View>
-                          </View>
-                          <View style={styles.checkInTimeRow}>
-                            <Text style={styles.checkInDate}>
-                              {checkInDate.toLocaleDateString('en-US', { 
-                                weekday: 'short', 
-                                month: 'short', 
-                                day: 'numeric' 
-                              })}
-                            </Text>
-                            <Text style={styles.checkInTime}>
-                              {checkInDate.toLocaleTimeString('en-US', { 
-                                hour: '2-digit', 
-                                minute: '2-digit',
-                                hour12: true 
-                              })}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                    {todayCheckIns.length > 5 && (
-                      <Text style={styles.moreCheckInsText}>
-                        +{todayCheckIns.length - 5} more today
+                    <TouchableOpacity
+                      style={styles.todayHeaderRow}
+                      activeOpacity={0.8}
+                      onPress={() => setShowTodayCheckIns((prev) => !prev)}
+                    >
+                      <Text style={styles.sectionTitle}>Check-ins Today: {todayCheckIns.length}</Text>
+                      <Text style={styles.todayToggleText}>
+                        {showTodayCheckIns ? 'Hide' : 'Show'}
                       </Text>
+                    </TouchableOpacity>
+
+                    {showTodayCheckIns && (
+                      <>
+                        {todayCheckIns.slice(0, 5).map((checkIn: any) => {
+                          const checkInDate = new Date(checkIn.timestamp);
+                          return (
+                            <TouchableOpacity
+                              key={checkIn.id}
+                              style={styles.checkInCard}
+                              activeOpacity={0.85}
+                              onPress={() => setSelectedCheckIn(checkIn)}
+                            >
+                              <View style={styles.checkInHeader}>
+                                <View
+                                  style={[
+                                    styles.tierBadge,
+                                    {
+                                      backgroundColor:
+                                        TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] + '20',
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.tierText,
+                                      { color: TIER_COLORS[checkIn.tier as keyof typeof TIER_COLORS] },
+                                    ]}
+                                  >
+                                    {checkIn.tier.toUpperCase()}
+                                  </Text>
+                                </View>
+                                <View style={styles.checkInInfo}>
+                                  <Text style={styles.checkInUser}>{checkIn.userName}</Text>
+                                  <Text style={styles.checkInGym}>{checkIn.gymName}</Text>
+                                </View>
+                              </View>
+                              <View style={styles.checkInTimeRow}>
+                                <Text style={styles.checkInDate}>
+                                  {checkInDate.toLocaleDateString('en-US', {
+                                    weekday: 'short',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })}
+                                </Text>
+                                <Text style={styles.checkInTime}>
+                                  {checkInDate.toLocaleTimeString('en-US', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: true,
+                                  })}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                        {todayCheckIns.length > 5 && (
+                          <Text style={styles.moreCheckInsText}>
+                            +{todayCheckIns.length - 5} more today
+                          </Text>
+                        )}
+                      </>
                     )}
                   </View>
                 );
@@ -2190,7 +2214,12 @@ export default function AdminDashboardScreen() {
               })();
 
               return (
-                <View key={checkIn.id} style={styles.checkInCard}>
+                <TouchableOpacity
+                  key={checkIn.id}
+                  style={styles.checkInCard}
+                  activeOpacity={0.85}
+                  onPress={() => setSelectedCheckIn(checkIn)}
+                >
                   <View style={styles.checkInHeader}>
                     <View
                       style={[
@@ -2229,7 +2258,7 @@ export default function AdminDashboardScreen() {
                       })}
                     </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -3202,6 +3231,54 @@ export default function AdminDashboardScreen() {
         </View>
       </Modal>
 
+      {/* Check-in details modal */}
+      <Modal
+        visible={!!selectedCheckIn}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedCheckIn(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.checkInDetailModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Check-in Details</Text>
+              <TouchableOpacity onPress={() => setSelectedCheckIn(null)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            {selectedCheckIn && (
+              <View style={styles.checkInDetailBody}>
+                <Text style={styles.checkInDetailLabel}>User name</Text>
+                <Text style={styles.checkInDetailValue}>{selectedCheckIn.userName || 'N/A'}</Text>
+
+                <Text style={styles.checkInDetailLabel}>Email</Text>
+                <Text style={styles.checkInDetailValue}>{selectedCheckIn.userEmail || 'N/A'}</Text>
+
+                <Text style={styles.checkInDetailLabel}>Gym</Text>
+                <Text style={styles.checkInDetailValue}>{selectedCheckIn.gymName || 'N/A'}</Text>
+
+                <Text style={styles.checkInDetailLabel}>Tier</Text>
+                <Text style={styles.checkInDetailValue}>
+                  {selectedCheckIn.tier ? selectedCheckIn.tier.toUpperCase() : 'N/A'}
+                </Text>
+
+                <Text style={styles.checkInDetailLabel}>Date & time</Text>
+                <Text style={styles.checkInDetailValue}>
+                  {new Date(selectedCheckIn.timestamp).toLocaleString('en-US', {
+                    weekday: 'short',
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* City Picker Modal */}
       <Modal
         visible={isCityModalVisible}
@@ -4038,6 +4115,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
+  todayHeaderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+  },
+  todayToggleText: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500' as const,
+  },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700' as const,
@@ -4074,32 +4161,7 @@ const styles = StyleSheet.create({
     alignItems: 'center' as const,
     marginTop: 8,
   },
-  todayCheckInsSection: {
-    marginBottom: 24,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#111827',
-    marginBottom: 12,
-  },
-  allCheckInsTitle: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#111827',
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  moreCheckInsText: {
-    fontSize: 13,
-    color: '#6B7280',
-    fontStyle: 'italic' as const,
-    marginTop: 8,
-    textAlign: 'center' as const,
-  },
+  // (duplicate keys removed above – keep single definition)
   addButton: {
     backgroundColor: '#DC2626',
     padding: 8,
@@ -4128,6 +4190,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     maxHeight: '90%',
   },
+  checkInDetailModal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
   modalHeader: {
     flexDirection: 'row' as const,
     justifyContent: 'space-between' as const,
@@ -4143,6 +4211,22 @@ const styles = StyleSheet.create({
   },
   modalBody: {
     padding: 20,
+  },
+  checkInDetailBody: {
+    padding: 20,
+    gap: 8,
+  },
+  checkInDetailLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#6B7280',
+    textTransform: 'uppercase' as const,
+  },
+  checkInDetailValue: {
+    fontSize: 15,
+    fontWeight: '500' as const,
+    color: '#111827',
+    marginBottom: 8,
   },
   label: {
     fontSize: 14,
