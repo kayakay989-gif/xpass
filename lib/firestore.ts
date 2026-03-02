@@ -290,7 +290,7 @@ export const firestoreCheckIns = {
     });
   },
 
-  async getTodayCheckIn(userId: string): Promise<CheckIn | null> {
+  async getTodayCheckIn(userId: string, gymId?: string): Promise<CheckIn | null> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -299,18 +299,29 @@ export const firestoreCheckIns = {
     const q = query(
       checkInsCollection,
       where('userId', '==', userId),
-      where('timestamp', '>=', Timestamp.fromDate(today)),
-      where('timestamp', '<', Timestamp.fromDate(tomorrow)),
-      limit(1)
     );
 
     const snapshot = await getDocs(q);
     if (snapshot.empty) return null;
 
-    const doc = snapshot.docs[0];
-    const data = doc.data();
+    const todayDocs = snapshot.docs.filter((doc) => {
+      const data = doc.data() as any;
+      const ts = timestampToDate(data.timestamp);
+      const matchesGym = gymId ? data.gymId === gymId : true;
+      return matchesGym && ts >= today && ts < tomorrow;
+    });
+
+    if (todayDocs.length === 0) return null;
+
+    const latestDoc = todayDocs.sort((a, b) => {
+      const aTime = timestampToDate((a.data() as any).timestamp).getTime();
+      const bTime = timestampToDate((b.data() as any).timestamp).getTime();
+      return bTime - aTime;
+    })[0];
+
+    const data = latestDoc.data() as any;
     return {
-      id: doc.id,
+      id: latestDoc.id,
       userId: data.userId,
       gymId: data.gymId,
       timestamp: timestampToDate(data.timestamp),

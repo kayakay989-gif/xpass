@@ -268,7 +268,7 @@ export const firestoreCheckIns = {
     });
   },
 
-  async getTodayCheckIn(userId: string): Promise<CheckIn | null> {
+  async getTodayCheckIn(userId: string, gymId?: string): Promise<CheckIn | null> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -286,7 +286,8 @@ export const firestoreCheckIns = {
     const todayDocs = snapshot.docs.filter((doc) => {
       const data: any = doc.data();
       const ts = timestampToDate(data.timestamp);
-      return ts >= today && ts < tomorrow;
+      const matchesGym = gymId ? data.gymId === gymId : true;
+      return matchesGym && ts >= today && ts < tomorrow;
     });
 
     if (todayDocs.length === 0) return null;

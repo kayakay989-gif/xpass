@@ -58,11 +58,11 @@ export default protectedProcedure
       throw new Error('Monthly visit limit reached. Your limit resets next month.');
     }
 
-    // Check if already checked in today
-    const todayCheckIn = await firestoreCheckIns.getTodayCheckIn(input.userId);
+    // Check if already checked in to this gym today (but allow other gyms)
+    const todayCheckIn = await firestoreCheckIns.getTodayCheckIn(input.userId, input.gymId);
     if (todayCheckIn) {
-      console.error('[CheckIn] Already checked in today');
-      throw new Error('You have already checked in today. Please come back tomorrow.');
+      console.error('[CheckIn] Already checked in to this gym today');
+      throw new Error('You have already checked in to this gym today. You can check in to other gyms.');
     }
 
     // Validate gym exists

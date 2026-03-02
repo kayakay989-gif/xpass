@@ -224,7 +224,7 @@ export const db = {
       return checkIn;
     },
 
-    async getTodayCheckIn(userId: string): Promise<CheckIn | null> {
+    async getTodayCheckIn(userId: string, gymId?: string): Promise<CheckIn | null> {
       const checkIns = await this.getByUserId(userId);
       
       const today = new Date();
@@ -233,7 +233,8 @@ export const db = {
       const todayCheckIn = checkIns.find(ci => {
         const ciDate = new Date(ci.timestamp);
         ciDate.setHours(0, 0, 0, 0);
-        return ciDate.getTime() === today.getTime();
+        const matchesGym = gymId ? ci.gymId === gymId : true;
+        return matchesGym && ciDate.getTime() === today.getTime();
       });
 
       return todayCheckIn || null;
