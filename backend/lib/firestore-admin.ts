@@ -274,20 +274,33 @@ export const firestoreCheckIns = {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
+    // Query only by userId to avoid composite index requirements,
+    // then filter today's check-ins in memory.
     const snapshot = await adminDb
       .collection('checkIns')
       .where('userId', '==', userId)
-      .where('timestamp', '>=', admin.firestore.Timestamp.fromDate(today))
-      .where('timestamp', '<', admin.firestore.Timestamp.fromDate(tomorrow))
-      .limit(1)
       .get();
 
     if (snapshot.empty) return null;
 
-    const doc = snapshot.docs[0];
-    const data = doc.data();
+    const todayDocs = snapshot.docs.filter((doc) => {
+      const data: any = doc.data();
+      const ts = timestampToDate(data.timestamp);
+      return ts >= today && ts < tomorrow;
+    });
+
+    if (todayDocs.length === 0) return null;
+
+    // If multiple docs exist for today, take the latest by timestamp.
+    const latestDoc = todayDocs.sort((a, b) => {
+      const aTime = timestampToDate((a.data() as any).timestamp).getTime();
+      const bTime = timestampToDate((b.data() as any).timestamp).getTime();
+      return bTime - aTime;
+    })[0];
+
+    const data = latestDoc.data() as any;
     return {
-      id: doc.id,
+      id: latestDoc.id,
       userId: data.userId,
       gymId: data.gymId,
       timestamp: timestampToDate(data.timestamp),
