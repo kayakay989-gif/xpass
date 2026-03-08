@@ -10,7 +10,10 @@
     "build-server": "tsc -p tsconfig.server-node.json",
     "start-server": "node dist/server-standalone.js",
     "lint": "expo lint",
-    "seed-gyms": "bun scripts/seed-gyms.ts"
+    "seed-gyms": "bun scripts/seed-gyms.ts",
+    "postinstall": "patch-package",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@ai-sdk/react": "^2.0.86",
@@ -82,6 +85,7 @@
     "eslint": "9.31.0",
     "eslint-config-expo": "9.2.0",
     "expo-build-properties": "^1.0.9",
+    "patch-package": "^8.0.1",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.6",
     "typescript": "~5.9.2",

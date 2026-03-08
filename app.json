@@ -100,10 +100,14 @@
         "expo-build-properties",
         {
           "android": {
-            "googleServicesFile": "./google-services.json"
+            "googleServicesFile": "./google-services.json",
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0"
           }
         }
-      ]
+      ],
+      "./plugins/withExpoFirebaseCoreFix"
     ],
     "experiments": {
       "typedRoutes": true
@@ -116,9 +120,7 @@
         "projectId": "05cfe6ff-0777-4879-baf1-8d836c51fd2f"
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.14",
     "updates": {
       "url": "https://u.expo.dev/05cfe6ff-0777-4879-baf1-8d836c51fd2f"
     }
