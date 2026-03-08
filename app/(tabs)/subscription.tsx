@@ -7,6 +7,7 @@ import Colors from '@/constants/colors';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
+import { TIER_COLORS } from '@/constants/tier-colors';
 
 type Package = {
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
@@ -17,6 +18,7 @@ type Package = {
   buttonColors: [string, string];
 };
 
+// Use shared tier colors for consistency
 const PACKAGE_THEMES: Record<
   Package['tier'],
   {
@@ -30,40 +32,40 @@ const PACKAGE_THEMES: Record<
   }
 > = {
   silver: {
-    cardBg: '#F5F7FA',
+    cardBg: TIER_COLORS.silver.cardBg,
     border: '#E5E7EB',
-    title: '#5B667A',
-    price: '#111827',
+    title: TIER_COLORS.silver.textOnCard,
+    price: TIER_COLORS.silver.primary,
     desc: '#667085',
-    chipBg: '#E6EEF8',
-    buttonText: '#111827',
+    chipBg: TIER_COLORS.silver.chipBg,
+    buttonText: TIER_COLORS.silver.textOnChip,
   },
   gold: {
-    cardBg: '#FFF3E8',
+    cardBg: TIER_COLORS.gold.cardBg,
     border: '#F3D9B8',
-    title: '#B58B2E',
+    title: TIER_COLORS.gold.textOnCard,
     price: '#111827',
     desc: '#8B7355',
-    chipBg: '#FFE0AE',
-    buttonText: '#3B2F12',
+    chipBg: TIER_COLORS.gold.chipBg,
+    buttonText: TIER_COLORS.gold.textOnChip,
   },
   diamond: {
-    cardBg: '#F4F1FF',
+    cardBg: TIER_COLORS.diamond.cardBg,
     border: '#E6E0FF',
-    title: '#6D5BD0',
+    title: TIER_COLORS.diamond.textOnCard,
     price: '#111827',
     desc: '#6B7280',
-    chipBg: '#E1DAFF',
-    buttonText: '#2D1D76',
+    chipBg: TIER_COLORS.diamond.chipBg,
+    buttonText: TIER_COLORS.diamond.textOnChip,
   },
   elite: {
-    cardBg: '#EEF6FF',
+    cardBg: TIER_COLORS.elite.cardBg,
     border: '#D6E9FF',
-    title: '#1D7EF5',
+    title: TIER_COLORS.elite.textOnCard,
     price: '#111827',
     desc: '#6B7280',
-    chipBg: '#BFE4FF',
-    buttonText: '#0B2A52',
+    chipBg: TIER_COLORS.elite.chipBg,
+    buttonText: TIER_COLORS.elite.textOnChip,
   },
 };
 
@@ -247,9 +249,6 @@ export default function SubscriptionScreen() {
             Hello {user?.name?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'User'}
           </Text>
           <View style={styles.iconsContainer}>
-            <View style={styles.languageButton}>
-              <Text style={styles.languageText}>EN</Text>
-            </View>
             <TouchableOpacity 
               style={styles.profileButton}
               onPress={() => {
@@ -398,19 +397,6 @@ const styles = StyleSheet.create({
   iconsContainer: {
     flexDirection: 'row',
     gap: 8,
-  },
-  languageButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  languageText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: '700' as const,
   },
   profileButton: {
     width: 36,

@@ -7,6 +7,8 @@ import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { config } from '@/lib/config';
+import Toast from '@/components/Toast';
+import { CheckCircle } from 'lucide-react-native';
 
 export default function SecurityScreen() {
   const { user, firebaseUser, updateProfileData } = useAuth();
@@ -16,6 +18,11 @@ export default function SecurityScreen() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [verificationId, setVerificationId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>({
+    visible: false,
+    message: '',
+    type: 'success',
+  });
 
   const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-security', []);
@@ -28,6 +35,15 @@ export default function SecurityScreen() {
       setPhone(rawPhone);
     }
   }, [user]);
+
+  // Reset verification state if phone number changes
+  useEffect(() => {
+    if (user?.phoneVerified) {
+      setOtpSent(false);
+      setVerificationId(null);
+      setOtp('');
+    }
+  }, [user?.phone, user?.phoneVerified]);
 
   const normalizePhone = (): string => {
     const digits = phone.replace(/\D/g, '');
@@ -93,15 +109,27 @@ export default function SecurityScreen() {
   const handleVerify = async () => {
     const fullPhone = normalizePhone();
     if (!otp.trim()) {
-      Alert.alert('Missing OTP', 'Enter the 6-digit code.');
+      setToast({
+        visible: true,
+        message: 'Please enter the 6-digit code',
+        type: 'error',
+      });
       return;
     }
     if (!verificationId) {
-      showAlert('OTP required', 'Please send an OTP first.');
+      setToast({
+        visible: true,
+        message: 'Please send an OTP first',
+        type: 'error',
+      });
       return;
     }
     if (!firebaseUser || !auth.currentUser) {
-      showAlert('Not logged in', 'Please log in to verify your phone.');
+      setToast({
+        visible: true,
+        message: 'Please log in to verify your phone',
+        type: 'error',
+      });
       return;
     }
     setIsVerifying(true);
@@ -111,9 +139,23 @@ export default function SecurityScreen() {
       console.log('[Security] Credential created, updating phone number...');
       await updatePhoneNumber(auth.currentUser, credential);
       console.log('[Security] Phone number updated, updating profile data...');
-      await updateProfileData({ phone: fullPhone });
+      
+      // Update phone and mark as verified
+      await updateProfileData({ 
+        phone: fullPhone,
+        phoneVerified: true,
+        phoneVerifiedAt: new Date(),
+      });
+      
       console.log('[Security] Phone verification successful');
-      Alert.alert('Phone verified', 'Your phone number was updated.');
+      
+      // Show success toast
+      setToast({
+        visible: true,
+        message: 'Phone number verified successfully',
+        type: 'success',
+      });
+      
       setOtp('');
       setOtpSent(false);
       setVerificationId('');
@@ -121,17 +163,24 @@ export default function SecurityScreen() {
       console.error('[Security] OTP verify failed:', error);
       let errorMessage = 'Verification failed.';
       if (error?.code === 'auth/invalid-verification-code') {
-        errorMessage = 'Invalid OTP code. Please check and try again.';
+        errorMessage = 'Invalid verification code';
       } else if (error?.code === 'auth/code-expired') {
-        errorMessage = 'OTP code has expired. Please request a new code.';
+        errorMessage = 'Verification code expired. Please request a new one.';
       } else if (error?.message) {
         errorMessage = error.message;
       }
-      showAlert('Error', errorMessage);
+      setToast({
+        visible: true,
+        message: errorMessage,
+        type: 'error',
+      });
     } finally {
       setIsVerifying(false);
     }
   };
+
+  const isPhoneVerified = user?.phoneVerified === true;
+  const displayPhone = user?.phone || normalizePhone();
 
   return (
     <>
@@ -140,32 +189,46 @@ export default function SecurityScreen() {
         <Text style={styles.title}>Phone OTP</Text>
         <Text style={styles.subtitle}>Verify your phone to secure your account.</Text>
 
+        {isPhoneVerified && (
+          <View style={styles.verifiedBadge}>
+            <CheckCircle size={20} color="#059669" />
+            <Text style={styles.verifiedText}>Phone number verified</Text>
+          </View>
+        )}
+
         <Text style={styles.label}>Phone number</Text>
         <View style={styles.phoneRow}>
           <Text style={styles.countryCode}>+962</Text>
           <TextInput
-            style={[styles.input, { flex: 1, paddingLeft: 58 }]}
+            style={[
+              styles.input, 
+              { flex: 1, paddingLeft: 58 },
+              isPhoneVerified && styles.inputDisabled
+            ]}
             placeholder="9 digit phone"
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
             maxLength={9}
+            editable={!isPhoneVerified}
           />
         </View>
 
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={handleSendOtp}
-          disabled={isSendingOtp}
-        >
-          {isSendingOtp ? (
-            <ActivityIndicator color={Colors.white} />
-          ) : (
-            <Text style={styles.primaryButtonText}>{otpSent ? 'Resend OTP' : 'Send OTP'}</Text>
-          )}
-        </TouchableOpacity>
+        {!isPhoneVerified && (
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleSendOtp}
+            disabled={isSendingOtp}
+          >
+            {isSendingOtp ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={styles.primaryButtonText}>{otpSent ? 'Resend OTP' : 'Send OTP'}</Text>
+            )}
+          </TouchableOpacity>
+        )}
 
-        {otpSent && (
+        {otpSent && !isPhoneVerified && (
           <>
             <Text style={styles.label}>Enter OTP</Text>
             <TextInput
@@ -191,6 +254,17 @@ export default function SecurityScreen() {
           </>
         )}
 
+        {isPhoneVerified && (
+          <View style={styles.verifiedInfo}>
+            <Text style={styles.verifiedInfoText}>
+              Your phone number {displayPhone} is verified and secure.
+            </Text>
+            <Text style={styles.verifiedInfoSubtext}>
+              To change your phone number, please contact support.
+            </Text>
+          </View>
+        )}
+
         {Platform.OS !== 'web' && (
           <FirebaseRecaptchaVerifierModal
             ref={recaptchaVerifier}
@@ -206,6 +280,13 @@ export default function SecurityScreen() {
             id: recaptchaContainerId,
             style: { position: 'absolute', left: '-10000px', top: '-10000px' },
           })}
+        
+        <Toast
+          visible={toast.visible}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ ...toast, visible: false })}
+        />
       </View>
     </>
   );
@@ -278,6 +359,39 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: Colors.white,
     fontWeight: '700',
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  verifiedText: {
+    color: '#059669',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  inputDisabled: {
+    backgroundColor: '#F3F4F6',
+    color: Colors.textSecondary,
+  },
+  verifiedInfo: {
+    backgroundColor: Colors.surface,
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  verifiedInfoText: {
+    color: Colors.text,
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  verifiedInfoSubtext: {
+    color: Colors.textSecondary,
+    fontSize: 12,
   },
 });
 

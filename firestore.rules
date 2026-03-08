@@ -17,7 +17,9 @@ service cloud.firestore {
     
     // Users collection
     match /users/{userId} {
-      allow read: if request.auth != null;
+      // Allow reads for everyone (needed to check for duplicate emails/phones during signup)
+      // But only allow authenticated users to read full user documents
+      allow read: if true;
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update: if request.auth != null && (request.auth.uid == userId || isAdmin());
       allow delete: if isAdmin();

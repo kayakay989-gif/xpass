@@ -11,6 +11,7 @@ import { firestoreSpotlightImages } from '@/lib/firestore';
 import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
 import { CITY_FILTER_OPTIONS } from '@/constants/cities';
+import SpotlightImageViewer from '@/components/SpotlightImageViewer';
 
 type ViewMode = 'map' | 'list';
 
@@ -20,6 +21,8 @@ export default function HomeScreen() {
   const { subscription, gyms, isLoading } = useApp();
   const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
   const [isLoadingBanners, setIsLoadingBanners] = useState(true);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   useEffect(() => {
     // On web, Firebase Auth can be ready before the Firestore user profile loads.
@@ -240,9 +243,6 @@ export default function HomeScreen() {
           </Text>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.languageButton}>
-            <Text style={styles.languageText}>EN</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.profileButton} onPress={() => {
             // Consider the user logged in if Firebase Auth session exists,
             // even if the Firestore profile hasn't loaded yet.
@@ -302,20 +302,14 @@ export default function HomeScreen() {
             style={styles.spotlightContainer}
             contentContainerStyle={styles.spotlightContent}
           >
-            {spotlightBanners.map((banner) => (
+            {spotlightBanners.map((banner, index) => (
               <TouchableOpacity 
                 key={banner.id} 
                 style={styles.spotlightCard}
                 onPress={() => {
-                  if (banner.linkUrl) {
-                    if (banner.linkUrl.startsWith('http')) {
-                      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-                        window.open(banner.linkUrl, '_blank');
-                      }
-                    } else {
-                      router.push(banner.linkUrl as any);
-                    }
-                  }
+                  // Open image viewer
+                  setSelectedImageIndex(index);
+                  setImageViewerVisible(true);
                 }}
               >
                 <Image 
@@ -475,6 +469,14 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Spotlight Image Viewer */}
+      <SpotlightImageViewer
+        visible={imageViewerVisible}
+        images={spotlightBanners}
+        initialIndex={selectedImageIndex}
+        onClose={() => setImageViewerVisible(false)}
+      />
     </ScrollView>
   );
 }
@@ -512,19 +514,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  languageButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  languageText: {
-    fontSize: 12,
-    fontWeight: '600' as const,
-    color: Colors.white,
   },
   profileButton: {
     width: 36,

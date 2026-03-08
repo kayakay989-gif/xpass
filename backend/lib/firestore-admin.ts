@@ -201,6 +201,16 @@ export const firestoreGyms = {
     });
   },
 
+  async update(gymId: string, updates: Partial<Gym>): Promise<void> {
+    // If pricePerVisit is being updated, store the change timestamp
+    const updateData: any = { ...updates };
+    if (updates.pricePerVisit !== undefined) {
+      updateData.payoutRateChangedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    updateData.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+    await adminDb.collection('gyms').doc(gymId).update(updateData);
+  },
+
   async delete(gymId: string): Promise<void> {
     await adminDb.collection('gyms').doc(gymId).delete();
   },
@@ -449,6 +459,51 @@ export const firestoreCoupons = {
     });
   },
 
+  async getAllPaginated(limit: number = 20, offset: number = 0): Promise<{ coupons: Coupon[]; total: number; hasMore: boolean }> {
+    // Get total count (optimized - only count documents)
+    const countSnapshot = await adminDb.collection('coupons').count().get();
+    const total = countSnapshot.data().count;
+
+    // Get paginated results
+    let query = adminDb.collection('coupons').orderBy('createdAt', 'desc');
+    
+    if (offset > 0) {
+      // Get the offset document for cursor-based pagination
+      const offsetSnapshot = await adminDb
+        .collection('coupons')
+        .orderBy('createdAt', 'desc')
+        .limit(offset)
+        .get();
+      
+      if (!offsetSnapshot.empty) {
+        const lastDoc = offsetSnapshot.docs[offsetSnapshot.docs.length - 1];
+        query = query.startAfter(lastDoc);
+      }
+    }
+    
+    const snapshot = await query.limit(limit).get();
+    
+    const coupons = snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        code: data.code || '',
+        discountPercent: data.discountPercent || 0,
+        isActive: !!data.isActive,
+        createdAt: timestampToDate(data.createdAt),
+        usageLimit: data.usageLimit ?? null,
+        usedCount: data.usedCount || 0,
+        expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+      };
+    });
+
+    return {
+      coupons,
+      total,
+      hasMore: offset + coupons.length < total,
+    };
+  },
+
   async getByCode(code: string): Promise<Coupon | null> {
     const upperCode = code.toUpperCase().trim();
     const snapshot = await adminDb
@@ -544,6 +599,7 @@ export const firestorePayouts = {
         month: data.month,
         totalCheckins: data.totalCheckins || 0,
         amount: data.amount || 0,
+        payPerVisitRate: data.payPerVisitRate || 0,
         status: (data.status as 'pending' | 'paid') || 'pending',
         paidAt: data.paidAt ? timestampToDate(data.paidAt) : null,
         createdAt: data.createdAt ? timestampToDate(data.createdAt) : new Date(),
@@ -560,6 +616,14 @@ export const firestorePayouts = {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return ref.id;
+  },
+
+  async update(payoutId: string, updates: Partial<Payout>): Promise<void> {
+    const updateData: any = { ...updates };
+    if (updates.paidAt) {
+      updateData.paidAt = admin.firestore.Timestamp.fromDate(updates.paidAt);
+    }
+    await adminDb.collection('payouts').doc(payoutId).update(updateData);
   },
 
   async markPaid(payoutId: string): Promise<void> {

@@ -61,11 +61,6 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.headerRight}>
               <Text style={styles.greeting}>Welcome</Text>
-              <View style={styles.iconsContainer}>
-                <View style={styles.languageButton}>
-                  <Text style={styles.languageText}>EN</Text>
-                </View>
-              </View>
             </View>
           </View>
           <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, { alignItems: 'center', justifyContent: 'center', flexGrow: 1 }]}>
@@ -142,17 +137,14 @@ export default function ProfileScreen() {
               resizeMode="contain"
             />
           </View>
-          <View style={styles.headerRight}>
-            <Text style={styles.greeting}>Hello {displayName.split(' ')[0]}</Text>
-            <View style={styles.iconsContainer}>
-              <View style={styles.languageButton}>
-                <Text style={styles.languageText}>EN</Text>
-              </View>
-              <View style={styles.profileButton}>
-                <UserIcon size={16} color={Colors.white} />
+            <View style={styles.headerRight}>
+              <Text style={styles.greeting}>Hello {displayName.split(' ')[0]}</Text>
+              <View style={styles.iconsContainer}>
+                <View style={styles.profileButton}>
+                  <UserIcon size={16} color={Colors.white} />
+                </View>
               </View>
             </View>
-          </View>
         </View>
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -176,7 +168,14 @@ export default function ProfileScreen() {
               )}
               <View style={styles.userInfo}>
                 <Text style={styles.userName}>{displayName}</Text>
-                <Text style={styles.userPhone}>{primaryPhone}</Text>
+                <View style={styles.phoneRow}>
+                  <Text style={styles.userPhone}>{primaryPhone}</Text>
+                  {user?.phoneVerified && (
+                    <View style={styles.verifiedBadge}>
+                      <Text style={styles.verifiedBadgeText}>✓ Verified</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.userEmail}>{primaryEmail}</Text>
               </View>
             </View>
@@ -240,16 +239,6 @@ export default function ProfileScreen() {
                 ) : (
                   <Text style={styles.menuSubtitle}>No active subscription</Text>
                 )}
-              </View>
-              <ChevronRight size={20} color={Colors.textSecondary} />
-            </TouchableOpacity>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity style={styles.menuItem}>
-              <Globe size={20} color={Colors.text} />
-              <View style={styles.menuContent}>
-                <Text style={styles.menuTitle}>Language</Text>
               </View>
               <ChevronRight size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
@@ -353,19 +342,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  languageButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  languageText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: '700' as const,
-  },
   profileButton: {
     width: 36,
     height: 36,
@@ -450,6 +426,23 @@ const styles = StyleSheet.create({
   userPhone: {
     fontSize: 14,
     color: Colors.textSecondary,
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
+  verifiedBadge: {
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  verifiedBadgeText: {
+    color: '#059669',
+    fontSize: 11,
+    fontWeight: '600',
   },
   userEmail: {
     fontSize: 14,

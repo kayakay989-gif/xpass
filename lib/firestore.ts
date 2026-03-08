@@ -15,7 +15,7 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage, Coupon, Payout } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage, Coupon, Payout, WalletTransaction, ReferralTransaction } from '@/types';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -74,6 +74,46 @@ export const firestoreUsers = {
         ...(typeof (data as any).status === 'string' && { status: (data as any).status }),
       } as any;
     });
+  },
+
+  async getByEmail(email: string): Promise<User | null> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const q = query(usersCollection, where('email', '==', normalizedEmail), limit(1));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    
+    const userDoc = snapshot.docs[0];
+    const data = userDoc.data();
+    return {
+      id: userDoc.id,
+      name: data.name || '',
+      email: data.email || '',
+      phone: data.phone || '',
+      referralCode: data.referralCode || '',
+      referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
+      walletBalance: data.walletBalance || 0,
+      createdAt: timestampToDate(data.createdAt),
+    };
+  },
+
+  async getByPhone(phone: string): Promise<User | null> {
+    const normalizedPhone = phone.trim();
+    const q = query(usersCollection, where('phone', '==', normalizedPhone), limit(1));
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    
+    const userDoc = snapshot.docs[0];
+    const data = userDoc.data();
+    return {
+      id: userDoc.id,
+      name: data.name || '',
+      email: data.email || '',
+      phone: data.phone || '',
+      referralCode: data.referralCode || '',
+      referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
+      walletBalance: data.walletBalance || 0,
+      createdAt: timestampToDate(data.createdAt),
+    };
   },
 };
 
@@ -637,6 +677,91 @@ export const firestoreCoupons = {
 };
 
 // Export all services
+// Wallet Transactions collection
+export const walletTransactionsCollection = collection(db, 'walletTransactions');
+
+export const firestoreWalletTransactions = {
+  async create(transaction: Omit<WalletTransaction, 'id'>): Promise<string> {
+    const transactionRef = doc(walletTransactionsCollection);
+    await setDoc(transactionRef, {
+      ...transaction,
+      createdAt: serverTimestamp(),
+    });
+    return transactionRef.id;
+  },
+
+  async getByUserId(userId: string): Promise<WalletTransaction[]> {
+    const q = query(
+      walletTransactionsCollection,
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        userId: data.userId,
+        type: data.type,
+        amount: data.amount,
+        description: data.description,
+        relatedUserId: data.relatedUserId,
+        createdAt: timestampToDate(data.createdAt),
+      };
+    });
+  },
+};
+
+// Referral Transactions collection
+export const referralTransactionsCollection = collection(db, 'referralTransactions');
+
+export const firestoreReferralTransactions = {
+  async create(transaction: Omit<ReferralTransaction, 'id'>): Promise<string> {
+    const transactionRef = doc(referralTransactionsCollection);
+    await setDoc(transactionRef, {
+      ...transaction,
+      createdAt: serverTimestamp(),
+    });
+    return transactionRef.id;
+  },
+
+  async getByReferrerId(referrerId: string): Promise<ReferralTransaction[]> {
+    const q = query(
+      referralTransactionsCollection,
+      where('referrerId', '==', referrerId),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        referrerId: data.referrerId,
+        referredUserId: data.referredUserId,
+        rewardAmount: data.rewardAmount,
+        referrerCode: data.referrerCode,
+        createdAt: timestampToDate(data.createdAt),
+      };
+    });
+  },
+
+  async getAll(): Promise<ReferralTransaction[]> {
+    const q = query(referralTransactionsCollection, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        referrerId: data.referrerId,
+        referredUserId: data.referredUserId,
+        rewardAmount: data.rewardAmount,
+        referrerCode: data.referrerCode,
+        createdAt: timestampToDate(data.createdAt),
+      };
+    });
+  },
+};
+
 export default {
   users: firestoreUsers,
   subscriptions: firestoreSubscriptions,
@@ -645,5 +770,7 @@ export default {
   gymOwners: firestoreGymOwners,
   spotlightImages: firestoreSpotlightImages,
   coupons: firestoreCoupons,
+  walletTransactions: firestoreWalletTransactions,
+  referralTransactions: firestoreReferralTransactions,
 };
 

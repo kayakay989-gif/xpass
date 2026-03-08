@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { gymOwnerOrAdminProcedure } from '@/backend/trpc/create-context';
+import { firestorePayouts } from '@/backend/lib/firestore-admin';
 
 export default gymOwnerOrAdminProcedure
   .input(z.object({ 
@@ -9,9 +10,15 @@ export default gymOwnerOrAdminProcedure
     if (!ctx.isAdmin && ctx.gymOwner?.gymId !== input.gymId) {
       throw new Error('Unauthorized');
     }
-    // For now, return empty array as payments aren't tracked in Firestore yet
-    // This can be enhanced later to track payments per gym
-    // The gym dashboard will still show check-in stats correctly
-    const payments: any[] = [];
-    return payments;
+    
+    // Get all payouts for this gym
+    const allPayouts = await firestorePayouts.getAll();
+    const gymPayouts = allPayouts.filter((p) => p.gymId === input.gymId);
+    
+    // Sort by month (newest first)
+    return gymPayouts.sort((a, b) => {
+      if (a.month > b.month) return -1;
+      if (a.month < b.month) return 1;
+      return 0;
+    });
   });

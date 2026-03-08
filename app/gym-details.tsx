@@ -10,9 +10,11 @@ import {
   Alert,
   Modal,
   Dimensions,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { MapPin, Clock, ChevronLeft, QrCode, X } from 'lucide-react-native';
+import { MapPin, Clock, ChevronLeft, QrCode, X, Navigation } from 'lucide-react-native';
 import { firestoreGyms } from '@/lib/firestore';
 import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 import Colors from '@/constants/colors';
@@ -21,6 +23,7 @@ import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
+import ImageGalleryViewer from '@/components/ImageGalleryViewer';
 
 export default function GymDetailsScreen() {
   const router = useRouter();
@@ -30,7 +33,8 @@ export default function GymDetailsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const { isGuest, firebaseUser } = useAuth();
   const { subscription } = useApp();
 
@@ -185,10 +189,29 @@ export default function GymDetailsScreen() {
     typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
       ? gym.imageUrl
       : null;
-  const heroImage =
-    (galleryImages.length > 0 && galleryImages[0]) ||
-    safeLogo ||
-    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
+  
+  // Combine all images: hero (logo) first, then gallery images
+  // If no gallery images, use logo as hero; if no logo, use fallback
+  const allImages: string[] = [];
+  if (safeLogo) {
+    allImages.push(safeLogo);
+  }
+  // Add gallery images, but skip the first one if it's the same as the logo
+  galleryImages.forEach((url) => {
+    if (url !== safeLogo && !allImages.includes(url)) {
+      allImages.push(url);
+    }
+  });
+  
+  // If no images at all, use fallback
+  const heroImage = allImages.length > 0 
+    ? allImages[0]
+    : 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
+  
+  // Ensure fallback is in the array if needed
+  if (allImages.length === 0) {
+    allImages.push(heroImage);
+  }
   const facilities: string[] =
     Array.isArray((gym as any).facilities) && (gym as any).facilities.length > 0
       ? (gym as any).facilities
@@ -219,6 +242,53 @@ export default function GymDetailsScreen() {
     );
   };
 
+  const openGoogleMaps = async () => {
+    try {
+      const gymLat = typeof gym.latitude === 'string' ? parseFloat(gym.latitude) : gym.latitude;
+      const gymLon = typeof gym.longitude === 'string' ? parseFloat(gym.longitude) : gym.longitude;
+      const hasCoordinates = Number.isFinite(gymLat) && Number.isFinite(gymLon);
+      
+      let mapsUrl: string;
+      
+      if (hasCoordinates) {
+        // Use coordinates for navigation
+        mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${gymLat},${gymLon}`;
+      } else if (gym.address) {
+        // Fallback to address search
+        const encodedAddress = encodeURIComponent(gym.address);
+        mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+      } else {
+        Alert.alert('Location Not Available', 'This gym does not have location information available.');
+        return;
+      }
+
+      // Open Google Maps
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        // Open in new tab on web
+        window.open(mapsUrl, '_blank');
+      } else {
+        // Open with Linking on mobile (will open Google Maps app if installed, otherwise browser)
+        const canOpen = await Linking.canOpenURL(mapsUrl);
+        if (canOpen) {
+          await Linking.openURL(mapsUrl);
+        } else {
+          Alert.alert('Error', 'Unable to open Google Maps. Please install Google Maps app.');
+        }
+      }
+    } catch (error: any) {
+      console.error('[GymDetails] Error opening Google Maps:', error);
+      Alert.alert('Error', 'Failed to open Google Maps. Please try again.');
+    }
+  };
+
+  // Check if location data is available
+  const hasLocationData = () => {
+    const gymLat = typeof gym.latitude === 'string' ? parseFloat(gym.latitude) : gym.latitude;
+    const gymLon = typeof gym.longitude === 'string' ? parseFloat(gym.longitude) : gym.longitude;
+    const hasCoordinates = Number.isFinite(gymLat) && Number.isFinite(gymLon);
+    return hasCoordinates || !!gym.address;
+  };
+
   return (
     <>
       <Stack.Screen
@@ -239,7 +309,10 @@ export default function GymDetailsScreen() {
         {/* Gym Image / Gallery hero */}
         <TouchableOpacity
           activeOpacity={0.9}
-          onPress={() => setSelectedImage(heroImage)}
+          onPress={() => {
+            setSelectedImageIndex(0);
+            setImageViewerVisible(true);
+          }}
         >
           <Image
             source={{ uri: heroImage }}
@@ -249,17 +322,22 @@ export default function GymDetailsScreen() {
         </TouchableOpacity>
 
         {/* Gym Image Gallery */}
-        {galleryImages.length > 1 && (
-          <View style={styles.gallerySection}>
+        {allImages.length > 1 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Images</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              style={styles.galleryScrollView}
             >
-              {galleryImages.map((url, index) => (
+              {allImages.map((url, index) => (
                 <TouchableOpacity
                   key={`${url}-${index}`}
                   activeOpacity={0.9}
-                  onPress={() => setSelectedImage(url)}
+                  onPress={() => {
+                    setSelectedImageIndex(index);
+                    setImageViewerVisible(true);
+                  }}
                 >
                   <Image
                     source={{ uri: url }}
@@ -302,6 +380,23 @@ export default function GymDetailsScreen() {
             </View>
           )}
 
+          {/* Open in Google Maps Button */}
+          {hasLocationData() ? (
+            <TouchableOpacity
+              style={styles.mapsButton}
+              onPress={openGoogleMaps}
+              activeOpacity={0.8}
+            >
+              <Navigation size={20} color={Colors.white} />
+              <Text style={styles.mapsButtonText}>Open in Google Maps</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.mapsButtonDisabled}>
+              <MapPin size={20} color={Colors.textMuted} />
+              <Text style={styles.mapsButtonTextDisabled}>Location not available</Text>
+            </View>
+          )}
+
         </View>
 
         {/* Facilities Section */}
@@ -321,7 +416,7 @@ export default function GymDetailsScreen() {
         {/* Allowed Tiers */}
         {gym.allowedTiers && gym.allowedTiers.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Available Tiers</Text>
+            <Text style={styles.sectionTitle}>Accessibility</Text>
             <View style={styles.tiersRow}>
               {gym.allowedTiers.map((tier: string, index: number) => {
                 const tierBadge = getTierBadgeColors(tier as any);
@@ -411,30 +506,13 @@ export default function GymDetailsScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Fullscreen Image Modal */}
-      <Modal
-        visible={selectedImage !== null}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setSelectedImage(null)}
-      >
-        <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
-          <TouchableOpacity
-            style={[styles.modalCloseButton, { top: insets.top + 10 }]}
-            onPress={() => setSelectedImage(null)}
-            activeOpacity={0.8}
-          >
-            <X size={24} color={Colors.white} />
-          </TouchableOpacity>
-          {selectedImage && (
-            <Image
-              source={{ uri: selectedImage }}
-              style={styles.fullscreenImage}
-              resizeMode="contain"
-            />
-          )}
-        </View>
-      </Modal>
+      {/* Image Gallery Viewer */}
+      <ImageGalleryViewer
+        visible={imageViewerVisible}
+        images={allImages}
+        initialIndex={selectedImageIndex}
+        onClose={() => setImageViewerVisible(false)}
+      />
     </>
   );
 }
@@ -627,26 +705,40 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  galleryScrollView: {
+    marginTop: -16,
   },
-  modalCloseButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    zIndex: 1000,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
+  mapsButton: {
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 12,
+    gap: 8,
   },
-  fullscreenImage: {
-    width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height,
+  mapsButtonText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  mapsButtonDisabled: {
+    backgroundColor: Colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginTop: 12,
+    gap: 8,
+    opacity: 0.6,
+  },
+  mapsButtonTextDisabled: {
+    color: Colors.textMuted,
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

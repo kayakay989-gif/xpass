@@ -11,7 +11,9 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
   signInWithPopup,
-  updateProfile
+  updateProfile,
+  sendPasswordResetEmail,
+  confirmPasswordReset,
 } from 'firebase/auth';
 import { 
   doc, 
@@ -22,7 +24,8 @@ import {
   updateDoc, 
   query,
   where,
-  serverTimestamp 
+  serverTimestamp,
+  limit
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthSession from 'expo-auth-session';
@@ -49,6 +52,8 @@ function firestoreDataToUser(id: string, data: any): User {
     referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
     walletBalance: data.walletBalance || 0,
     createdAt: data.createdAt?.toDate() || new Date(),
+    phoneVerified: data.phoneVerified === true,
+    phoneVerifiedAt: data.phoneVerifiedAt?.toDate() || undefined,
   };
 }
 
@@ -312,97 +317,322 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     age?: number
   ): Promise<void> => {
     try {
-      const normalizedEmail = (email || '').trim();
-      const userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+      // Validate required parameters
+      if (!email || !email.trim()) {
+        throw new Error('Email is required');
+      }
+      if (!password || password.length < 6) {
+        throw new Error('Password must be at least 6 characters');
+      }
+      if (!name || !name.trim()) {
+        throw new Error('Name is required');
+      }
       
-      // Update display name
+      const normalizedEmail = (email || '').trim().toLowerCase();
+      // Normalize phone: remove all spaces and non-digit characters except +
+      const normalizedPhone = phone ? phone.replace(/\s/g, '').trim() : '';
+      
+      // Validate required fields before creating Firebase Auth user
+      if (!normalizedEmail || normalizedEmail.length === 0) {
+        throw new Error('Email is required');
+      }
+      if (!password || password.length < 6) {
+        throw new Error('Password must be at least 6 characters');
+      }
+      if (!name || !name.trim() || name.trim().length === 0) {
+        throw new Error('Name is required');
+      }
+      
+      console.log('[AuthContext] Starting signup for:', normalizedEmail);
+      
+      // Create Firebase Auth user FIRST
+      // Firebase Auth will automatically check if email already exists and throw auth/email-already-in-use
+      let userCredential;
+      try {
+        userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+        console.log('[AuthContext] Firebase Auth user created:', userCredential.user.uid);
+      } catch (authError: any) {
+        console.error('[AuthContext] Firebase Auth creation error:', authError);
+        // Map Firebase Auth errors to user-friendly messages
+        if (authError.code === 'auth/email-already-in-use') {
+          throw new Error('An account with this email already exists. Please login instead.');
+        } else if (authError.code === 'auth/invalid-email') {
+          throw new Error('Invalid email address. Please enter a valid email.');
+        } else if (authError.code === 'auth/weak-password') {
+          throw new Error('Password is too weak. Please use a stronger password (at least 6 characters).');
+        } else if (authError.code === 'auth/operation-not-allowed') {
+          throw new Error('Email/password accounts are not enabled. Please contact support.');
+        } else if (authError.code === 'auth/network-request-failed') {
+          throw new Error('Network error. Please check your connection and try again.');
+        } else {
+          throw new Error(authError.message || 'Failed to create account. Please try again.');
+        }
+      }
+      
+      // Now check if user already exists in Firestore (edge case: user in Auth but not in Firestore)
+      const usersRef = collection(db, 'users');
+      try {
+        const emailQuery = query(usersRef, where('email', '==', normalizedEmail), limit(1));
+        const emailSnap = await getDocs(emailQuery);
+        if (!emailSnap.empty) {
+          // User exists in Firestore but we just created Auth user - this is an edge case
+          // Delete the Auth user and throw error
+          console.warn('[AuthContext] User exists in Firestore but not in Auth - deleting Auth user');
+          try {
+            await userCredential.user.delete();
+          } catch (deleteError) {
+            console.error('[AuthContext] Failed to delete Auth user:', deleteError);
+          }
+          throw new Error('An account with this email already exists. Please login instead.');
+        }
+        
+        // Check by phone if provided
+        if (normalizedPhone) {
+          const phoneQuery = query(usersRef, where('phone', '==', normalizedPhone), limit(1));
+          const phoneSnap = await getDocs(phoneQuery);
+          if (!phoneSnap.empty) {
+            // User exists with this phone - delete Auth user and throw error
+            console.warn('[AuthContext] User exists with phone number - deleting Auth user');
+            try {
+              await userCredential.user.delete();
+            } catch (deleteError) {
+              console.error('[AuthContext] Failed to delete Auth user:', deleteError);
+            }
+            throw new Error('An account with this phone number already exists. Please login instead.');
+          }
+        }
+      } catch (checkError: any) {
+        // If it's our custom error, re-throw it
+        if (checkError.message && checkError.message.includes('already exists')) {
+          throw checkError;
+        }
+        // If it's a permission error, log it but continue (Firestore rules might allow it)
+        if (checkError.code === 'permission-denied') {
+          console.warn('[AuthContext] Permission denied checking for existing users, continuing with signup');
+        } else {
+          // Other errors - log but continue (don't fail signup for Firestore read errors)
+          console.warn('[AuthContext] Error checking for existing users, continuing with signup:', checkError);
+        }
+      }
+      
+      // Update display name (non-blocking - don't fail signup if this fails)
       if (name) {
-        await updateProfile(userCredential.user, { displayName: name });
+        try {
+          await updateProfile(userCredential.user, { displayName: name });
+          console.log('[AuthContext] Display name updated');
+        } catch (profileError) {
+          console.warn('[AuthContext] Failed to update display name, continuing with signup:', profileError);
+        }
       }
 
       const normalizedReferral = typeof referralCodeUsed === 'string' ? referralCodeUsed.trim().toUpperCase() : '';
       let referredBy: string | undefined = undefined;
       let initialWalletBalance = 0;
 
+      // Process referral code ONLY for new users (we've already verified user doesn't exist)
       if (normalizedReferral) {
-        // Validate referral code: must match an existing user's referralCode.
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('referralCode', '==', normalizedReferral));
-        const snap = await getDocs(q);
-        if (snap.empty) {
-          throw new Error('Invalid referral code. Please check and try again.');
+        try {
+          const referralQuery = query(usersRef, where('referralCode', '==', normalizedReferral), limit(1));
+          const referralSnap = await getDocs(referralQuery);
+          
+          if (!referralSnap.empty) {
+            referredBy = normalizedReferral;
+            const referrerDoc = referralSnap.docs[0];
+            const referrerId = referrerDoc.id;
+            const referrerData = referrerDoc.data();
+            const referrerName = referrerData.name || 'Unknown';
+            
+            // Prevent self-referral
+            if (referrerId === userCredential.user.uid) {
+              console.warn('[AuthContext] User cannot refer themselves, skipping referral reward');
+            } else {
+              // Give 10 JOD to the referrer
+              const currentBalance = referrerData.walletBalance || 0;
+              const newBalance = currentBalance + 10;
+              
+              // Update referrer's wallet balance
+              await updateDoc(doc(db, 'users', referrerId), {
+                walletBalance: newBalance,
+              });
+              
+              // Record wallet transaction for referrer
+              const walletTransactionRef = doc(collection(db, 'walletTransactions'));
+              await setDoc(walletTransactionRef, {
+                userId: referrerId,
+                type: 'referral_reward',
+                amount: 10,
+                description: `Referral Reward from ${name}`,
+                relatedUserId: userCredential.user.uid,
+                createdAt: serverTimestamp(),
+              });
+              
+              // Record referral transaction for admin tracking
+              const referralTransactionRef = doc(collection(db, 'referralTransactions'));
+              await setDoc(referralTransactionRef, {
+                referrerId: referrerId,
+                referredUserId: userCredential.user.uid,
+                rewardAmount: 10,
+                referrerCode: normalizedReferral,
+                createdAt: serverTimestamp(),
+              });
+              
+              console.log('[AuthContext] Referral reward processed:', {
+                referrerId,
+                referredUserId: userCredential.user.uid,
+                rewardAmount: 10,
+              });
+            }
+          } else {
+            console.warn('[AuthContext] Invalid referral code provided, continuing without referral benefits');
+          }
+        } catch (referralError) {
+          // Don't fail signup if referral code processing fails
+          console.warn('[AuthContext] Error processing referral code, continuing without referral benefits:', referralError);
         }
-        referredBy = normalizedReferral;
-        // Only the referrer gets 10 JDs, not the new user
-        initialWalletBalance = 0;
-        
-        // Give 10 JDs to the referrer
-        const referrerDoc = snap.docs[0];
-        const referrerData = referrerDoc.data();
-        const currentBalance = referrerData.walletBalance || 0;
-        await updateDoc(doc(db, 'users', referrerDoc.id), {
-          walletBalance: currentBalance + 10,
-        });
       }
 
-      // Check if user document already exists (e.g., admin account being used for signup)
-      const existingUserDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
-      
-      if (existingUserDoc.exists()) {
-        // User document exists - preserve admin role and other important fields
-        const existingData = existingUserDoc.data();
-        const updatedUser: User = {
-          id: userCredential.user.uid,
-          name: name || existingData.name || '',
-          email: normalizedEmail || existingData.email || '',
-          phone: phone || existingData.phone || '',
-          age: age || existingData.age,
-          referralCode: existingData.referralCode || generateReferralCode(),
-          referredBy: referredBy || existingData.referredBy,
-          walletBalance: existingData.walletBalance !== undefined ? existingData.walletBalance : initialWalletBalance,
-          photoUrl: existingData.photoUrl || '',
-          createdAt: existingData.createdAt?.toDate() || new Date(),
-        };
-        
-        // Update user document, preserving role and status if they exist
-        await updateDoc(doc(db, 'users', userCredential.user.uid), {
-          name: updatedUser.name,
-          email: updatedUser.email,
-          phone: updatedUser.phone,
-          age: updatedUser.age,
-          referredBy: updatedUser.referredBy,
-          // Preserve role and status if they exist (for admin accounts)
-          ...(existingData.role && { role: existingData.role }),
-          ...(existingData.status && { status: existingData.status }),
-        });
-        
-        setUser(updatedUser);
-        console.log('[AuthContext] Sign up successful (existing user updated):', userCredential.user.uid);
-      } else {
-        // Create new user profile in Firestore
-        const newUser: User = {
-          id: userCredential.user.uid,
-          name,
-          email: normalizedEmail,
-          phone: phone || '',
-          age: age,
-          referralCode: generateReferralCode(),
-          referredBy,
-          walletBalance: initialWalletBalance,
-          createdAt: new Date(),
-        };
+      // Create new user profile in Firestore (we've verified this is a new user)
+      const newUser: User = {
+        id: userCredential.user.uid,
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: normalizedPhone || '',
+        age: age && !isNaN(age) && age > 0 ? age : undefined,
+        referralCode: generateReferralCode(),
+        referredBy,
+        walletBalance: initialWalletBalance,
+        createdAt: new Date(),
+      };
 
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
+      // Create user document in Firestore
+      // The security rule requires request.auth != null && request.auth.uid == userId
+      // Since we just created the Firebase Auth user, auth should be available
+      console.log('[AuthContext] Creating Firestore user document for:', userCredential.user.uid);
+      
+      try {
+        const userDocRef = doc(db, 'users', userCredential.user.uid);
+        await setDoc(userDocRef, {
           ...newUser,
           createdAt: serverTimestamp(),
-        });
-
-        setUser(newUser);
-        console.log('[AuthContext] Sign up successful (new user):', userCredential.user.uid);
+        }, { merge: false });
+        console.log('[AuthContext] Firestore user document created successfully');
+      } catch (firestoreError: any) {
+        console.error('[AuthContext] Firestore document creation error:', firestoreError);
+        
+        // If Firestore write fails, we need to clean up the Firebase Auth user
+        // to prevent orphaned accounts
+        try {
+          await userCredential.user.delete();
+          console.log('[AuthContext] Deleted Firebase Auth user due to Firestore error');
+        } catch (deleteError) {
+          console.error('[AuthContext] Failed to delete Firebase Auth user after Firestore error:', deleteError);
+        }
+        
+        // Map Firestore errors to user-friendly messages
+        if (firestoreError.code === 'permission-denied') {
+          throw new Error('Unable to create user profile due to permissions. Please contact support.');
+        } else if (firestoreError.code === 'unavailable') {
+          throw new Error('Service temporarily unavailable. Please try again in a moment.');
+        } else {
+          throw new Error('Failed to create user profile. Please try again.');
+        }
       }
+
+      // Set user state - this makes the user immediately available in the app
+      setUser(newUser);
+      console.log('[AuthContext] Sign up successful - user created and available:', {
+        uid: userCredential.user.uid,
+        email: normalizedEmail,
+        name: name.trim()
+      });
     } catch (error: any) {
-      console.error('[AuthContext] Sign up error:', error);
-      throw error;
+      console.error('[AuthContext] Sign up error (final catch):', error);
+      
+      // If error already has a user-friendly message, re-throw it
+      if (error.message && (
+        error.message.includes('already exists') ||
+        error.message.includes('Invalid email') ||
+        error.message.includes('Password') ||
+        error.message.includes('required') ||
+        error.message.includes('permissions') ||
+        error.message.includes('unavailable') ||
+        error.message.includes('Network error')
+      )) {
+        throw error;
+      }
+      
+      // Map remaining Firebase error codes
+      if (error.code === 'auth/email-already-in-use') {
+        throw new Error('An account with this email already exists. Please login instead.');
+      } else if (error.code === 'auth/invalid-email') {
+        throw new Error('Invalid email address. Please enter a valid email.');
+      } else if (error.code === 'auth/weak-password') {
+        throw new Error('Password is too weak. Please use a stronger password (at least 6 characters).');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        throw new Error('Email/password accounts are not enabled. Please contact support.');
+      } else if (error.code === 'auth/network-request-failed') {
+        throw new Error('Network error. Please check your connection and try again.');
+      } else if (error.code === 'permission-denied') {
+        throw new Error('Unable to create account due to permissions. Please contact support.');
+      } else if (error.message) {
+        throw new Error(error.message);
+      } else {
+        throw new Error('Failed to create account. Please try again.');
+      }
+    }
+  }, []);
+
+  // Password reset (email-based)
+  const resetPassword = useCallback(async (email: string): Promise<void> => {
+    try {
+      const normalizedEmail = (email || '').trim().toLowerCase();
+      if (!normalizedEmail) {
+        throw new Error('Please enter your email address.');
+      }
+
+      await sendPasswordResetEmail(auth, normalizedEmail);
+      console.log('[AuthContext] Password reset email sent to:', normalizedEmail);
+    } catch (error: any) {
+      console.error('[AuthContext] Reset password error:', error);
+
+      if (error.code === 'auth/invalid-email') {
+        throw new Error('Email invalid. Please enter a valid email address.');
+      }
+      if (error.code === 'auth/user-not-found') {
+        throw new Error('Email invalid. Please check and try again.');
+      }
+      if (error.message) {
+        throw new Error(error.message);
+      }
+      throw new Error('Failed to send password reset email. Please try again later.');
+    }
+  }, []);
+
+  // Confirm password reset with oobCode
+  const confirmPasswordResetWithCode = useCallback(async (oobCode: string, newPassword: string): Promise<void> => {
+    try {
+      if (!oobCode || !oobCode.trim()) {
+        throw new Error('Invalid reset code. Please request a new password reset link.');
+      }
+      if (!newPassword || newPassword.length < 6) {
+        throw new Error('Password must be at least 6 characters long.');
+      }
+
+      await confirmPasswordReset(auth, oobCode, newPassword);
+      console.log('[AuthContext] Password reset confirmed successfully');
+    } catch (error: any) {
+      console.error('[AuthContext] Confirm password reset error:', error);
+
+      if (error.code === 'auth/invalid-action-code' || error.code === 'auth/expired-action-code') {
+        throw new Error('This password reset link is invalid or has expired. Please request a new one.');
+      }
+      if (error.code === 'auth/weak-password') {
+        throw new Error('Password is too weak. Please choose a stronger password.');
+      }
+      if (error.message) {
+        throw new Error(error.message);
+      }
+      throw new Error('Failed to reset password. Please try again.');
     }
   }, []);
 
@@ -571,15 +801,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [firebaseUser, user]);
 
   const updateProfileData = useCallback(
-    async (updates: { name?: string; phone?: string; email?: string; photoUrl?: string }): Promise<void> => {
+    async (updates: { name?: string; phone?: string; email?: string; photoUrl?: string; phoneVerified?: boolean; phoneVerifiedAt?: Date }): Promise<void> => {
       if (!firebaseUser) throw new Error('No authenticated user');
       const userRef = doc(db, 'users', firebaseUser.uid);
 
       const updatePayload: any = {};
       if (typeof updates.name === 'string') updatePayload.name = updates.name;
-      if (typeof updates.phone === 'string') updatePayload.phone = updates.phone;
+      
+      // If phone number is changing, reset verification status
+      if (typeof updates.phone === 'string') {
+        const currentPhone = user?.phone || '';
+        if (updates.phone !== currentPhone) {
+          // Phone number changed - reset verification
+          updatePayload.phone = updates.phone;
+          updatePayload.phoneVerified = false;
+          updatePayload.phoneVerifiedAt = null;
+        } else {
+          // Same phone number - keep existing verification status
+          updatePayload.phone = updates.phone;
+        }
+      }
+      
       if (typeof updates.email === 'string') updatePayload.email = updates.email;
       if (typeof updates.photoUrl === 'string') updatePayload.photoUrl = updates.photoUrl;
+      if (typeof updates.phoneVerified === 'boolean') updatePayload.phoneVerified = updates.phoneVerified;
+      if (updates.phoneVerifiedAt instanceof Date) updatePayload.phoneVerifiedAt = serverTimestamp();
 
       // Update Firestore profile (create if missing)
       if (Object.keys(updatePayload).length > 0) {
@@ -607,7 +853,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       // Update local state
       setUser((prev) => {
         if (!prev) return prev;
-        return { ...prev, ...updatePayload };
+        return { 
+          ...prev, 
+          ...updatePayload,
+          phoneVerifiedAt: updates.phoneVerifiedAt || prev.phoneVerifiedAt,
+        };
       });
     },
     [firebaseUser]
@@ -630,6 +880,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       signUpWithEmail,
       loginWithGoogle,
       logout,
+      resetPassword,
+      confirmPasswordReset: confirmPasswordResetWithCode,
       updateWalletBalance,
       updateProfileData,
       continueAsGuest,
@@ -649,6 +901,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signUpWithEmail,
     loginWithGoogle,
     logout,
+    resetPassword,
+    confirmPasswordResetWithCode,
     updateWalletBalance,
     updateProfileData,
     continueAsGuest,

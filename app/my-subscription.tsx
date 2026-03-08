@@ -71,9 +71,6 @@ export default function MySubscriptionScreen() {
             <View style={styles.headerRight}>
               <Text style={styles.greeting}>Hello {user?.name?.split(' ')[0] || 'Hamza'}</Text>
               <View style={styles.iconsContainer}>
-                <View style={styles.languageButton}>
-                  <Text style={styles.languageText}>EN</Text>
-                </View>
                 <View style={styles.profileButton}>
                   <UserIcon size={16} color={Colors.white} />
                 </View>
@@ -129,9 +126,6 @@ export default function MySubscriptionScreen() {
           <View style={styles.headerRight}>
             <Text style={styles.greeting}>Hello {user?.name?.split(' ')[0] || 'Hamza'}</Text>
             <View style={styles.iconsContainer}>
-              <View style={styles.languageButton}>
-                <Text style={styles.languageText}>EN</Text>
-              </View>
               <View style={styles.profileButton}>
                 <UserIcon size={16} color={Colors.white} />
               </View>
@@ -237,19 +231,6 @@ const styles = StyleSheet.create({
   iconsContainer: {
     flexDirection: 'row',
     gap: 8,
-  },
-  languageButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  languageText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: '700' as const,
   },
   profileButton: {
     width: 36,

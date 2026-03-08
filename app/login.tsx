@@ -5,12 +5,13 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
+import Toast from '@/components/Toast';
 
 type AuthMode = 'login' | 'signup';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginWithEmail, signUpWithEmail, loginWithGoogle } = useAuth();
+  const { loginWithEmail, signUpWithEmail, loginWithGoogle, logout, isAdmin } = useAuth();
   const params = useLocalSearchParams<{ mode?: string; ref?: string }>();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('login');
@@ -23,6 +24,26 @@ export default function LoginScreen() {
   const [referral, setReferral] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Validation error states
+  const [errors, setErrors] = useState<{
+    name?: string;
+    email?: string;
+    phone?: string;
+    age?: string;
+    password?: string;
+  }>({});
+  
+  // Toast state
+  const [toast, setToast] = useState<{
+    visible: boolean;
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+  }>({
+    visible: false,
+    message: '',
+    type: 'info',
+  });
 
   useEffect(() => {
     const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
@@ -36,59 +57,207 @@ export default function LoginScreen() {
     return jordanPhoneRegex.test(phoneNum);
   };
 
+  const validateEmailFormat = (value: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(value.trim().toLowerCase());
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: typeof errors = {};
+
+    // Validate name
+    if (!name.trim()) {
+      newErrors.name = 'Name is required';
+    }
+
+    // Validate email
+    if (!email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!validateEmailFormat(email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+
+    // Validate phone - normalize by removing all non-digit characters
+    const phoneDigitsOnly = phone.replace(/\D/g, '');
+    if (!phoneDigitsOnly) {
+      newErrors.phone = 'Phone number is required';
+    } else if (phoneDigitsOnly.length !== 9) {
+      newErrors.phone = 'Please enter a valid 9-digit Jordan phone number (without +962)';
+    }
+
+    // Validate age
+    if (!age.trim()) {
+      newErrors.age = 'Age is required';
+    } else {
+      const ageNum = parseInt(age, 10);
+      if (isNaN(ageNum) || ageNum < 1 || ageNum > 150) {
+        newErrors.age = 'Please enter a valid age (1-150)';
+      }
+    }
+
+    // Validate password
+    if (!password) {
+      newErrors.password = 'Password is required';
+    } else if (password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSignUp = async () => {
-    if (!name || !email || !phone || !password || !age) {
-      Alert.alert('Error', 'Please fill all required fields');
+    // Clear previous errors
+    setErrors({});
+
+    // Validate form
+    if (!validateForm()) {
+      setToast({
+        visible: true,
+        message: 'Please fill all required fields correctly',
+        type: 'error',
+      });
       return;
     }
 
-    if (!validatePhone(phone)) {
-      Alert.alert('Error', 'Please enter a valid 9-digit Jordan phone number (without +962)');
+    // Additional validation before calling signup
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedAge = age.trim();
+    const ageNum = parseInt(trimmedAge, 10);
+
+    if (!trimmedName) {
+      setErrors({ name: 'Name is required' });
+      setToast({
+        visible: true,
+        message: 'Please enter your full name',
+        type: 'error',
+      });
       return;
     }
 
-    const ageNum = parseInt(age, 10);
-    if (isNaN(ageNum) || ageNum < 1 || ageNum > 150) {
-      Alert.alert('Error', 'Please enter a valid age');
+    if (!trimmedEmail) {
+      setErrors({ email: 'Email is required' });
+      setToast({
+        visible: true,
+        message: 'Please enter your email address',
+        type: 'error',
+      });
       return;
     }
 
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    // Normalize phone: remove all non-digit characters, then check length
+    const phoneDigits = trimmedPhone.replace(/\D/g, '');
+    if (!phoneDigits || phoneDigits.length !== 9) {
+      setErrors({ phone: 'Phone number is required' });
+      setToast({
+        visible: true,
+        message: 'Please enter a valid 9-digit phone number (without +962)',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (!trimmedAge || isNaN(ageNum) || ageNum < 1 || ageNum > 150) {
+      setErrors({ age: 'Age is required' });
+      setToast({
+        visible: true,
+        message: 'Please enter a valid age',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (!password || password.length < 6) {
+      setErrors({ password: 'Password is required' });
+      setToast({
+        visible: true,
+        message: 'Password must be at least 6 characters',
+        type: 'error',
+      });
       return;
     }
 
     setIsLoading(true);
+    setErrors({}); // Clear any previous errors
+    
     try {
-      await signUpWithEmail(email.trim(), password, name, `+962${phone}`, referral.trim() || undefined, ageNum);
-      // After successful signup, switch to login mode and ask user to log in
-      setMode('login');
-      setPassword('');
+      console.log('[Login] Starting signup process');
+      await signUpWithEmail(
+        trimmedEmail, 
+        password, 
+        trimmedName, 
+        `+962${phoneDigits}`, 
+        referral.trim() || undefined, 
+        ageNum
+      );
 
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert('Account created successfully!\n\nPlease log in with your new credentials.');
-      } else {
-        Alert.alert('Success', 'Account created successfully! Please log in with your new credentials.');
-      }
-    } catch (error: any) {
-      console.error('Sign up error:', error);
-      let errorMessage = 'Failed to create account. Please try again.';
+      console.log('[Login] Signup successful');
       
-      if (error.code) {
-        if (error.code === 'auth/email-already-in-use') {
-          errorMessage = 'This email is already registered. Please login instead.';
-        } else if (error.code === 'auth/invalid-email') {
-          errorMessage = 'Please enter a valid email address.';
-        } else if (error.code === 'auth/weak-password') {
-          errorMessage = 'Password is too weak. Please use a stronger password.';
-        } else {
-          errorMessage = error.message || errorMessage;
+      // Signup succeeded - show success message
+      setToast({
+        visible: true,
+        message: 'Account created successfully! You can now log in to your account.',
+        type: 'success',
+      });
+
+      // Clear form
+      setName('');
+      setEmail('');
+      setPhone('');
+      setAge('');
+      setPassword('');
+      setReferral('');
+      setErrors({});
+
+      // Wait 2 seconds to show success message, then logout and switch to login mode
+      setTimeout(async () => {
+        try {
+          // Logout to return to login screen (user needs to log in with their new credentials)
+          await logout();
+          console.log('[Login] Logged out after signup');
+        } catch (e) {
+          console.warn('[Login] Logout after signup failed (continuing anyway):', e);
         }
-      } else if (error.message) {
-        errorMessage = error.message;
+        
+        // Switch to login mode
+        setMode('login');
+        router.replace('/login');
+      }, 2000);
+    } catch (error: any) {
+      console.error('[Login] Signup error:', error);
+      
+      // Extract error message - AuthContext already provides user-friendly messages
+      const errorMessage = error.message || 'Failed to create account. Please try again.';
+      
+      // Show error toast
+      setToast({
+        visible: true,
+        message: errorMessage,
+        type: 'error',
+      });
+      
+      // Set inline errors based on error message content
+      const lowerMessage = errorMessage.toLowerCase();
+      const newErrors: Record<string, string> = {};
+      
+      if (lowerMessage.includes('email') && !lowerMessage.includes('phone')) {
+        newErrors.email = errorMessage;
+      } else if (lowerMessage.includes('password')) {
+        newErrors.password = errorMessage;
+      } else if (lowerMessage.includes('phone')) {
+        newErrors.phone = errorMessage;
+      } else if (lowerMessage.includes('name')) {
+        newErrors.name = errorMessage;
+      } else if (lowerMessage.includes('age')) {
+        newErrors.age = errorMessage;
+      } else {
+        // General error - show at top of form
+        newErrors.general = errorMessage;
       }
       
-      Alert.alert('Error', errorMessage);
+      setErrors(newErrors);
     } finally {
       setIsLoading(false);
     }
@@ -105,11 +274,26 @@ export default function LoginScreen() {
       return;
     }
 
+    if (!validateEmailFormat(email)) {
+      const msg = 'Please enter a valid email address.';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Error', msg);
+      }
+      return;
+    }
+
     setIsLoading(true);
     try {
       await loginWithEmail(email.trim(), password);
       console.log('[Login] Email/password login successful, navigating to home');
-      router.replace('/(tabs)/home');
+      // Route based on role: admins go to admin dashboard, users to main app
+      if (isAdmin) {
+        router.replace('/admin-dashboard');
+      } else {
+        router.replace('/(tabs)/home');
+      }
     } catch (error: any) {
       console.error('Login error:', error);
       let errorMessage = 'Invalid credentials. Please try again.';
@@ -166,6 +350,7 @@ export default function LoginScreen() {
     }
   };
 
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -173,6 +358,13 @@ export default function LoginScreen() {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <Toast
+          visible={toast.visible}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ ...toast, visible: false })}
+          duration={toast.type === 'success' ? 2500 : 4000}
+        />
         <ScrollView 
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -196,9 +388,6 @@ export default function LoginScreen() {
             />
             <Text style={styles.brandText}>XPASS</Text>
             <View style={styles.spacer} />
-            <TouchableOpacity style={styles.languageButton}>
-              <Text style={styles.languageText}>EN</Text>
-            </TouchableOpacity>
           </View>
 
           <View style={styles.content}>
@@ -213,40 +402,53 @@ export default function LoginScreen() {
 
             {mode === 'signup' && (
               <View style={styles.inputContainer}>
-                <View style={styles.inputWrapper}>
-                  <User size={20} color={Colors.textMuted} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, errors.name && styles.inputWrapperError]}>
+                  <User size={20} color={errors.name ? Colors.error : Colors.textMuted} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Full Name"
                     placeholderTextColor={Colors.textMuted}
                     value={name}
-                    onChangeText={setName}
+                    onChangeText={(text) => {
+                      setName(text);
+                      if (errors.name) {
+                        setErrors({ ...errors, name: undefined });
+                      }
+                    }}
                     autoCapitalize="words"
                   />
                 </View>
+                {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
               </View>
             )}
 
             <View style={styles.inputContainer}>
-              <View style={styles.inputWrapper}>
-                <Mail size={20} color={Colors.textMuted} style={styles.inputIcon} />
+              <View style={[styles.inputWrapper, errors.email && styles.inputWrapperError]}>
+                <Mail size={20} color={errors.email ? Colors.error : Colors.textMuted} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Email"
                   placeholderTextColor={Colors.textMuted}
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    if (errors.email) {
+                      setErrors({ ...errors, email: undefined });
+                    }
+                  }}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoComplete="email"
                 />
               </View>
+              {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
             </View>
+
 
             {mode === 'signup' && (
               <View style={styles.inputContainer}>
-                <View style={styles.inputWrapper}>
-                  <Phone size={20} color={Colors.textMuted} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, errors.phone && styles.inputWrapperError]}>
+                  <Phone size={20} color={errors.phone ? Colors.error : Colors.textMuted} style={styles.inputIcon} />
                   <View style={styles.countryCodeContainer}>
                     <Text style={styles.countryCode}>+962</Text>
                   </View>
@@ -255,28 +457,40 @@ export default function LoginScreen() {
                     placeholder="Phone (9 digits)"
                     placeholderTextColor={Colors.textMuted}
                     value={phone}
-                    onChangeText={setPhone}
+                    onChangeText={(text) => {
+                      setPhone(text);
+                      if (errors.phone) {
+                        setErrors({ ...errors, phone: undefined });
+                      }
+                    }}
                     keyboardType="phone-pad"
                     maxLength={9}
                   />
                 </View>
+                {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
               </View>
             )}
 
             {mode === 'signup' && (
               <View style={styles.inputContainer}>
-                <View style={styles.inputWrapper}>
-                  <User size={20} color={Colors.textMuted} style={styles.inputIcon} />
+                <View style={[styles.inputWrapper, errors.age && styles.inputWrapperError]}>
+                  <User size={20} color={errors.age ? Colors.error : Colors.textMuted} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Age"
                     placeholderTextColor={Colors.textMuted}
                     value={age}
-                    onChangeText={setAge}
+                    onChangeText={(text) => {
+                      setAge(text);
+                      if (errors.age) {
+                        setErrors({ ...errors, age: undefined });
+                      }
+                    }}
                     keyboardType="numeric"
                     maxLength={3}
                   />
                 </View>
+                {errors.age && <Text style={styles.errorText}>{errors.age}</Text>}
               </View>
             )}
 
@@ -297,47 +511,108 @@ export default function LoginScreen() {
               </View>
             )}
 
-            <View style={styles.inputContainer}>
-              <View style={styles.inputWrapper}>
-                <Lock size={20} color={Colors.textMuted} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Password"
-                  placeholderTextColor={Colors.textMuted}
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                />
+            {mode === 'login' && (
+              <View style={styles.inputContainer}>
+                <View style={styles.inputWrapper}>
+                  <Lock size={20} color={Colors.textMuted} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Password"
+                    placeholderTextColor={Colors.textMuted}
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity 
+                    style={styles.eyeButton}
+                    onPress={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={20} color={Colors.textMuted} />
+                    ) : (
+                      <Eye size={20} color={Colors.textMuted} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {mode === 'signup' && (
+              <View style={styles.inputContainer}>
+                <View style={[styles.inputWrapper, errors.password && styles.inputWrapperError]}>
+                  <Lock size={20} color={errors.password ? Colors.error : Colors.textMuted} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Password"
+                    placeholderTextColor={Colors.textMuted}
+                    value={password}
+                    onChangeText={(text) => {
+                      setPassword(text);
+                      if (errors.password) {
+                        setErrors({ ...errors, password: undefined });
+                      }
+                    }}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                  />
+                  <TouchableOpacity 
+                    style={styles.eyeButton}
+                    onPress={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={20} color={Colors.textMuted} />
+                    ) : (
+                      <Eye size={20} color={Colors.textMuted} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+                {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+              </View>
+            )}
+
+            {mode === 'login' && (
+              <>
                 <TouchableOpacity 
-                  style={styles.eyeButton}
-                  onPress={() => setShowPassword(!showPassword)}
+                  style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
+                  onPress={handleLogin}
+                  disabled={isLoading}
                 >
-                  {showPassword ? (
-                    <EyeOff size={20} color={Colors.textMuted} />
+                  {isLoading ? (
+                    <ActivityIndicator color={Colors.white} />
                   ) : (
-                    <Eye size={20} color={Colors.textMuted} />
+                    <>
+                      <Lock size={18} color={Colors.white} />
+                      <Text style={styles.continueButtonText}>Login</Text>
+                    </>
                   )}
                 </TouchableOpacity>
-              </View>
-            </View>
+                <TouchableOpacity
+                  style={styles.forgotPasswordButton}
+                  onPress={() => router.push('/forgot-password')}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.forgotPasswordButtonText}>Forgot Password</Text>
+                </TouchableOpacity>
+              </>
+            )}
 
-            <TouchableOpacity 
-              style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
-              onPress={mode === 'login' ? handleLogin : handleSignUp}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color={Colors.white} />
-              ) : (
-                <>
-                  <Lock size={18} color={Colors.white} />
-                  <Text style={styles.continueButtonText}>
-                    {mode === 'login' ? 'Login' : 'Sign Up'}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {mode === 'signup' && (
+              <TouchableOpacity 
+                style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
+                onPress={handleSignUp}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  <>
+                    <Lock size={18} color={Colors.white} />
+                    <Text style={styles.continueButtonText}>Sign Up</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
 
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
@@ -355,7 +630,11 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <View style={styles.toggleContainer}>
-              <TouchableOpacity onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+              <TouchableOpacity onPress={() => {
+                setMode(mode === 'login' ? 'signup' : 'login');
+                setErrors({});
+                setToast({ visible: false, message: '', type: 'info' });
+              }}>
                 <Text style={styles.toggleText}>
                   {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
                   <Text style={styles.toggleTextBold}>
@@ -405,19 +684,6 @@ const styles = StyleSheet.create({
   spacer: {
     flex: 1,
   },
-  languageButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  languageText: {
-    fontSize: 12,
-    fontWeight: '600' as const,
-    color: Colors.white,
-  },
   content: {
     flex: 1,
     paddingHorizontal: 32,
@@ -445,6 +711,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.border,
+  },
+  inputWrapperError: {
+    borderColor: Colors.error,
+    borderWidth: 1.5,
+  },
+  errorText: {
+    marginTop: 6,
+    marginLeft: 2,
+    fontSize: 12,
+    color: Colors.error,
+    fontWeight: '500' as const,
   },
   inputIcon: {
     position: 'absolute',
@@ -565,5 +842,21 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  forgotPasswordButton: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+    marginTop: -8,
+    borderWidth: 1,
+    borderColor: '#DC143C',
+  },
+  forgotPasswordButtonText: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#DC143C',
   },
 });

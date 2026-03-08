@@ -2,7 +2,7 @@
   "expo": {
     "name": "Xpass Subscription App",
     "slug": "xpass-subscription-app",
-    "version": "1.0.0",
+    "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "xpass",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "1",
+      "buildNumber": "15",
       "config": {},
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
@@ -39,7 +39,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.xpass.app",
-      "versionCode": 1,
+      "versionCode": 15,
       "config": {},
       "intentFilters": [
         {

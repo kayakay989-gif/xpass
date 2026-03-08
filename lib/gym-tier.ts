@@ -1,5 +1,6 @@
 import Colors from '@/constants/colors';
 import type { Gym, GymCategory, SubscriptionTier } from '@/types';
+import { getTierBadgeColors as getSharedTierBadgeColors } from '@/constants/tier-colors';
 
 const TIER_ORDER: SubscriptionTier[] = ['silver', 'gold', 'diamond', 'elite'];
 
@@ -52,17 +53,7 @@ export function getTierLabel(tier: SubscriptionTier): string {
 }
 
 export function getTierBadgeColors(tier: SubscriptionTier): { backgroundColor: string; textColor: string } {
-  switch (tier) {
-    case 'silver':
-      return { backgroundColor: '#111827', textColor: Colors.white };
-    case 'gold':
-      return { backgroundColor: '#F6C343', textColor: Colors.black };
-    case 'diamond':
-      return { backgroundColor: '#6D5BD0', textColor: Colors.white };
-    case 'elite':
-      return { backgroundColor: '#1D7EF5', textColor: Colors.white };
-    default:
-      return { backgroundColor: Colors.textSecondary, textColor: Colors.white };
-  }
+  // Use shared tier colors for consistency across the app
+  return getSharedTierBadgeColors(tier);
 }
 

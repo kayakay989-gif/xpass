@@ -17,6 +17,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronRight, CreditCard, Filter, Home, User as UserIcon } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { firestoreGyms, firestoreCheckIns, firestoreGymOwners, firestoreUsers } from '@/lib/firestore';
+import { trpc } from '@/lib/trpc';
 
 export default function GymDashboardScreen() {
   const router = useRouter();
@@ -125,8 +126,12 @@ export default function GymDashboardScreen() {
     })();
   }, [urlParams.gymId, router]);
 
-  // Mock payments data (can be replaced with actual Firestore query later)
-  const payments = useMemo(() => [], []);
+  // Load payouts data
+  const payoutsQuery = trpc.gyms.getPayments.useQuery(
+    { gymId: actualGymId || '' },
+    { enabled: !!actualGymId }
+  );
+  const payments = payoutsQuery.data || [];
 
   const todayCheckIns = useMemo(() => {
     const today = new Date();
@@ -215,9 +220,6 @@ export default function GymDashboardScreen() {
       </View>
 
       <View style={styles.topBarRight}>
-        <TouchableOpacity style={styles.langPill} activeOpacity={0.8}>
-          <Text style={styles.langText}>EN</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           style={styles.profilePill}
           activeOpacity={0.8}
@@ -405,20 +407,78 @@ export default function GymDashboardScreen() {
       )}
 
       {activeTab === 'payments' && (
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.pillHeader}>
-            <Text style={styles.pillHeaderText}>Upcoming Payments</Text>
-          </View>
+        <ScrollView 
+          style={styles.scrollView} 
+          contentContainerStyle={styles.scrollContent} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
+        >
+          <Text style={styles.screenTitle}>Payout History</Text>
 
-          {payments.length === 0 ? (
-            <Text style={styles.muted}>No upcoming payments</Text>
+          {payoutsQuery.isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#111827" />
+              <Text style={styles.loadingText}>Loading payouts...</Text>
+            </View>
+          ) : payments.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No payouts yet</Text>
+              <Text style={styles.emptyText}>
+                Payouts will appear here once check-ins are processed.
+              </Text>
+            </View>
           ) : (
-            payments.map((p: any, idx: number) => (
-              <View key={`${p.id || idx}`} style={styles.paymentRow}>
-                <Text style={styles.paymentLeft}>{p.label || p.month || '—'}</Text>
-                <Text style={styles.paymentRight}>JOD {p.amount || 0}</Text>
-              </View>
-            ))
+            <>
+              {payments.map((payout: any) => {
+                const monthDate = new Date(payout.month + '-01');
+                const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                const isPaid = payout.status === 'paid';
+                const paidDate = payout.paidAt ? new Date(payout.paidAt) : null;
+
+                return (
+                  <View key={payout.id} style={styles.payoutCard}>
+                    <View style={styles.payoutHeaderRow}>
+                      <Text style={styles.payoutMonth}>{monthName}</Text>
+                      <View style={[styles.payoutStatusBadge, isPaid && styles.payoutStatusBadgePaid]}>
+                        <Text style={[styles.payoutStatusText, isPaid && styles.payoutStatusTextPaid]}>
+                          {isPaid ? 'Paid' : 'Pending'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.payoutDetailsRow}>
+                      <Text style={styles.payoutLabel}>Check-ins:</Text>
+                      <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
+                    </View>
+
+                    {payout.payPerVisitRate && (
+                      <View style={styles.payoutDetailsRow}>
+                        <Text style={styles.payoutLabel}>Rate per visit:</Text>
+                        <Text style={styles.payoutValue}>{payout.payPerVisitRate.toFixed(2)} JOD</Text>
+                      </View>
+                    )}
+
+                    <View style={styles.payoutDetailsRow}>
+                      <Text style={styles.payoutLabel}>Total Amount:</Text>
+                      <Text style={styles.payoutTotalAmount}>JOD {payout.amount.toFixed(2)}</Text>
+                    </View>
+
+                    {isPaid && paidDate && (
+                      <View style={styles.payoutDetailsRow}>
+                        <Text style={styles.payoutLabel}>Paid on:</Text>
+                        <Text style={styles.payoutValue}>
+                          {paidDate.toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </>
           )}
         </ScrollView>
       )}
@@ -593,15 +653,6 @@ const styles = StyleSheet.create({
   brandLogo: { width: 28, height: 28 },
   brandText: { fontSize: 18, fontWeight: '800' as const, color: '#111827', letterSpacing: 0.4 },
   topBarRight: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10 },
-  langPill: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#111827',
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  langText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' as const },
   profilePill: {
     width: 34,
     height: 34,
@@ -840,5 +891,57 @@ const styles = StyleSheet.create({
   checkinName: { fontSize: 15, fontWeight: '800' as const, color: '#111827' },
   checkinSub: { marginTop: 2, fontSize: 12, fontWeight: '600' as const, color: '#6B7280' },
   checkinTime: { marginTop: 2, fontSize: 11, fontWeight: '600' as const, color: '#9CA3AF' },
+
+  emptyState: {
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingVertical: 40,
+  },
+  emptyTitle: { fontSize: 16, fontWeight: '700' as const, color: '#111827', marginBottom: 8 },
+  emptyText: { fontSize: 13, color: '#6B7280', textAlign: 'center' as const },
+
+  payoutCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 16,
+    marginBottom: 12,
+  },
+  payoutHeaderRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: 12,
+  },
+  payoutMonth: { fontSize: 16, fontWeight: '700' as const, color: '#111827' },
+  payoutStatusBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  payoutStatusBadgePaid: {
+    backgroundColor: '#D1FAE5',
+  },
+  payoutStatusText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    color: '#92400E',
+  },
+  payoutStatusTextPaid: {
+    color: '#065F46',
+  },
+  payoutDetailsRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F2',
+  },
+  payoutLabel: { fontSize: 13, color: '#6B7280', fontWeight: '600' as const },
+  payoutValue: { fontSize: 13, color: '#111827', fontWeight: '700' as const },
+  payoutTotalAmount: { fontSize: 16, color: '#111827', fontWeight: '800' as const },
 });
 

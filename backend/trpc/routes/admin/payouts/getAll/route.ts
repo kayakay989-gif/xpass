@@ -31,6 +31,7 @@ export default adminProcedure.query(async () => {
     month: string;
     totalCheckins: number;
     amount: number;
+    payPerVisitRate: number; // Average rate per visit for this month
   };
 
   const aggregates = new Map<string, Aggregate>();
@@ -49,10 +50,20 @@ export default adminProcedure.query(async () => {
       month: monthKey,
       totalCheckins: 0,
       amount: 0,
+      payPerVisitRate: 0,
     };
 
+    const payoutAmount = ci.payoutAmount || gym.pricePerVisit || 0;
     existing.totalCheckins += 1;
-    existing.amount += ci.payoutAmount || gym.pricePerVisit || 0;
+    existing.amount += payoutAmount;
+    
+    // Calculate average rate (for display purposes, since rates may vary)
+    if (existing.totalCheckins === 1) {
+      existing.payPerVisitRate = payoutAmount;
+    } else {
+      // Weighted average
+      existing.payPerVisitRate = existing.amount / existing.totalCheckins;
+    }
 
     aggregates.set(aggKey, existing);
   }
@@ -67,10 +78,11 @@ export default adminProcedure.query(async () => {
         month: agg.month,
         totalCheckins: agg.totalCheckins,
         amount: agg.amount,
+        payPerVisitRate: agg.payPerVisitRate,
         status: 'pending',
         paidAt: null,
       });
-    }
+      }
   }
 
   // Reload payouts after potential inserts

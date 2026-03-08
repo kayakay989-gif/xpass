@@ -121,9 +121,6 @@ export default function AdminLoginScreen() {
         </View>
 
         <View style={styles.topBarRight}>
-          <TouchableOpacity style={styles.langPill} activeOpacity={0.8}>
-            <Text style={styles.langText}>EN</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.profilePill} activeOpacity={0.8}>
             <User size={18} color="#FFFFFF" />
           </TouchableOpacity>
@@ -232,19 +229,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     gap: 10,
-  },
-  langPill: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#111827',
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  langText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800' as const,
   },
   profilePill: {
     width: 34,

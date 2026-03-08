@@ -49,14 +49,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
 import { FIXED_CITIES } from '@/constants/cities';
 import { trpc } from '@/lib/trpc';
+import { TIER_COLORS as SHARED_TIER_COLORS } from '@/constants/tier-colors';
+import DatePicker from '@/components/DatePicker';
 
 type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
 
+// Use shared tier colors for consistency
 const TIER_COLORS = {
-  silver: '#C0C0C0',
-  gold: '#FFD700',
-  diamond: '#B9F2FF',
-  elite: '#9333EA',
+  silver: SHARED_TIER_COLORS.silver.primary,
+  gold: SHARED_TIER_COLORS.gold.primary,
+  diamond: SHARED_TIER_COLORS.diamond.primary,
+  elite: SHARED_TIER_COLORS.elite.primary,
   none: '#9CA3AF',
 } as const;
 
@@ -71,10 +74,41 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
     usageLimit: '',
     expiresAt: '',
   });
+  const [page, setPage] = useState(0);
+  const [allCoupons, setAllCoupons] = useState<any[]>([]);
+  const pageSize = 20;
 
-  const { data: coupons, refetch: refetchCoupons, isLoading } = trpc.coupons.getAll.useQuery();
+  // Lazy loading: only fetch when component is mounted (when coupons section is opened)
+  const { data: couponsData, refetch: refetchCoupons, isLoading, isFetching } = trpc.coupons.getAll.useQuery(
+    { limit: pageSize, offset: page * pageSize },
+    { 
+      enabled: true, // Always enabled since we're in the coupons section
+    }
+  );
+
+  // Update coupons list when data changes
+  useEffect(() => {
+    if (couponsData?.coupons) {
+      if (page === 0) {
+        // First page - replace all coupons
+        setAllCoupons(couponsData.coupons);
+      } else {
+        // Subsequent pages - append to existing coupons (avoid duplicates)
+        setAllCoupons((prev) => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const newCoupons = couponsData.coupons.filter(c => !existingIds.has(c.id));
+          return [...prev, ...newCoupons];
+        });
+      }
+    }
+  }, [couponsData, page]);
+
+  const coupons = allCoupons;
+  const hasMore = couponsData?.hasMore || false;
   const createMutation = trpc.coupons.create.useMutation({
     onSuccess: () => {
+      setPage(0); // Reset to first page
+      setAllCoupons([]); // Clear existing coupons
       refetchCoupons();
       setShowCouponModal(false);
       resetCouponForm();
@@ -86,6 +120,8 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
   });
   const updateMutation = trpc.coupons.update.useMutation({
     onSuccess: () => {
+      setPage(0); // Reset to first page
+      setAllCoupons([]); // Clear existing coupons
       refetchCoupons();
       setShowCouponModal(false);
       setEditingCoupon(null);
@@ -98,11 +134,15 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
   });
   const deleteMutation = trpc.coupons.delete.useMutation({
     onSuccess: () => {
+      console.log('[Coupons] Delete successful, refreshing list...');
+      setPage(0); // Reset to first page
+      setAllCoupons([]); // Clear existing coupons
       refetchCoupons();
       Alert.alert('Success', 'Coupon deleted successfully');
     },
     onError: (error) => {
-      Alert.alert('Error', error.message);
+      console.error('[Coupons] Delete error:', error);
+      Alert.alert('Error', error.message || 'Failed to delete coupon. Please try again.');
     },
   });
 
@@ -171,14 +211,31 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
   };
 
   const handleDeleteCoupon = (couponId: string) => {
-    Alert.alert('Delete Coupon', 'Are you sure you want to delete this coupon?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => deleteMutation.mutate({ couponId }),
-      },
-    ]);
+    if (!couponId) {
+      Alert.alert('Error', 'Invalid coupon ID');
+      return;
+    }
+    
+    Alert.alert(
+      'Delete Coupon',
+      'Are you sure you want to delete this coupon? This action cannot be undone.',
+      [
+        { 
+          text: 'Cancel', 
+          style: 'cancel',
+          onPress: () => console.log('[Coupons] Delete cancelled')
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            console.log('[Coupons] Deleting coupon:', couponId);
+            deleteMutation.mutate({ couponId });
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   const toggleCouponActive = (coupon: any) => {
@@ -208,10 +265,23 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
         </TouchableOpacity>
       </View>
 
-      {isLoading ? (
+      {isLoading && page === 0 ? (
         <ActivityIndicator size="large" color="#111827" style={{ marginTop: 40 }} />
       ) : (
-        <ScrollView style={styles.couponsList} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.couponsList} 
+          showsVerticalScrollIndicator={false}
+          onScroll={(e) => {
+            const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+            const paddingToBottom = 20;
+            const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+            
+            if (isCloseToBottom && hasMore && !isFetching) {
+              setPage((prev) => prev + 1);
+            }
+          }}
+          scrollEventThrottle={400}
+        >
           {coupons && coupons.length > 0 ? (
             coupons.map((coupon: any) => {
               const isExpired = coupon.expiresAt && new Date(coupon.expiresAt) < new Date();
@@ -249,7 +319,14 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.iconButton}
-                        onPress={() => handleDeleteCoupon(coupon.id)}
+                        onPress={(e) => {
+                          e?.stopPropagation?.();
+                          if (coupon?.id) {
+                            handleDeleteCoupon(coupon.id);
+                          }
+                        }}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
                         <Trash2 size={18} color="#DC2626" />
                       </TouchableOpacity>
@@ -304,6 +381,26 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
               <Tag size={48} color="#9CA3AF" />
               <Text style={styles.emptyTitle}>No coupons</Text>
               <Text style={styles.emptyText}>Create your first coupon to get started.</Text>
+            </View>
+          )}
+          {isFetching && page > 0 && (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#111827" />
+            </View>
+          )}
+          {!hasMore && coupons.length > 0 && (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <Text style={{ color: '#6B7280', fontSize: 14 }}>No more coupons to load</Text>
+            </View>
+          )}
+          {isFetching && page > 0 && (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#111827" />
+            </View>
+          )}
+          {!hasMore && coupons.length > 0 && (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <Text style={{ color: '#6B7280', fontSize: 14 }}>No more coupons to load</Text>
             </View>
           )}
         </ScrollView>
@@ -424,6 +521,7 @@ export default function AdminDashboardScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showTodayCheckIns, setShowTodayCheckIns] = useState<boolean>(false);
   const [selectedCheckIn, setSelectedCheckIn] = useState<any | null>(null);
+  const [selectedSubscriber, setSelectedSubscriber] = useState<any | null>(null);
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
   const [spotlightImages, setSpotlightImages] = useState<any[]>([]);
   const [isLoadingSpotlight, setIsLoadingSpotlight] = useState(false);
@@ -491,7 +589,7 @@ export default function AdminDashboardScreen() {
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'inactive'>('all');
-  const [checkInsDateFilter, setCheckInsDateFilter] = useState<string>('');
+  const [checkInsDateFilter, setCheckInsDateFilter] = useState<Date | null>(null);
 
   // Admin payouts (pending / paid)
   const payoutsQuery = trpc.admin.payouts.getAll.useQuery(undefined, {
@@ -730,39 +828,15 @@ export default function AdminDashboardScreen() {
       );
     }
 
-    // Date filter (YYYY-MM-DD). Uses check-in timestamp but keeps existing sort.
-    const trimmedDate = checkInsDateFilter.trim();
-    if (trimmedDate) {
-      const parseDate = (value: string): Date | null => {
-        // Prefer YYYY-MM-DD; fall back to Date parsing if needed.
-        const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (isoMatch) {
-          const [_, y, m, d] = isoMatch;
-          const parsed = new Date(
-            Number(y),
-            Number(m) - 1,
-            Number(d),
-            0,
-            0,
-            0,
-            0
-          );
-          return isNaN(parsed.getTime()) ? null : parsed;
-        }
-
-        const fallback = new Date(value);
-        return isNaN(fallback.getTime()) ? null : fallback;
-      };
-
-      const selectedDate = parseDate(trimmedDate);
-      if (selectedDate) {
-        selectedDate.setHours(0, 0, 0, 0);
-        result = result.filter((ci: any) => {
-          const ciDate = new Date(ci.timestamp);
-          ciDate.setHours(0, 0, 0, 0);
-          return ciDate.getTime() === selectedDate.getTime();
-        });
-      }
+    // Date filter - filter by selected date
+    if (checkInsDateFilter) {
+      const selectedDate = new Date(checkInsDateFilter);
+      selectedDate.setHours(0, 0, 0, 0);
+      result = result.filter((ci: any) => {
+        const ciDate = new Date(ci.timestamp);
+        ciDate.setHours(0, 0, 0, 0);
+        return ciDate.getTime() === selectedDate.getTime();
+      });
     }
 
     return result;
@@ -956,6 +1030,15 @@ export default function AdminDashboardScreen() {
     return true;
   };
 
+  const validateEditForm = (): boolean => {
+    if (!validateDetailsStep()) return false;
+    if (!newGym.pricePerVisit || isNaN(parseFloat(newGym.pricePerVisit)) || parseFloat(newGym.pricePerVisit) <= 0) {
+      Alert.alert('Error', 'Please enter a valid Pay Per Visit amount (must be greater than 0)');
+      return false;
+    }
+    return true;
+  };
+
   const handleNextStep = () => {
     if (gymCreationStep === 'details') {
       if (validateDetailsStep()) {
@@ -982,8 +1065,14 @@ export default function AdminDashboardScreen() {
     const isEditing = !!editingGymId;
     
     // Final validation before submission
-    if (!validateDetailsStep() || !validatePricingStep()) {
-      return;
+    if (isEditing) {
+      if (!validateEditForm()) {
+        return;
+      }
+    } else {
+      if (!validateDetailsStep() || !validatePricingStep()) {
+        return;
+      }
     }
 
     const latitude = parseFloat(newGym.latitude);
@@ -1711,9 +1800,6 @@ export default function AdminDashboardScreen() {
         </View>
 
         <View style={styles.topBarRight}>
-          <TouchableOpacity style={styles.langPill} activeOpacity={0.8}>
-            <Text style={styles.langText}>EN</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.profilePill} activeOpacity={0.8}>
             <UserIcon size={18} color="#FFFFFF" />
           </TouchableOpacity>
@@ -1817,7 +1903,7 @@ export default function AdminDashboardScreen() {
               />
             </View>
 
-            {/* Subscribers status filter: All vs Inactive / Expired */}
+            {/* Subscribers status filter: Active vs Inactive / Expired */}
             <View style={styles.userFilterRow}>
               <TouchableOpacity
                 style={[
@@ -1833,7 +1919,7 @@ export default function AdminDashboardScreen() {
                     userStatusFilter === 'all' && styles.userFilterChipTextActive,
                   ]}
                 >
-                  All
+                  Active
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1864,7 +1950,12 @@ export default function AdminDashboardScreen() {
                 : null;
 
               return (
-                <View key={user.id} style={styles.userCard}>
+                <TouchableOpacity
+                  key={user.id}
+                  style={styles.userCard}
+                  onPress={() => setSelectedSubscriber(user)}
+                  activeOpacity={0.7}
+                >
                   <View style={styles.userHeader}>
                     <View style={styles.userIcon}>
                       <Users size={24} color="#DC2626" />
@@ -1911,14 +2002,14 @@ export default function AdminDashboardScreen() {
                   <View style={styles.userStats}>
                     <View style={styles.userStat}>
                       <Text style={styles.userStatLabel}>Wallet</Text>
-                      <Text style={styles.userStatValue}>${user.walletBalance || 0}</Text>
+                      <Text style={styles.userStatValue}>JOD {user.walletBalance || 0}</Text>
                     </View>
                     <View style={styles.userStat}>
                       <Text style={styles.userStatLabel}>Code</Text>
                       <Text style={styles.userStatValue}>{user.referralCode || 'N/A'}</Text>
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -2089,6 +2180,14 @@ export default function AdminDashboardScreen() {
               )}
             </View>
 
+            {/* Gyms Section */}
+            <View style={styles.gymsSection}>
+              <Text style={styles.sectionTitle}>Gyms</Text>
+              <Text style={styles.spotlightDescription}>
+                Manage gym locations and settings.
+              </Text>
+            </View>
+
             {filteredGyms.map((gym: any) => {
               const logoUri =
                 typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
@@ -2235,19 +2334,25 @@ export default function AdminDashboardScreen() {
               />
             </View>
 
-            {/* Date filter for check-ins (YYYY-MM-DD or any parsable date) */}
+            {/* Date filter for check-ins */}
             <View style={styles.dateFilterRow}>
               <Text style={styles.dateFilterLabel}>Filter by date</Text>
-              <TextInput
-                style={styles.dateFilterInput}
-                placeholder="YYYY-MM-DD"
+              <DatePicker
                 value={checkInsDateFilter}
-                onChangeText={setCheckInsDateFilter}
-                placeholderTextColor="#9CA3AF"
+                onChange={setCheckInsDateFilter}
+                placeholder="Select date"
               />
             </View>
 
-            <Text style={styles.allCheckInsTitle}>All Check-ins</Text>
+            <Text style={styles.allCheckInsTitle}>
+              {checkInsDateFilter
+                ? checkInsDateFilter.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })
+                : 'All Check-ins'}
+            </Text>
 
             {filteredCheckIns.map((checkIn: any) => {
               const checkInDate = new Date(checkIn.timestamp);
@@ -2356,7 +2461,13 @@ export default function AdminDashboardScreen() {
                             <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
                           </View>
                           <View style={styles.payoutMetaRow}>
-                            <Text style={styles.payoutLabel}>Amount</Text>
+                            <Text style={styles.payoutLabel}>Pay Per Visit Rate</Text>
+                            <Text style={styles.payoutValue}>
+                              {payout.payPerVisitRate ? `${payout.payPerVisitRate.toFixed(2)} JOD` : 'N/A'}
+                            </Text>
+                          </View>
+                          <View style={styles.payoutMetaRow}>
+                            <Text style={styles.payoutLabel}>Total Amount</Text>
                             <Text style={styles.payoutValue}>{formatPayoutAmount(payout.amount)}</Text>
                           </View>
 
@@ -2405,7 +2516,13 @@ export default function AdminDashboardScreen() {
                               <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
                             </View>
                             <View style={styles.payoutMetaRow}>
-                              <Text style={styles.payoutLabel}>Amount</Text>
+                              <Text style={styles.payoutLabel}>Pay Per Visit Rate</Text>
+                              <Text style={styles.payoutValue}>
+                                {payout.payPerVisitRate ? `${payout.payPerVisitRate.toFixed(2)} JOD` : 'N/A'}
+                              </Text>
+                            </View>
+                            <View style={styles.payoutMetaRow}>
+                              <Text style={styles.payoutLabel}>Total Amount</Text>
                               <Text style={styles.payoutValue}>{formatPayoutAmount(payout.amount)}</Text>
                             </View>
                             <View style={styles.payoutMetaRow}>
@@ -3223,6 +3340,21 @@ export default function AdminDashboardScreen() {
                   </View>
                 </>
               )}
+
+              {/* Pay Per Visit Field - Show when editing */}
+              {editingGymId && (
+                <>
+                  <Text style={styles.label}>Pay Per Visit (JOD) *</Text>
+                  <Text style={styles.helperText}>Amount XPASS pays the gym per check-in</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={newGym.pricePerVisit}
+                    onChangeText={(text) => setNewGym({ ...newGym, pricePerVisit: text.replace(/[^0-9.]/g, '') })}
+                    placeholder="Enter pay per visit amount"
+                    keyboardType="decimal-pad"
+                  />
+                </>
+              )}
                 </>
               )}
 
@@ -3411,6 +3543,136 @@ export default function AdminDashboardScreen() {
                   })}
                 </Text>
               </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Subscriber Details Modal */}
+      <Modal
+        visible={!!selectedSubscriber}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedSubscriber(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.checkInDetailModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Subscriber Details</Text>
+              <TouchableOpacity onPress={() => setSelectedSubscriber(null)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            {selectedSubscriber && (
+              <ScrollView style={styles.checkInDetailBody} showsVerticalScrollIndicator={false}>
+                <Text style={styles.checkInDetailLabel}>Name</Text>
+                <Text style={styles.checkInDetailValue}>{selectedSubscriber.name || 'N/A'}</Text>
+
+                <Text style={styles.checkInDetailLabel}>Email</Text>
+                <Text style={styles.checkInDetailValue}>{selectedSubscriber.email || 'N/A'}</Text>
+
+                <Text style={styles.checkInDetailLabel}>Phone</Text>
+                <Text style={styles.checkInDetailValue}>{selectedSubscriber.phone || 'N/A'}</Text>
+
+                <Text style={styles.checkInDetailLabel}>Age</Text>
+                <Text style={styles.checkInDetailValue}>{selectedSubscriber.age || 'N/A'}</Text>
+
+                {selectedSubscriber.subscription && (
+                  <>
+                    <Text style={styles.checkInDetailLabel}>Subscription Tier</Text>
+                    <Text style={styles.checkInDetailValue}>
+                      {selectedSubscriber.subscription.tier
+                        ? selectedSubscriber.subscription.tier.toUpperCase()
+                        : 'N/A'}
+                    </Text>
+
+                    <Text style={styles.checkInDetailLabel}>Subscription Duration</Text>
+                    <Text style={styles.checkInDetailValue}>
+                      {selectedSubscriber.subscription.duration
+                        ? `${selectedSubscriber.subscription.duration} month(s)`
+                        : 'N/A'}
+                    </Text>
+
+                    <Text style={styles.checkInDetailLabel}>Subscription Status</Text>
+                    <Text
+                      style={[
+                        styles.checkInDetailValue,
+                        new Date(selectedSubscriber.subscription.endDate) < new Date()
+                          ? { color: '#DC2626' }
+                          : { color: '#059669' },
+                      ]}
+                    >
+                      {new Date(selectedSubscriber.subscription.endDate) < new Date()
+                        ? 'Expired'
+                        : `${Math.ceil(
+                            (new Date(selectedSubscriber.subscription.endDate).getTime() -
+                              new Date().getTime()) /
+                              (1000 * 60 * 60 * 24)
+                          )} days remaining`}
+                    </Text>
+
+                    <Text style={styles.checkInDetailLabel}>Subscription Start Date</Text>
+                    <Text style={styles.checkInDetailValue}>
+                      {selectedSubscriber.subscription.startDate
+                        ? new Date(selectedSubscriber.subscription.startDate).toLocaleDateString(
+                            'en-US',
+                            {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            }
+                          )
+                        : 'N/A'}
+                    </Text>
+
+                    <Text style={styles.checkInDetailLabel}>Subscription End Date</Text>
+                    <Text style={styles.checkInDetailValue}>
+                      {selectedSubscriber.subscription.endDate
+                        ? new Date(selectedSubscriber.subscription.endDate).toLocaleDateString(
+                            'en-US',
+                            {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            }
+                          )
+                        : 'N/A'}
+                    </Text>
+                  </>
+                )}
+
+                <Text style={styles.checkInDetailLabel}>Wallet Balance</Text>
+                <Text style={styles.checkInDetailValue}>
+                  JOD {selectedSubscriber.walletBalance || 0}
+                </Text>
+
+                <Text style={styles.checkInDetailLabel}>Referral Code</Text>
+                <Text style={styles.checkInDetailValue}>
+                  {selectedSubscriber.referralCode || 'N/A'}
+                </Text>
+
+                {selectedSubscriber.referredBy && (
+                  <>
+                    <Text style={styles.checkInDetailLabel}>Referred By</Text>
+                    <Text style={styles.checkInDetailValue}>
+                      {selectedSubscriber.referredBy}
+                    </Text>
+                  </>
+                )}
+
+                {selectedSubscriber.createdAt && (
+                  <>
+                    <Text style={styles.checkInDetailLabel}>Member Since</Text>
+                    <Text style={styles.checkInDetailValue}>
+                      {new Date(selectedSubscriber.createdAt).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                      })}
+                    </Text>
+                  </>
+                )}
+              </ScrollView>
             )}
           </View>
         </View>
@@ -3658,19 +3920,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     gap: 10,
-  },
-  langPill: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#111827',
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  langText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800' as const,
   },
   profilePill: {
     width: 34,
@@ -5114,6 +5363,14 @@ const styles = StyleSheet.create({
   },
   spotlightPanel: {
     marginTop: 24,
+    marginBottom: 32,
+    paddingBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  gymsSection: {
+    marginTop: 8,
+    marginBottom: 16,
   },
   spotlightDescription: {
     fontSize: 13,

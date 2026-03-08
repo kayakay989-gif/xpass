@@ -1,11 +1,17 @@
 {
-    "cli": {
-      "version": ">= 5.9.1"
+  "cli": {
+    "version": ">= 5.9.1"
+  },
+  "build": {
+    "production": {
+      "distribution": "store"
     },
-    "build": {
-      "production": {
-        "distribution": "store"
-      }
+    "preview": {
+      "distribution": "internal"
     }
+  },
+  "submit": {
+    "production": {}
   }
+}
   

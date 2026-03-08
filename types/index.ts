@@ -16,6 +16,8 @@ export interface User {
   referredBy?: string;
   walletBalance: number;
   createdAt: Date;
+  phoneVerified?: boolean;
+  phoneVerifiedAt?: Date;
 }
 
 export interface Subscription {
@@ -135,7 +137,29 @@ export interface Payout {
   month: string; // e.g. "2026-03"
   totalCheckins: number;
   amount: number;
+  payPerVisitRate?: number; // Average rate per visit (JOD)
   status: PayoutStatus;
   paidAt: Date | null;
+  createdAt: Date;
+}
+
+export type WalletTransactionType = 'referral_reward' | 'payment' | 'refund' | 'adjustment';
+
+export interface WalletTransaction {
+  id: string;
+  userId: string;
+  type: WalletTransactionType;
+  amount: number; // Positive for credit, negative for debit
+  description: string;
+  relatedUserId?: string; // For referral rewards, the referred user's ID
+  createdAt: Date;
+}
+
+export interface ReferralTransaction {
+  id: string;
+  referrerId: string; // User who gets the reward
+  referredUserId: string; // New user who signed up
+  rewardAmount: number; // Always 10 JOD
+  referrerCode: string; // The referral code used
   createdAt: Date;
 }
