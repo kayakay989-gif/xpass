@@ -225,6 +225,18 @@ export default function HomeScreen() {
     longitudeDelta: 0.1,
   };
 
+  // While auth or core app data (subscription, gyms, check-ins) is loading,
+  // show a unified loading state so we don't briefly render incorrect
+  // subscription UI (e.g., "No Active Subscription" before data arrives).
+  if (isLoadingAuth || isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading your membership...</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.header}>

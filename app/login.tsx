@@ -193,12 +193,12 @@ export default function LoginScreen() {
         ageNum
       );
 
-      console.log('[Login] Signup successful');
+      console.log('[Login] Signup successful - showing success and redirecting');
       
       // Signup succeeded - show success message
       setToast({
         visible: true,
-        message: 'Account created successfully! You can now log in to your account.',
+        message: 'Account created successfully! You can now log in.',
         type: 'success',
       });
 
@@ -210,19 +210,20 @@ export default function LoginScreen() {
       setPassword('');
       setReferral('');
       setErrors({});
-
-      // Wait 2 seconds to show success message, then logout and switch to login mode
+      
+      // Switch to login mode
+      setMode('login');
+      
+      // Logout and redirect after a brief delay to show success message
       setTimeout(async () => {
         try {
-          // Logout to return to login screen (user needs to log in with their new credentials)
           await logout();
           console.log('[Login] Logged out after signup');
         } catch (e) {
           console.warn('[Login] Logout after signup failed (continuing anyway):', e);
         }
         
-        // Switch to login mode
-        setMode('login');
+        // Redirect to login page
         router.replace('/login');
       }, 2000);
     } catch (error: any) {

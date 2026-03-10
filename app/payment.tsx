@@ -3,16 +3,19 @@ import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Alert, Tex
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { ArrowLeft, CreditCard, CheckCircle2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
+import Toast, { ToastType } from '@/components/Toast';
 
 export default function PaymentScreen() {
   const { tier, duration, price } = useLocalSearchParams<{ tier: string; duration: string; price: string }>();
   const router = useRouter();
   const { user } = useAuth();
+  const { subscriptionQuery } = useApp();
   const insets = useSafeAreaInsets();
 
   const [paymentProcessing, setPaymentProcessing] = useState<boolean>(false);
@@ -30,6 +33,11 @@ export default function PaymentScreen() {
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState<string>('');
   const [isValidatingCoupon, setIsValidatingCoupon] = useState<boolean>(false);
+
+  // Toast state for success / error messages
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<ToastType>('success');
 
   const initiateAuthMutation = trpc.payments.initiate3ds.useMutation({
     onError: (error) => {
@@ -99,26 +107,50 @@ export default function PaymentScreen() {
         [{ text: 'OK' }]
       );
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       console.log('[Payment] Pay with 3DS mutation success:', data);
       setPaymentProcessing(false);
       setStatusMessage('');
-      
-      if (data.isFree) {
+
+      // After backend reports success, verify the subscription is active before redirecting.
+      try {
+        const result = await subscriptionQuery.refetch();
+        const sub = result.data;
+        const now = new Date();
+        const isActive =
+          !!sub &&
+          sub.isActive &&
+          !!sub.startDate &&
+          !!sub.endDate &&
+          new Date(sub.endDate).getTime() >= now.getTime();
+
+        if (isActive) {
+          setToastType('success');
+          setToastMessage('Subscribed successfully! Your membership is now active.');
+          setToastVisible(true);
+
+          // Give the toast a brief moment to show before redirecting.
+          setTimeout(() => {
+            router.replace('/(tabs)/home');
+          }, 1200);
+        } else {
+          console.warn('[Payment] Subscription not confirmed active after payment:', sub);
+          Alert.alert(
+            'Subscription Pending',
+            'Your payment was successful, but we could not confirm your subscription is active yet. Please refresh the app or contact support.',
+            [
+              {
+                text: 'OK',
+                onPress: () => router.replace('/(tabs)/home'),
+              },
+            ]
+          );
+        }
+      } catch (verifyError: any) {
+        console.error('[Payment] Failed to verify subscription after payment:', verifyError);
         Alert.alert(
-          'Subscription Activated',
-          `Your ${tier} subscription has been activated for ${duration} month(s) using coupon!`,
-          [
-            {
-              text: 'OK',
-              onPress: () => router.replace('/(tabs)/home'),
-            },
-          ]
-        );
-      } else {
-        Alert.alert(
-          'Payment Successful',
-          `Your ${tier} subscription has been activated for ${duration} month(s)!`,
+          'Subscription Error',
+          'Payment succeeded but we could not verify your subscription. Please refresh the app or contact support.',
           [
             {
               text: 'OK',
@@ -695,6 +727,12 @@ export default function PaymentScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
     >
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <Toast
+          message={toastMessage}
+          type={toastType}
+          visible={toastVisible}
+          onClose={() => setToastVisible(false)}
+        />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <ArrowLeft size={24} color={Colors.text} />

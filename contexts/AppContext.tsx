@@ -76,6 +76,15 @@ export const [AppProvider, useApp] = createContextHook(() => {
 
   const [selectedGymFilter, setSelectedGymFilter] = useState<SubscriptionTier | 'all'>('all');
 
+  // Debug logging for subscription lifecycle to help trace perceived delays.
+  useEffect(() => {
+    console.log('[AppContext] Subscription query state:', {
+      enabled: !!userId,
+      isLoading: subscriptionQuery.isLoading,
+      hasData: !!subscriptionQuery.data,
+    });
+  }, [userId, subscriptionQuery.isLoading, subscriptionQuery.data]);
+
   const checkInMutation = trpc.checkIns.create.useMutation({
     onSuccess: () => {
       console.log('[AppContext] Check-in successful, refetching data...');

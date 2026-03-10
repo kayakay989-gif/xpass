@@ -12,7 +12,8 @@ console.log('[Hono] Server initializing...');
 app.use("*", cors({
   origin: '*',
   credentials: true,
-  allowHeaders: ['Content-Type', 'Authorization'],
+  // Allow custom auth header used by the gym owner web panel so CORS preflight succeeds
+  allowHeaders: ['Content-Type', 'Authorization', 'x-gym-owner-token'],
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
 

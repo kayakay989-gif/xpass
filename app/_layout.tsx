@@ -94,7 +94,25 @@ export default function RootLayout() {
   useEffect(() => {
     // Validate configuration on app start
     validateConfig();
-    
+
+    // On web, proactively unregister any old service workers that might be
+    // caching stale bundles from previous PWA experiments. This ensures users
+    // always get the latest deployed version without needing to clear cache.
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => {
+          registrations.forEach((registration) => {
+            registration.unregister().catch((err) => {
+              console.warn('[RootLayout] Failed to unregister service worker:', err);
+            });
+          });
+        })
+        .catch((err) => {
+          console.warn('[RootLayout] Error querying service workers:', err);
+        });
+    }
+
     // Hide splash screen
     SplashScreen.hideAsync();
   }, []);

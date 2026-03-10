@@ -83,11 +83,14 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
     { limit: pageSize, offset: page * pageSize },
     { 
       enabled: true, // Always enabled since we're in the coupons section
+      refetchOnWindowFocus: true,
+      staleTime: 0,
     }
   );
 
   // Update coupons list when data changes
   useEffect(() => {
+    console.log('[Coupons] Loading coupons page', page, 'data:', couponsData);
     if (couponsData?.coupons) {
       if (page === 0) {
         // First page - replace all coupons
@@ -525,6 +528,8 @@ export default function AdminDashboardScreen() {
   const [showAddGymModal, setShowAddGymModal] = useState<boolean>(false);
   const [spotlightImages, setSpotlightImages] = useState<any[]>([]);
   const [isLoadingSpotlight, setIsLoadingSpotlight] = useState(false);
+  const [spotlightOrderDirty, setSpotlightOrderDirty] = useState(false);
+  const [isSavingSpotlightOrder, setIsSavingSpotlightOrder] = useState(false);
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
   const [editingGymId, setEditingGymId] = useState<string | null>(null);
   const [editingGymOwnerId, setEditingGymOwnerId] = useState<string | null>(null);
@@ -558,6 +563,7 @@ export default function AdminDashboardScreen() {
     membershipModel: 'pay_per_visit' as 'pay_per_visit',
     pricePerVisit: '',
     gymImages: [] as string[],
+    ownerPhone: '',
   });
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
   const [isCityModalVisible, setIsCityModalVisible] = useState(false);
@@ -588,8 +594,9 @@ export default function AdminDashboardScreen() {
   const [stats, setStats] = useState<any>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'inactive'>('all');
-  const [checkInsDateFilter, setCheckInsDateFilter] = useState<Date | null>(null);
+  const [userStatusFilter, setUserStatusFilter] = useState<'active' | 'inactive'>('active');
+  const [checkInsStartDateFilter, setCheckInsStartDateFilter] = useState<Date | null>(null);
+  const [checkInsEndDateFilter, setCheckInsEndDateFilter] = useState<Date | null>(null);
 
   // Admin payouts (pending / paid)
   const payoutsQuery = trpc.admin.payouts.getAll.useQuery(undefined, {
@@ -695,12 +702,26 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  // Load spotlight images for admin panel
+  // Load spotlight images for admin panel and normalize positions in memory
   const loadSpotlightImages = useCallback(async () => {
     try {
       setIsLoadingSpotlight(true);
       const images = await firestoreSpotlightImages.getAll();
-      setSpotlightImages(images);
+
+      // Ensure positions are normalized: 1..N, no duplicates or gaps
+      const sorted = [...images].sort(
+        (a: any, b: any) =>
+          (typeof a.position === 'number' ? a.position : 0) -
+          (typeof b.position === 'number' ? b.position : 0)
+      );
+
+      const resequenced = sorted.map((img: any, index: number) => ({
+        ...img,
+        position: index + 1,
+      }));
+
+      setSpotlightImages(resequenced);
+      setSpotlightOrderDirty(false);
     } catch (error) {
       console.error('[Admin] Error loading spotlight images:', error);
       Alert.alert('Error', 'Failed to load spotlight images');
@@ -766,8 +787,11 @@ export default function AdminDashboardScreen() {
   }, [gyms, checkIns]);
 
   const filteredUsers = useMemo(() => {
+    // Normalize strings
     const norm = (v: any) =>
       typeof v === 'string' ? v.trim().toLowerCase() : '';
+
+    const now = new Date();
 
     // Base search filter (by name or email)
     let result = !searchQuery
@@ -782,24 +806,36 @@ export default function AdminDashboardScreen() {
               .includes(searchQuery.toLowerCase())
         );
 
-    // Helper: determine if a user is inactive/expired
-    const isInactiveOrExpired = (user: any) => {
+    // Helper: determine if a user currently has an active subscription
+    const isActiveSubscriber = (user: any) => {
       const subscription = user.subscription;
-      const now = new Date();
+      if (!subscription) return false;
 
-      let isExpired = false;
-      if (subscription?.endDate) {
-        const end = new Date(subscription.endDate);
-        isExpired = end.getTime() < now.getTime();
-      }
+      const statusActive = subscription.isActive === true;
+      const endDate = subscription.endDate ? new Date(subscription.endDate) : null;
+      const notExpired = endDate ? endDate.getTime() >= now.getTime() : false;
 
-      const status = norm(user.status);
-      const isInactiveStatus = status === 'inactive';
-
-      return isExpired || isInactiveStatus;
+      return statusActive && notExpired;
     };
 
-    if (userStatusFilter === 'inactive') {
+    // Helper: determine if a user is inactive/expired (never subscribed, expired, or inactive)
+    const isInactiveOrExpired = (user: any) => {
+      const subscription = user.subscription;
+      if (!subscription) {
+        return true;
+      }
+
+      const statusActive = subscription.isActive === true;
+      const endDate = subscription.endDate ? new Date(subscription.endDate) : null;
+      const expired = endDate ? endDate.getTime() < now.getTime() : false;
+
+      // Inactive if subscription is not active or already expired
+      return !statusActive || expired;
+    };
+
+    if (userStatusFilter === 'active') {
+      result = result.filter(isActiveSubscriber);
+    } else if (userStatusFilter === 'inactive') {
       result = result.filter(isInactiveOrExpired);
     }
 
@@ -828,19 +864,28 @@ export default function AdminDashboardScreen() {
       );
     }
 
-    // Date filter - filter by selected date
-    if (checkInsDateFilter) {
-      const selectedDate = new Date(checkInsDateFilter);
-      selectedDate.setHours(0, 0, 0, 0);
+    // Date range filter - filter by selected start/end dates (inclusive)
+    if (checkInsStartDateFilter || checkInsEndDateFilter) {
+      const start = checkInsStartDateFilter ? new Date(checkInsStartDateFilter) : null;
+      const end = checkInsEndDateFilter ? new Date(checkInsEndDateFilter) : null;
+
+      if (start) {
+        start.setHours(0, 0, 0, 0);
+      }
+      if (end) {
+        end.setHours(23, 59, 59, 999);
+      }
+
       result = result.filter((ci: any) => {
         const ciDate = new Date(ci.timestamp);
-        ciDate.setHours(0, 0, 0, 0);
-        return ciDate.getTime() === selectedDate.getTime();
+        const afterStart = !start || ciDate.getTime() >= start.getTime();
+        const beforeEnd = !end || ciDate.getTime() <= end.getTime();
+        return afterStart && beforeEnd;
       });
     }
 
     return result;
-  }, [enrichedCheckIns, searchQuery, checkInsDateFilter]);
+  }, [enrichedCheckIns, searchQuery, checkInsStartDateFilter, checkInsEndDateFilter]);
 
   const generateId = async (): Promise<string> => {
     if (Platform.OS === 'web' && typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -879,6 +924,7 @@ export default function AdminDashboardScreen() {
       membershipModel: 'pay_per_visit',
       pricePerVisit: '',
       gymImages: [],
+      ownerPhone: '',
     });
     setEditingGymId(null);
     setEditingGymOwnerId(null);
@@ -937,6 +983,7 @@ export default function AdminDashboardScreen() {
         membershipModel: gym.membershipModel || 'pay_per_visit',
         pricePerVisit: gym.pricePerVisit ? String(gym.pricePerVisit) : '',
         gymImages: Array.isArray(gym.gymImages) ? gym.gymImages : [],
+        ownerPhone: gym.ownerPhone || '',
       });
 
       // Load owner contact info and credentials (best-effort)
@@ -1096,6 +1143,7 @@ export default function AdminDashboardScreen() {
       // Owner contact (optional for edit, required for create)
       email: newGym.email?.trim() || undefined,
       ownerName: newGym.ownerName?.trim() || undefined,
+      ownerPhone: newGym.ownerPhone?.trim() || undefined,
     };
 
     console.log('[Admin] Submitting gym data (isEditing=%s):', isEditing, gymData);
@@ -1142,6 +1190,7 @@ export default function AdminDashboardScreen() {
       // Persist owner contact on the gym doc for easy editing/display (even if gymOwners doc is missing)
       if (gymData.email) gymRecord.ownerEmail = gymData.email;
       if (gymData.ownerName) gymRecord.ownerName = gymData.ownerName;
+      if (gymData.ownerPhone) gymRecord.ownerPhone = gymData.ownerPhone;
 
       if (isEditing) {
         const { id: _ignoreId, ...gymUpdates } = gymRecord;
@@ -1183,6 +1232,7 @@ export default function AdminDashboardScreen() {
           passwordHash,
           email: gymData.email,
           name: gymData.ownerName,
+          // Owner phone is kept only on the gym doc for admin use; it is never exposed in the user app.
           createdAt: new Date(),
         };
         console.log('[Admin] Creating gym owner in Firestore:', gymOwnerData);
@@ -1645,56 +1695,79 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  const handleUpdateSpotlightOrder = async (bannerId: string, newOrderRaw: string) => {
+  const handleUpdateSpotlightOrder = (bannerId: string, newOrderRaw: string) => {
     const trimmed = newOrderRaw.trim();
     if (!trimmed) return;
     const parsed = parseInt(trimmed, 10);
     if (!Number.isFinite(parsed) || parsed < 0) return;
 
+    setSpotlightImages((prev) => {
+      const list = [...prev].sort(
+        (a, b) => (a.position || 0) - (b.position || 0)
+      );
+      const currentIndex = list.findIndex((img) => img.id === bannerId);
+      if (currentIndex === -1) return prev;
+
+      const clamped =
+        parsed < 1
+          ? 1
+          : parsed > list.length
+          ? list.length
+          : parsed;
+
+      const [moved] = list.splice(currentIndex, 1);
+      list.splice(clamped - 1, 0, moved);
+
+      const reseq = list.map((img, index) => ({
+        ...img,
+        position: index + 1,
+      }));
+
+      return reseq;
+    });
+    setSpotlightOrderDirty(true);
+  };
+
+  const handleSaveSpotlightOrder = async () => {
+    if (!spotlightImages || spotlightImages.length === 0) return;
+
     try {
-      setSpotlightImages((prev) => {
-        const list = [...prev].sort(
-          (a, b) => (a.position || 0) - (b.position || 0)
-        );
-        const currentIndex = list.findIndex((img) => img.id === bannerId);
-        if (currentIndex === -1) return prev;
+      setIsSavingSpotlightOrder(true);
 
-        const clamped =
-          parsed < 1
-            ? 1
-            : parsed > list.length
-            ? list.length
-            : parsed;
+      // Normalize to 1..N and persist to Firestore
+      const sorted = [...spotlightImages].sort(
+        (a: any, b: any) =>
+          (typeof a.position === 'number' ? a.position : 0) -
+          (typeof b.position === 'number' ? b.position : 0)
+      );
 
-        const [moved] = list.splice(currentIndex, 1);
-        list.splice(clamped - 1, 0, moved);
+      const resequenced = sorted.map((img: any, index: number) => ({
+        ...img,
+        position: index + 1,
+      }));
 
-        const reseq = list.map((img, index) => ({
-          ...img,
-          position: index + 1,
-        }));
+      await Promise.all(
+        resequenced.map((img: any) =>
+          firestoreSpotlightImages.update(img.id, {
+            position: img.position,
+          })
+        )
+      );
 
-        // Persist new positions
-        Promise.all(
-          reseq.map((img) =>
-            firestoreSpotlightImages.update(img.id, {
-              position: img.position,
-            })
-          )
-        ).catch((error) => {
-          console.error(
-            '[Admin] Failed to persist spotlight image reorder:',
-            error
-          );
-        });
+      setSpotlightImages(resequenced);
+      setSpotlightOrderDirty(false);
+      Alert.alert('Success', 'Banner order updated successfully');
 
-        return reseq;
-      });
+      // Reload from Firestore to ensure consistency
+      await loadSpotlightImages();
     } catch (error: any) {
-      console.error('[Admin] Failed to update spotlight banner order:', error);
-      Alert.alert('Error', error?.message || 'Failed to update banner position. Please try again.');
-      // Reload from server to ensure consistency
-      loadSpotlightImages();
+      console.error('[Admin] Failed to save spotlight banner order:', error);
+      Alert.alert(
+        'Error',
+        error?.message || 'Failed to save banner order. Please try again.'
+      );
+    } finally {
+      setIsSavingSpotlightOrder(false);
     }
   };
 
@@ -1839,7 +1912,7 @@ export default function AdminDashboardScreen() {
                 onPress={() => setActiveTab('payouts')}
               >
                 <Text style={styles.statLabelMinimal}>Payouts Pending</Text>
-                <Text style={styles.statValueMinimal}>0</Text>
+                <Text style={styles.statValueMinimal}>{pendingPayouts.length}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.statCardMinimal}
@@ -1908,15 +1981,15 @@ export default function AdminDashboardScreen() {
               <TouchableOpacity
                 style={[
                   styles.userFilterChip,
-                  userStatusFilter === 'all' && styles.userFilterChipActive,
+                  userStatusFilter === 'active' && styles.userFilterChipActive,
                 ]}
                 activeOpacity={0.85}
-                onPress={() => setUserStatusFilter('all')}
+                onPress={() => setUserStatusFilter('active')}
               >
                 <Text
                   style={[
                     styles.userFilterChipText,
-                    userStatusFilter === 'all' && styles.userFilterChipTextActive,
+                    userStatusFilter === 'active' && styles.userFilterChipTextActive,
                   ]}
                 >
                   Active
@@ -2099,84 +2172,105 @@ export default function AdminDashboardScreen() {
                   </Text>
                 </View>
               ) : (
-                <View style={styles.bannersList}>
-                  {spotlightImages.map((img, index) => (
-                    <View key={img.id} style={styles.bannerCard}>
-                      <Image
-                        source={{ uri: img.imageUrl }}
-                        style={styles.bannerPreview}
-                        resizeMode="cover"
-                      />
-                      <View style={styles.bannerInfo}>
-                        <View style={styles.bannerOrderRow}>
-                          <Text style={styles.bannerOrderLabel}>Position</Text>
-                          <TextInput
-                            style={styles.bannerOrderInput}
-                            keyboardType="number-pad"
-                            defaultValue={
-                              typeof img.position === 'number'
-                                ? String(img.position)
-                                : String(index + 1)
-                            }
-                            onEndEditing={(e) =>
-                              handleUpdateSpotlightOrder(
-                                img.id,
-                                e.nativeEvent.text || String(index + 1)
-                              )
-                            }
-                          />
-                        </View>
-                        <View style={styles.bannerActiveRow}>
-                          <Text style={styles.bannerOrderLabel}>
-                            {img.isActive ? 'Active' : 'Inactive'}
-                          </Text>
-                          <TouchableOpacity
-                            style={[
-                              styles.activeToggle,
-                              img.isActive && styles.activeToggleOn,
-                            ]}
-                            onPress={async () => {
-                              const next = !img.isActive;
-                              setSpotlightImages((prev) =>
-                                prev.map((it) =>
-                                  it.id === img.id ? { ...it, isActive: next } : it
-                                )
-                              );
-                              try {
-                                await firestoreSpotlightImages.update(img.id, {
-                                  isActive: next,
-                                });
-                              } catch (error) {
-                                console.error(
-                                  '[Admin] Failed to toggle spotlight image active flag:',
-                                  error
-                                );
-                                loadSpotlightImages();
+                <>
+                  <View style={styles.bannersList}>
+                    {spotlightImages.map((img, index) => (
+                      <View key={img.id} style={styles.bannerCard}>
+                        <Image
+                          source={{ uri: img.imageUrl }}
+                          style={styles.bannerPreview}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.bannerInfo}>
+                          <View style={styles.bannerOrderRow}>
+                            <Text style={styles.bannerOrderLabel}>Position</Text>
+                            <TextInput
+                              style={styles.bannerOrderInput}
+                              keyboardType="number-pad"
+                              value={
+                                typeof img.position === 'number'
+                                  ? String(img.position)
+                                  : String(index + 1)
                               }
-                            }}
-                          >
-                            <Text
-                              style={[
-                                styles.activeToggleText,
-                                img.isActive && styles.activeToggleTextOn,
-                              ]}
-                            >
-                              {img.isActive ? 'ON' : 'OFF'}
+                              onChangeText={(text) =>
+                                handleUpdateSpotlightOrder(
+                                  img.id,
+                                  text || String(index + 1)
+                                )
+                              }
+                            />
+                          </View>
+                          <View style={styles.bannerActiveRow}>
+                            <Text style={styles.bannerOrderLabel}>
+                              {img.isActive ? 'Active' : 'Inactive'}
                             </Text>
-                          </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.activeToggle,
+                                img.isActive && styles.activeToggleOn,
+                              ]}
+                              onPress={async () => {
+                                const next = !img.isActive;
+                                setSpotlightImages((prev) =>
+                                  prev.map((it) =>
+                                    it.id === img.id ? { ...it, isActive: next } : it
+                                  )
+                                );
+                                try {
+                                  await firestoreSpotlightImages.update(img.id, {
+                                    isActive: next,
+                                  });
+                                } catch (error) {
+                                  console.error(
+                                    '[Admin] Failed to toggle spotlight image active flag:',
+                                    error
+                                  );
+                                  loadSpotlightImages();
+                                }
+                              }}
+                            >
+                              <Text
+                                style={[
+                                  styles.activeToggleText,
+                                  img.isActive && styles.activeToggleTextOn,
+                                ]}
+                              >
+                                {img.isActive ? 'ON' : 'OFF'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
+                        <TouchableOpacity
+                          style={styles.deleteBannerButton}
+                          onPress={() =>
+                            handleDeleteSpotlightBanner(img.id, img.imageUrl)
+                          }
+                        >
+                          <X size={18} color="#fff" />
+                        </TouchableOpacity>
                       </View>
-                      <TouchableOpacity
-                        style={styles.deleteBannerButton}
-                        onPress={() =>
-                          handleDeleteSpotlightBanner(img.id, img.imageUrl)
-                        }
-                      >
-                        <X size={18} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
+                    ))}
+                  </View>
+
+                  <View style={{ marginTop: 12, alignItems: 'flex-end' }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.saveBannerOrderButton,
+                        (!spotlightOrderDirty || isSavingSpotlightOrder) &&
+                          styles.saveBannerOrderButtonDisabled,
+                      ]}
+                      activeOpacity={0.85}
+                      disabled={!spotlightOrderDirty || isSavingSpotlightOrder}
+                      onPress={handleSaveSpotlightOrder}
+                    >
+                      {isSavingSpotlightOrder ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.saveBannerOrderButtonText}>Save Banner Order</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </>
               )}
             </View>
 
@@ -2334,23 +2428,41 @@ export default function AdminDashboardScreen() {
               />
             </View>
 
-            {/* Date filter for check-ins */}
+            {/* Date range filter for check-ins */}
             <View style={styles.dateFilterRow}>
-              <Text style={styles.dateFilterLabel}>Filter by date</Text>
-              <DatePicker
-                value={checkInsDateFilter}
-                onChange={setCheckInsDateFilter}
-                placeholder="Select date"
-              />
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.dateFilterLabel}>From</Text>
+                <DatePicker
+                  value={checkInsStartDateFilter}
+                  onChange={setCheckInsStartDateFilter}
+                  placeholder="Start date"
+                />
+              </View>
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={styles.dateFilterLabel}>To</Text>
+                <DatePicker
+                  value={checkInsEndDateFilter}
+                  onChange={setCheckInsEndDateFilter}
+                  placeholder="End date"
+                />
+              </View>
             </View>
 
             <Text style={styles.allCheckInsTitle}>
-              {checkInsDateFilter
-                ? checkInsDateFilter.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })
+              {checkInsStartDateFilter || checkInsEndDateFilter
+                ? `${checkInsStartDateFilter
+                    ? checkInsStartDateFilter.toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : '...'} – ${checkInsEndDateFilter
+                    ? checkInsEndDateFilter.toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : '...'}`
                 : 'All Check-ins'}
             </Text>
 
@@ -3279,6 +3391,15 @@ export default function AdminDashboardScreen() {
                 value={newGym.ownerName}
                 onChangeText={(text) => setNewGym({ ...newGym, ownerName: text })}
                 placeholder="Gym Owner Name"
+              />
+
+              <Text style={styles.label}>Owner Phone (Admin only)</Text>
+              <TextInput
+                style={styles.input}
+                value={newGym.ownerPhone}
+                onChangeText={(text) => setNewGym({ ...newGym, ownerPhone: text })}
+                placeholder="+962 7X XXX XXXX"
+                keyboardType="phone-pad"
               />
 
               {/* Show credentials and QR code when editing */}
@@ -5255,6 +5376,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#111827',
     textAlign: 'right' as const,
+  },
+  saveBannerOrderButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+  },
+  saveBannerOrderButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveBannerOrderButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700' as const,
   },
   stepIndicator: {
     flexDirection: 'row' as const,

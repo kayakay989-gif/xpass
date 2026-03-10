@@ -109,6 +109,90 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
+  // Ensure user profile exists in Firestore (idempotent - safe to call multiple times)
+  const ensureUserProfileExists = useCallback(async (
+    uid: string,
+    email: string,
+    name: string,
+    phone: string,
+    age?: number,
+    referralCode?: string,
+    referredBy?: string,
+    walletBalance: number = 0
+  ): Promise<void> => {
+    console.log('[AuthContext] STEP: Ensuring user profile exists for:', uid);
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (userDoc.exists()) {
+        console.log('[AuthContext] User profile already exists, skipping creation');
+        return;
+      }
+      
+      console.log('[AuthContext] Creating new user profile document');
+      const newUser: User = {
+        id: uid,
+        name: name.trim(),
+        email: email.toLowerCase(),
+        phone: phone || '',
+        age: age && !isNaN(age) && age > 0 ? age : undefined,
+        referralCode: referralCode || generateReferralCode(),
+        referredBy,
+        walletBalance,
+        createdAt: new Date(),
+      };
+      
+      await setDoc(userDocRef, {
+        ...newUser,
+        createdAt: serverTimestamp(),
+      }, { merge: true }); // Use merge to be safe
+      
+      console.log('[AuthContext] User profile created successfully');
+    } catch (error: any) {
+      console.error('[AuthContext] Error ensuring user profile:', error);
+      // Don't throw - this is non-critical setup
+      if (error.code === 'permission-denied') {
+        console.warn('[AuthContext] Permission denied creating user profile - will retry on login');
+      }
+    }
+  }, []);
+
+  // Repair incomplete user account (called after login or signup)
+  const repairUserAccountIfNeeded = useCallback(async (uid: string, firebaseAuthUser?: FirebaseUser | null) => {
+    console.log('[AuthContext] Repairing user account if needed for:', uid);
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const userDoc = await getDoc(userDocRef);
+      
+      if (!userDoc.exists()) {
+        console.log('[AuthContext] User profile missing, creating it now');
+        const currentAuthUser = firebaseAuthUser || auth.currentUser;
+        if (!currentAuthUser) {
+          console.warn('[AuthContext] No auth user available for repair');
+          return;
+        }
+        
+        await ensureUserProfileExists(
+          uid,
+          currentAuthUser.email || '',
+          currentAuthUser.displayName || '',
+          currentAuthUser.phoneNumber || '',
+          undefined,
+          generateReferralCode(),
+          undefined,
+          0
+        );
+        console.log('[AuthContext] ✅ User profile repaired');
+      } else {
+        console.log('[AuthContext] User profile exists, no repair needed');
+      }
+    } catch (error: any) {
+      console.error('[AuthContext] Error repairing user account:', error);
+      // Non-critical - don't throw
+    }
+  }, [ensureUserProfileExists]);
+
   // Load user profile from Firestore
   const loadUserProfile = useCallback(async (uid: string, firebaseAuthUser?: FirebaseUser | null) => {
     try {
@@ -218,6 +302,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           
           setFirebaseUser(firebaseUser);
           setIsGuest(false);
+          
+          // Repair account if needed (ensures profile exists even if signup setup failed)
+          await repairUserAccountIfNeeded(firebaseUser.uid, firebaseUser);
+          
           // Always load profile from Firestore first (source of truth) - pass firebaseUser to ensure consistency
           const profile = await loadUserProfile(firebaseUser.uid, firebaseUser);
           // If profile loaded successfully, ensure Firebase Auth displayName matches
@@ -243,7 +331,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     });
 
     return () => unsubscribe();
-  }, [loadUserProfile, evaluateAdminClaim]);
+  }, [loadUserProfile, evaluateAdminClaim, repairUserAccountIfNeeded]);
 
   // Check for guest mode
   useEffect(() => {
@@ -316,6 +404,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     referralCodeUsed?: string,
     age?: number
   ): Promise<void> => {
+    console.log('[AuthContext] ========== SIGNUP FLOW START ==========');
+    console.log('[AuthContext] STEP 1: Validating input parameters');
+    
+    // Declare userCredential and tracking variables outside try block
+    let userCredential: any = undefined;
+    let authUserCreated = false; // Track if Stage A (Auth) succeeded
+    let normalizedEmail = '';
+    let normalizedPhone = '';
+    
     try {
       // Validate required parameters
       if (!email || !email.trim()) {
@@ -328,9 +425,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Name is required');
       }
       
-      const normalizedEmail = (email || '').trim().toLowerCase();
+      normalizedEmail = (email || '').trim().toLowerCase();
       // Normalize phone: remove all spaces and non-digit characters except +
-      const normalizedPhone = phone ? phone.replace(/\s/g, '').trim() : '';
+      normalizedPhone = phone ? phone.replace(/\s/g, '').trim() : '';
       
       // Validate required fields before creating Firebase Auth user
       if (!normalizedEmail || normalizedEmail.length === 0) {
@@ -343,16 +440,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Name is required');
       }
       
-      console.log('[AuthContext] Starting signup for:', normalizedEmail);
+      console.log('[AuthContext] STEP 2: Starting signup for:', normalizedEmail);
       
-      // Create Firebase Auth user FIRST
-      // Firebase Auth will automatically check if email already exists and throw auth/email-already-in-use
-      let userCredential;
+      // ========== STAGE A: CREATE FIREBASE AUTH USER ==========
+      console.log('[AuthContext] STAGE A: Creating Firebase Auth user');
       try {
         userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
-        console.log('[AuthContext] Firebase Auth user created:', userCredential.user.uid);
+        authUserCreated = true; // Mark that Stage A succeeded
+        console.log('[AuthContext] ✅ STAGE A SUCCESS: Firebase Auth user created:', userCredential.user.uid);
       } catch (authError: any) {
-        console.error('[AuthContext] Firebase Auth creation error:', authError);
+        console.error('[AuthContext] ❌ STAGE A FAILED: Firebase Auth creation error:', {
+          code: authError.code,
+          message: authError.message
+        });
         // Map Firebase Auth errors to user-friendly messages
         if (authError.code === 'auth/email-already-in-use') {
           throw new Error('An account with this email already exists. Please login instead.');
@@ -369,69 +469,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
       }
       
-      // Now check if user already exists in Firestore (edge case: user in Auth but not in Firestore)
-      const usersRef = collection(db, 'users');
-      try {
-        const emailQuery = query(usersRef, where('email', '==', normalizedEmail), limit(1));
-        const emailSnap = await getDocs(emailQuery);
-        if (!emailSnap.empty) {
-          // User exists in Firestore but we just created Auth user - this is an edge case
-          // Delete the Auth user and throw error
-          console.warn('[AuthContext] User exists in Firestore but not in Auth - deleting Auth user');
-          try {
-            await userCredential.user.delete();
-          } catch (deleteError) {
-            console.error('[AuthContext] Failed to delete Auth user:', deleteError);
-          }
-          throw new Error('An account with this email already exists. Please login instead.');
-        }
-        
-        // Check by phone if provided
-        if (normalizedPhone) {
-          const phoneQuery = query(usersRef, where('phone', '==', normalizedPhone), limit(1));
-          const phoneSnap = await getDocs(phoneQuery);
-          if (!phoneSnap.empty) {
-            // User exists with this phone - delete Auth user and throw error
-            console.warn('[AuthContext] User exists with phone number - deleting Auth user');
-            try {
-              await userCredential.user.delete();
-            } catch (deleteError) {
-              console.error('[AuthContext] Failed to delete Auth user:', deleteError);
-            }
-            throw new Error('An account with this phone number already exists. Please login instead.');
-          }
-        }
-      } catch (checkError: any) {
-        // If it's our custom error, re-throw it
-        if (checkError.message && checkError.message.includes('already exists')) {
-          throw checkError;
-        }
-        // If it's a permission error, log it but continue (Firestore rules might allow it)
-        if (checkError.code === 'permission-denied') {
-          console.warn('[AuthContext] Permission denied checking for existing users, continuing with signup');
-        } else {
-          // Other errors - log but continue (don't fail signup for Firestore read errors)
-          console.warn('[AuthContext] Error checking for existing users, continuing with signup:', checkError);
-        }
-      }
+      // If we get here, Stage A succeeded - Auth user exists
+      // From this point on, signup is considered successful even if setup fails
       
-      // Update display name (non-blocking - don't fail signup if this fails)
+      // ========== STAGE B: POST-SIGNUP SETUP (NON-BLOCKING) ==========
+      console.log('[AuthContext] STAGE B: Starting post-signup setup (non-blocking)');
+      
+      // Update display name (non-blocking)
       if (name) {
         try {
+          console.log('[AuthContext] STEP 3: Updating display name');
           await updateProfile(userCredential.user, { displayName: name });
-          console.log('[AuthContext] Display name updated');
-        } catch (profileError) {
-          console.warn('[AuthContext] Failed to update display name, continuing with signup:', profileError);
+          console.log('[AuthContext] ✅ Display name updated');
+        } catch (profileError: any) {
+          console.warn('[AuthContext] ⚠️ Failed to update display name (non-critical):', profileError.message);
         }
       }
 
+      // Process referral code (non-blocking - optional)
       const normalizedReferral = typeof referralCodeUsed === 'string' ? referralCodeUsed.trim().toUpperCase() : '';
       let referredBy: string | undefined = undefined;
       let initialWalletBalance = 0;
 
-      // Process referral code ONLY for new users (we've already verified user doesn't exist)
       if (normalizedReferral) {
         try {
+          console.log('[AuthContext] STEP 4: Processing referral code:', normalizedReferral);
+          const usersRef = collection(db, 'users');
           const referralQuery = query(usersRef, where('referralCode', '==', normalizedReferral), limit(1));
           const referralSnap = await getDocs(referralQuery);
           
@@ -440,17 +503,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             const referrerDoc = referralSnap.docs[0];
             const referrerId = referrerDoc.id;
             const referrerData = referrerDoc.data();
-            const referrerName = referrerData.name || 'Unknown';
             
             // Prevent self-referral
             if (referrerId === userCredential.user.uid) {
-              console.warn('[AuthContext] User cannot refer themselves, skipping referral reward');
+              console.warn('[AuthContext] ⚠️ User cannot refer themselves, skipping referral reward');
             } else {
               // Give 10 JOD to the referrer
               const currentBalance = referrerData.walletBalance || 0;
               const newBalance = currentBalance + 10;
               
-              // Update referrer's wallet balance
               await updateDoc(doc(db, 'users', referrerId), {
                 walletBalance: newBalance,
               });
@@ -476,77 +537,77 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
                 createdAt: serverTimestamp(),
               });
               
-              console.log('[AuthContext] Referral reward processed:', {
-                referrerId,
-                referredUserId: userCredential.user.uid,
-                rewardAmount: 10,
-              });
+              console.log('[AuthContext] ✅ Referral reward processed successfully');
             }
           } else {
-            console.warn('[AuthContext] Invalid referral code provided, continuing without referral benefits');
+            console.warn('[AuthContext] ⚠️ Invalid referral code provided, continuing without referral benefits');
           }
-        } catch (referralError) {
+        } catch (referralError: any) {
           // Don't fail signup if referral code processing fails
-          console.warn('[AuthContext] Error processing referral code, continuing without referral benefits:', referralError);
+          console.warn('[AuthContext] ⚠️ Error processing referral code (non-critical):', referralError.message);
         }
       }
 
-      // Create new user profile in Firestore (we've verified this is a new user)
-      const newUser: User = {
-        id: userCredential.user.uid,
-        name: name.trim(),
-        email: normalizedEmail,
-        phone: normalizedPhone || '',
-        age: age && !isNaN(age) && age > 0 ? age : undefined,
-        referralCode: generateReferralCode(),
+      // Create/ensure user profile in Firestore (idempotent)
+      console.log('[AuthContext] STEP 5: Ensuring user profile exists in Firestore');
+      const referralCode = generateReferralCode();
+      await ensureUserProfileExists(
+        userCredential.user.uid,
+        normalizedEmail,
+        name,
+        normalizedPhone || '',
+        age,
+        referralCode,
         referredBy,
-        walletBalance: initialWalletBalance,
-        createdAt: new Date(),
-      };
-
-      // Create user document in Firestore
-      // The security rule requires request.auth != null && request.auth.uid == userId
-      // Since we just created the Firebase Auth user, auth should be available
-      console.log('[AuthContext] Creating Firestore user document for:', userCredential.user.uid);
+        initialWalletBalance
+      );
       
-      try {
-        const userDocRef = doc(db, 'users', userCredential.user.uid);
-        await setDoc(userDocRef, {
-          ...newUser,
-          createdAt: serverTimestamp(),
-        }, { merge: false });
-        console.log('[AuthContext] Firestore user document created successfully');
-      } catch (firestoreError: any) {
-        console.error('[AuthContext] Firestore document creation error:', firestoreError);
-        
-        // If Firestore write fails, we need to clean up the Firebase Auth user
-        // to prevent orphaned accounts
-        try {
-          await userCredential.user.delete();
-          console.log('[AuthContext] Deleted Firebase Auth user due to Firestore error');
-        } catch (deleteError) {
-          console.error('[AuthContext] Failed to delete Firebase Auth user after Firestore error:', deleteError);
-        }
-        
-        // Map Firestore errors to user-friendly messages
-        if (firestoreError.code === 'permission-denied') {
-          throw new Error('Unable to create user profile due to permissions. Please contact support.');
-        } else if (firestoreError.code === 'unavailable') {
-          throw new Error('Service temporarily unavailable. Please try again in a moment.');
-        } else {
-          throw new Error('Failed to create user profile. Please try again.');
-        }
-      }
-
-      // Set user state - this makes the user immediately available in the app
-      setUser(newUser);
-      console.log('[AuthContext] Sign up successful - user created and available:', {
-        uid: userCredential.user.uid,
-        email: normalizedEmail,
-        name: name.trim()
-      });
+      console.log('[AuthContext] ✅ STAGE B COMPLETE: Post-signup setup finished');
+      console.log('[AuthContext] ========== SIGNUP FLOW SUCCESS ==========');
+      
+      // Signup is successful - Auth user exists, profile setup completed (or will be repaired on login)
+      // Return successfully - don't throw errors for post-auth setup failures
+      return;
     } catch (error: any) {
-      console.error('[AuthContext] Sign up error (final catch):', error);
+      console.error('[AuthContext] ========== SIGNUP FLOW ERROR ==========');
+      console.error('[AuthContext] Error details:', {
+        code: error.code,
+        message: error.message,
+        authUserCreated,
+        hasUserCredential: !!userCredential
+      });
+      
+      // CRITICAL: If Stage A (Auth creation) succeeded, signup is considered successful
+      // Do NOT delete the Auth user or treat this as signup failure
+      if (authUserCreated && userCredential && userCredential.user) {
+        console.log('[AuthContext] ⚠️ Auth user was created but post-setup failed');
+        console.log('[AuthContext] ✅ Signup is still considered successful - user can login');
+        console.log('[AuthContext] Profile setup will be repaired on first login');
+        
+        // Try to ensure minimum profile exists (non-blocking)
+        try {
+          await ensureUserProfileExists(
+            userCredential.user.uid,
+            normalizedEmail,
+            name,
+            normalizedPhone || '',
+            age,
+            generateReferralCode(),
+            undefined,
+            0
+          );
+        } catch (repairError) {
+          console.warn('[AuthContext] Could not repair profile immediately, will retry on login:', repairError);
+        }
+        
+        // Return successfully - Auth user exists, that's what matters
+        console.log('[AuthContext] ========== SIGNUP FLOW COMPLETE (with warnings) ==========');
+        return;
+      }
+      
+      // If Stage A (Auth creation) failed, this is a real signup failure
+      // Only throw errors for actual auth failures
+      console.error('[AuthContext] ❌ STAGE A FAILED: Real signup failure - Auth user not created');
       
       // If error already has a user-friendly message, re-throw it
       if (error.message && (
@@ -554,8 +615,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         error.message.includes('Invalid email') ||
         error.message.includes('Password') ||
         error.message.includes('required') ||
-        error.message.includes('permissions') ||
-        error.message.includes('unavailable') ||
         error.message.includes('Network error')
       )) {
         throw error;
@@ -572,15 +631,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Email/password accounts are not enabled. Please contact support.');
       } else if (error.code === 'auth/network-request-failed') {
         throw new Error('Network error. Please check your connection and try again.');
-      } else if (error.code === 'permission-denied') {
-        throw new Error('Unable to create account due to permissions. Please contact support.');
       } else if (error.message) {
         throw new Error(error.message);
       } else {
         throw new Error('Failed to create account. Please try again.');
       }
     }
-  }, []);
+  }, [ensureUserProfileExists]);
 
   // Password reset (email-based)
   const resetPassword = useCallback(async (email: string): Promise<void> => {

@@ -126,12 +126,35 @@ export default function GymDashboardScreen() {
     })();
   }, [urlParams.gymId, router]);
 
-  // Load payouts data
+  // Load payouts data (pending + paid) from the same source as the admin panel
   const payoutsQuery = trpc.gyms.getPayments.useQuery(
     { gymId: actualGymId || '' },
-    { enabled: !!actualGymId }
+    {
+      enabled: !!actualGymId,
+      refetchOnWindowFocus: true,
+    }
   );
   const payments = payoutsQuery.data || [];
+
+  const pendingPayouts = useMemo(
+    () => payments.filter((p: any) => p.status === 'pending'),
+    [payments]
+  );
+
+  const paidPayouts = useMemo(
+    () => payments.filter((p: any) => p.status === 'paid'),
+    [payments]
+  );
+
+  const latestPaidPayout = useMemo(
+    () => (paidPayouts.length > 0 ? paidPayouts[0] : null),
+    [paidPayouts]
+  );
+
+  const pastPaidPayouts = useMemo(
+    () => (paidPayouts.length > 1 ? paidPayouts.slice(1) : []),
+    [paidPayouts]
+  );
 
   const todayCheckIns = useMemo(() => {
     const today = new Date();
@@ -163,6 +186,7 @@ export default function GymDashboardScreen() {
   const onRefresh = () => {
     if (actualGymId) {
       loadData(actualGymId);
+      payoutsQuery.refetch();
     }
   };
 
@@ -413,7 +437,7 @@ export default function GymDashboardScreen() {
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />}
         >
-          <Text style={styles.screenTitle}>Payout History</Text>
+          <Text style={styles.screenTitle}>Payouts</Text>
 
           {payoutsQuery.isLoading ? (
             <View style={styles.loadingContainer}>
@@ -429,55 +453,131 @@ export default function GymDashboardScreen() {
             </View>
           ) : (
             <>
-              {payments.map((payout: any) => {
-                const monthDate = new Date(payout.month + '-01');
-                const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-                const isPaid = payout.status === 'paid';
-                const paidDate = payout.paidAt ? new Date(payout.paidAt) : null;
+              {/* Pending Payouts */}
+              <Text style={styles.sectionLabel}>Pending</Text>
+              {pendingPayouts.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No pending payouts</Text>
+                </View>
+              ) : (
+                pendingPayouts.map((payout: any) => {
+                  const monthDate = new Date(payout.month + '-01');
+                  const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-                return (
-                  <View key={payout.id} style={styles.payoutCard}>
-                    <View style={styles.payoutHeaderRow}>
-                      <Text style={styles.payoutMonth}>{monthName}</Text>
-                      <View style={[styles.payoutStatusBadge, isPaid && styles.payoutStatusBadgePaid]}>
-                        <Text style={[styles.payoutStatusText, isPaid && styles.payoutStatusTextPaid]}>
-                          {isPaid ? 'Paid' : 'Pending'}
-                        </Text>
+                  return (
+                    <View key={payout.id} style={styles.payoutCard}>
+                      <View style={styles.payoutHeaderRow}>
+                        <Text style={styles.payoutMonth}>{monthName}</Text>
+                        <View style={styles.payoutStatusBadge}>
+                          <Text style={styles.payoutStatusText}>Pending</Text>
+                        </View>
                       </View>
-                    </View>
 
-                    <View style={styles.payoutDetailsRow}>
-                      <Text style={styles.payoutLabel}>Check-ins:</Text>
-                      <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
-                    </View>
-
-                    {payout.payPerVisitRate && (
                       <View style={styles.payoutDetailsRow}>
-                        <Text style={styles.payoutLabel}>Rate per visit:</Text>
-                        <Text style={styles.payoutValue}>{payout.payPerVisitRate.toFixed(2)} JOD</Text>
+                        <Text style={styles.payoutLabel}>Check-ins:</Text>
+                        <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
                       </View>
-                    )}
 
-                    <View style={styles.payoutDetailsRow}>
-                      <Text style={styles.payoutLabel}>Total Amount:</Text>
-                      <Text style={styles.payoutTotalAmount}>JOD {payout.amount.toFixed(2)}</Text>
-                    </View>
+                      {payout.payPerVisitRate && (
+                        <View style={styles.payoutDetailsRow}>
+                          <Text style={styles.payoutLabel}>Rate per visit:</Text>
+                          <Text style={styles.payoutValue}>{payout.payPerVisitRate.toFixed(2)} JOD</Text>
+                        </View>
+                      )}
 
-                    {isPaid && paidDate && (
                       <View style={styles.payoutDetailsRow}>
-                        <Text style={styles.payoutLabel}>Paid on:</Text>
-                        <Text style={styles.payoutValue}>
-                          {paidDate.toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })}
-                        </Text>
+                        <Text style={styles.payoutLabel}>Total Amount:</Text>
+                        <Text style={styles.payoutTotalAmount}>JOD {payout.amount.toFixed(2)}</Text>
                       </View>
-                    )}
-                  </View>
-                );
-              })}
+                    </View>
+                  );
+                })
+              )}
+
+              {/* Paid Payouts (most recent) */}
+              <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Paid</Text>
+              {latestPaidPayout ? (
+                (() => {
+                  const payout = latestPaidPayout;
+                  const monthDate = new Date(payout.month + '-01');
+                  const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                  const paidDate = payout.paidAt ? new Date(payout.paidAt) : null;
+
+                  return (
+                    <View key={payout.id} style={styles.payoutCard}>
+                      <View style={styles.payoutHeaderRow}>
+                        <Text style={styles.payoutMonth}>{monthName}</Text>
+                        <View style={[styles.payoutStatusBadge, styles.payoutStatusBadgePaid]}>
+                          <Text style={[styles.payoutStatusText, styles.payoutStatusTextPaid]}>Paid</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.payoutDetailsRow}>
+                        <Text style={styles.payoutLabel}>Check-ins:</Text>
+                        <Text style={styles.payoutValue}>{payout.totalCheckins}</Text>
+                      </View>
+
+                      {payout.payPerVisitRate && (
+                        <View style={styles.payoutDetailsRow}>
+                          <Text style={styles.payoutLabel}>Rate per visit:</Text>
+                          <Text style={styles.payoutValue}>{payout.payPerVisitRate.toFixed(2)} JOD</Text>
+                        </View>
+                      )}
+
+                      <View style={styles.payoutDetailsRow}>
+                        <Text style={styles.payoutLabel}>Total Amount:</Text>
+                        <Text style={styles.payoutTotalAmount}>JOD {payout.amount.toFixed(2)}</Text>
+                      </View>
+
+                      {paidDate && (
+                        <View style={styles.payoutDetailsRow}>
+                          <Text style={styles.payoutLabel}>Paid on:</Text>
+                          <Text style={styles.payoutValue}>
+                            {paidDate.toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No paid payouts yet</Text>
+                </View>
+              )}
+
+              {/* Past Payouts (history) */}
+              <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Past Payouts</Text>
+              {pastPaidPayouts.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No older payouts yet</Text>
+                </View>
+              ) : (
+                pastPaidPayouts.map((payout: any) => {
+                  const monthDate = new Date(payout.month + '-01');
+                  const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+                  return (
+                    <View key={payout.id} style={styles.payoutCard}>
+                      <View style={styles.payoutHeaderRow}>
+                        <Text style={styles.payoutMonth}>{monthName}</Text>
+                        <View style={[styles.payoutStatusBadge, styles.payoutStatusBadgePaid]}>
+                          <Text style={[styles.payoutStatusText, styles.payoutStatusTextPaid]}>Paid</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.payoutDetailsRow}>
+                        <Text style={styles.payoutLabel}>Total Amount:</Text>
+                        <Text style={styles.payoutTotalAmount}>JOD {payout.amount.toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </>
           )}
         </ScrollView>
@@ -504,29 +604,19 @@ export default function GymDashboardScreen() {
           </View>
 
           <Text style={styles.sectionLabel}>Account</Text>
-          <View style={styles.listCard}>
-            <TouchableOpacity 
-              style={[styles.navRow, { borderBottomWidth: 0 }]} 
-              activeOpacity={0.85} 
-              onPress={() => router.push('/notifications' as any)}
-            >
-              <View>
-                <Text style={styles.navTitle}>Notifications</Text>
-                <Text style={styles.navSub}>Push • SMS</Text>
-              </View>
-              <ChevronRight size={18} color="#9CA3AF" />
-            </TouchableOpacity>
+      <View style={styles.listCard}>
+        <TouchableOpacity 
+          style={[styles.navRow, { borderBottomWidth: 0 }]} 
+          activeOpacity={0.85} 
+          onPress={() => router.push('/notifications' as any)}
+        >
+          <View>
+            <Text style={styles.navTitle}>Notifications</Text>
+            <Text style={styles.navSub}>Push • SMS</Text>
           </View>
-
-          <Text style={styles.sectionLabel}>XPASS</Text>
-          <View style={styles.listCard}>
-            <TouchableOpacity style={[styles.navRow, { borderBottomWidth: 0 }]} activeOpacity={0.85} onPress={() => Alert.alert('Language', 'Coming soon')}>
-              <View>
-                <Text style={styles.navTitle}>Language</Text>
-              </View>
-              <ChevronRight size={18} color="#9CA3AF" />
-            </TouchableOpacity>
-          </View>
+          <ChevronRight size={18} color="#9CA3AF" />
+        </TouchableOpacity>
+      </View>
 
           <TouchableOpacity
             style={styles.logoutButton}
