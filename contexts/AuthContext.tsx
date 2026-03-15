@@ -157,10 +157,29 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         createdAt: new Date(),
       };
       
-      await setDoc(userDocRef, {
-        ...newUser,
+      // Filter out undefined values before saving to Firestore (Firestore doesn't allow undefined)
+      const userData: any = {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone,
+        referralCode: newUser.referralCode,
+        walletBalance: newUser.walletBalance,
         createdAt: serverTimestamp(),
-      }, { merge: true }); // Use merge to be safe
+      };
+      
+      // Only include optional fields if they have values
+      if (newUser.age !== undefined && newUser.age !== null) {
+        userData.age = newUser.age;
+      }
+      if (newUser.referredBy) {
+        userData.referredBy = newUser.referredBy;
+      }
+      if (newUser.photoUrl) {
+        userData.photoUrl = newUser.photoUrl;
+      }
+      
+      await setDoc(userDocRef, userData, { merge: true }); // Use merge to be safe
       
       console.log('[AuthContext] User profile created successfully');
     } catch (error: any) {
@@ -278,10 +297,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             walletBalance: 0,
             createdAt: new Date(),
           };
-          await setDoc(doc(db, 'users', uid), {
-            ...newUser,
+          
+          // Filter out undefined values before saving to Firestore
+          const userData: any = {
+            id: newUser.id,
+            name: newUser.name,
+            email: newUser.email,
+            phone: newUser.phone,
+            referralCode: newUser.referralCode,
+            walletBalance: newUser.walletBalance,
             createdAt: serverTimestamp(),
-          });
+          };
+          
+          await setDoc(doc(db, 'users', uid), userData);
           setUser(newUser);
           return newUser;
         }

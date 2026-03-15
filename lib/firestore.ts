@@ -65,10 +65,19 @@ export const firestoreUsers = {
   },
 
   async update(userId: string, updates: Partial<User>): Promise<void> {
-    await updateDoc(doc(db, 'users', userId), {
-      ...updates,
+    // Filter out undefined values - Firestore doesn't allow undefined
+    const cleanUpdates: any = {
       updatedAt: serverTimestamp(),
+    };
+    
+    Object.keys(updates).forEach(key => {
+      const value = (updates as any)[key];
+      if (value !== undefined && value !== null) {
+        cleanUpdates[key] = value;
+      }
     });
+    
+    await updateDoc(doc(db, 'users', userId), cleanUpdates);
   },
 
   async getAll(): Promise<User[]> {
