@@ -29,6 +29,7 @@ export default protectedProcedure
       expiryMonth: z.string().optional(),
       expiryYear: z.string().optional(),
       cardholderName: z.string().optional(),
+      cvv: z.string().optional(), // Card Security Code (CVV/CVC)
       // For saved cards (VERSION 1 feature)
       savedCardId: z.string().optional(), // ID of saved card to use
       saveCard: z.boolean().optional().default(false), // Whether to save the card after payment
@@ -157,11 +158,17 @@ export default protectedProcedure
             throw new Error('Saved card not found or invalid');
           }
 
-          // Charge via saved card token
+          // CVV is still required for saved card payments
+          if (!input.cvv) {
+            throw new Error('CVV is required for saved card payment');
+          }
+
+          // Charge via saved card token (CVV still required for security)
           gatewayResponse = await payWithToken({
             orderId,
             paymentTransactionId,
             paymentToken: savedCard.token,
+            securityCode: input.cvv, // CVV required even for tokenized cards
             amount: remainingAmount,
             currency,
           });
@@ -169,6 +176,11 @@ export default protectedProcedure
           // New card payment
           if (!input.cardNumber || !input.expiryMonth || !input.expiryYear) {
             throw new Error('Card details are required for card payment');
+          }
+
+          // Validate CVV is provided
+          if (!input.cvv) {
+            throw new Error('CVV is required for card payment');
           }
 
           // Charge via card (simplified - in production, use 3DS flow)
@@ -180,6 +192,7 @@ export default protectedProcedure
               expiryMonth: input.expiryMonth,
               expiryYear: input.expiryYear,
               nameOnCard: input.cardholderName,
+              securityCode: input.cvv, // CVV required for payment
             },
             amount: remainingAmount,
             currency,

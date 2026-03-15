@@ -346,6 +346,7 @@ export default function PaymentScreen() {
         expiryMonth: selectedSavedCardId ? undefined : month,
         expiryYear: selectedSavedCardId ? undefined : year,
         cardholderName: selectedSavedCardId ? undefined : cardholderName,
+        cvv: cvv || undefined, // Always send CVV (required for both new and saved cards)
         savedCardId: selectedSavedCardId || undefined, // Send saved card ID if using saved card
         saveCard: saveCard && !selectedSavedCardId, // Only save if it's a new card
         couponCode: appliedCoupon?.coupon?.code || undefined,
