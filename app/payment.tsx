@@ -395,6 +395,11 @@ export default function PaymentScreen() {
       authStatus,
     });
 
+    if (!user) {
+      Alert.alert('Error', 'Please log in to complete payment');
+      return;
+    }
+
     setPaymentProcessing(true);
     setStatusMessage('Completing payment...');
 
@@ -448,7 +453,7 @@ export default function PaymentScreen() {
         setCouponError('');
       } else {
         setAppliedCoupon(null);
-        setCouponError(data?.error || 'Invalid coupon code');
+        setCouponError(data && 'valid' in data && !data.valid && 'error' in data ? data.error : 'Invalid coupon code');
       }
     } catch (error: any) {
       setAppliedCoupon(null);
@@ -1022,8 +1027,7 @@ export default function PaymentScreen() {
                 setPaymentProcessing(true);
                 setStatusMessage('Processing wallet payment...');
                 try {
-                  const orderId = `order-${Date.now()}`;
-                  await payWith3dsMutation.mutateAsync({
+                  await checkoutMutation.mutateAsync({
                     userId: user!.id,
                     tier: tier as any,
                     duration: parseInt(duration) as any,
@@ -1032,7 +1036,7 @@ export default function PaymentScreen() {
                     currency: 'JOD',
                     couponCode: appliedCoupon?.coupon?.code || undefined,
                     useWallet: true,
-                    paymentMethod: 'wallet',
+                    paymentMethod: 'card', // Required by schema, but ignored when useWallet covers full amount
                   });
                 } catch (error: any) {
                   setPaymentProcessing(false);
