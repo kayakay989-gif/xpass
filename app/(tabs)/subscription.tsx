@@ -161,7 +161,11 @@ export default function SubscriptionScreen() {
   // Get button label and action based on subscription status
   const getPackageButtonInfo = (tier: Package['tier']) => {
     const currentTier = subscription?.tier;
-    const isActive = subscription?.isActive && subscription?.endDate > new Date();
+    const endDate = subscription?.endDate ? new Date(subscription.endDate) : null;
+    const now = new Date();
+    
+    // Check if subscription is active: isActive AND endDate > now
+    const isActive = subscription?.isActive && endDate && endDate.getTime() > now.getTime();
     
     // If user has this tier active
     if (isActive && currentTier === tier) {
@@ -172,44 +176,13 @@ export default function SubscriptionScreen() {
       };
     }
     
-    // If user has a different tier active
-    if (isActive && currentTier) {
-      const tierLevels: Record<Package['tier'], number> = {
-        silver: 1,
-        gold: 2,
-        diamond: 3,
-        elite: 4,
+    // If user has a different tier active - show "Not available until current package expires"
+    if (isActive && currentTier && currentTier !== tier) {
+      return {
+        label: 'Not available until current package expires',
+        disabled: true,
+        action: null,
       };
-      
-      const currentLevel = tierLevels[currentTier];
-      const targetLevel = tierLevels[tier];
-      
-      if (targetLevel > currentLevel) {
-        // Upgrade
-        return {
-          label: 'Upgrade',
-          disabled: false,
-          action: () => {
-            const totalPrice = getTotalPrice(tier);
-            router.push({
-              pathname: '/payment',
-              params: {
-                tier,
-                duration: selectedDuration.toString(),
-                price: totalPrice.toString(),
-                isUpgrade: 'true',
-              },
-            });
-          },
-        };
-      } else {
-        // Downgrade (not allowed or optional)
-        return {
-          label: 'Downgrade not available',
-          disabled: true,
-          action: null,
-        };
-      }
     }
     
     // No active subscription - show Select Package
@@ -239,7 +212,7 @@ export default function SubscriptionScreen() {
             <ChevronLeft size={22} color={Colors.text} />
           </TouchableOpacity>
           <Image 
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+            source={require('../../assets/images/main logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -503,8 +476,11 @@ const styles = StyleSheet.create({
   },
   selectButton: {
     paddingVertical: 14,
+    paddingHorizontal: 20,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
   },
   selectButtonDisabled: {
     opacity: 0.6,
@@ -513,6 +489,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600' as const,
     color: Colors.text,
+    textAlign: 'center',
   },
   priceDetail: {
     fontSize: 11,

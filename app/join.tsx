@@ -26,7 +26,7 @@ export default function JoinScreen() {
       <View style={styles.container}>
         <View style={styles.card}>
           <Image
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+            source={require('../assets/images/main logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />

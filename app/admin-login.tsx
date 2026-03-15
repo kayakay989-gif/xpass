@@ -113,7 +113,7 @@ export default function AdminLoginScreen() {
             <ChevronLeft size={22} color="#111827" />
           </TouchableOpacity>
           <Image
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+            source={require('../assets/images/main logo.png')}
             style={styles.brandLogo}
             resizeMode="contain"
           />

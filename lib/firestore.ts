@@ -37,6 +37,20 @@ export const firestoreUsers = {
     if (!userDoc.exists()) return null;
     
     const data = userDoc.data();
+    
+    // Convert savedCards from Firestore format
+    const savedCards = data.savedCards ? data.savedCards.map((card: any) => ({
+      id: card.id || '',
+      token: card.token || '',
+      last4: card.last4 || '',
+      brand: card.brand || '',
+      expiryMonth: card.expiryMonth || '',
+      expiryYear: card.expiryYear || '',
+      cardholderName: card.cardholderName || '',
+      isDefault: card.isDefault || false,
+      createdAt: timestampToDate(card.createdAt) || new Date(),
+    })) : undefined;
+
     return {
       id: userDoc.id,
       name: data.name || '',
@@ -46,6 +60,7 @@ export const firestoreUsers = {
       referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
       walletBalance: data.walletBalance || 0,
       createdAt: timestampToDate(data.createdAt),
+      savedCards: savedCards,
     };
   },
 

@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
+import { isGooglePayAvailable, requestGooglePayPayment } from '@/lib/google-pay';
 
 export default function PaymentScreen() {
   const { tier, duration, price } = useLocalSearchParams<{ tier: string; duration: string; price: string }>();
@@ -33,58 +34,20 @@ export default function PaymentScreen() {
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState<string>('');
   const [isValidatingCoupon, setIsValidatingCoupon] = useState<boolean>(false);
+  const [useWallet, setUseWallet] = useState<boolean>(false);
+  // VERSION 1: Only card payments enabled, Google Pay and Apple Pay hidden
+  const [paymentMethod, setPaymentMethod] = useState<'apple_pay' | 'google_pay' | 'card'>('card');
+  const [applePayAvailable, setApplePayAvailable] = useState<boolean>(false);
+  const [googlePayAvailable, setGooglePayAvailable] = useState<boolean>(false);
+  const [saveCard, setSaveCard] = useState<boolean>(false);
+  const [selectedSavedCardId, setSelectedSavedCardId] = useState<string | null>(null);
+  const [savedCards, setSavedCards] = useState<any[]>([]);
 
   // Toast state for success / error messages
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<ToastType>('success');
 
-  const initiateAuthMutation = trpc.payments.initiate3ds.useMutation({
-    onError: (error) => {
-      console.error('[Payment] Initiate auth mutation error:', {
-        message: error.message,
-        data: error.data,
-        shape: error.shape,
-        cause: error.cause,
-        stack: error.stack,
-      });
-      setPaymentProcessing(false);
-      setStatusMessage('');
-    },
-    onSuccess: (data) => {
-      console.log('[Payment] Initiate auth mutation success:', {
-        orderId: data.orderId,
-        transactionId: data.transactionId,
-        hasMethodHtml: !!data.methodHtml,
-        gatewayRecommendation: data.gatewayRecommendation,
-      });
-    },
-    onMutate: (variables) => {
-      console.log('[Payment] Initiate auth mutation starting with:', {
-        userId: variables.userId,
-        tier: variables.tier,
-        duration: variables.duration,
-        cardNumberLength: variables.cardNumber.length,
-      });
-    },
-  });
-  
-  const authenticatePayerMutation = trpc.payments.authenticate3ds.useMutation({
-    onError: (error) => {
-      console.error('[Payment] Authenticate payer mutation error:', error);
-      setPaymentProcessing(false);
-      setStatusMessage('');
-      Alert.alert(
-        'Authentication Failed',
-        error.message || 'Failed to authenticate payment. Please try again.',
-        [{ text: 'OK' }]
-      );
-    },
-    onSuccess: (data) => {
-      console.log('[Payment] Authenticate payer mutation success:', data);
-    },
-  });
-  
   const validateCouponQuery = trpc.coupons.validate.useQuery(
     {
       code: couponCode.toUpperCase().trim(),
@@ -96,9 +59,9 @@ export default function PaymentScreen() {
     }
   );
 
-  const payWith3dsMutation = trpc.payments.payWith3ds.useMutation({
+  const checkoutMutation = trpc.payments.checkout.useMutation({
     onError: (error) => {
-      console.error('[Payment] Pay with 3DS mutation error:', error);
+      console.error('[Payment] Checkout mutation error:', error);
       setPaymentProcessing(false);
       setStatusMessage('');
       Alert.alert(
@@ -108,7 +71,7 @@ export default function PaymentScreen() {
       );
     },
     onSuccess: async (data) => {
-      console.log('[Payment] Pay with 3DS mutation success:', data);
+      console.log('[Payment] Checkout mutation success:', data);
       setPaymentProcessing(false);
       setStatusMessage('');
 
@@ -177,6 +140,12 @@ export default function PaymentScreen() {
   };
 
   const isCardValid = () => {
+    // If using saved card, only CVV is required
+    if (selectedSavedCardId) {
+      return cvv.length >= 3;
+    }
+    
+    // For new card, all fields required
     const cleanCardNumber = cardNumber.replace(/\s/g, '');
     return (
       cleanCardNumber.length >= 14 &&
@@ -198,6 +167,108 @@ export default function PaymentScreen() {
     return { month, year: year || '' };
   }, [expiryDate]);
 
+  // Load saved cards for the user
+  useEffect(() => {
+    if (user?.savedCards && user.savedCards.length > 0) {
+      setSavedCards(user.savedCards);
+    } else {
+      setSavedCards([]);
+    }
+  }, [user]);
+
+  // Load Google Pay script on web and detect payment method availability
+  // VERSION 1: This is disabled but code preserved for Version 2
+  useEffect(() => {
+    const checkPaymentMethods = async () => {
+      // VERSION 1: Skip payment method detection - only card payments enabled
+      return;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        // Load Google Pay script if not already loaded
+        const loadGooglePayScript = () => {
+          return new Promise<void>((resolve, reject) => {
+            if ((window as any).google?.payments?.api) {
+              resolve();
+              return;
+            }
+
+            const existing = document.querySelector<HTMLScriptElement>(
+              'script[data-xpass-google-pay="1"]'
+            );
+
+            if (existing) {
+              existing.addEventListener('load', () => resolve(), { once: true });
+              existing.addEventListener('error', () => reject(new Error('Failed to load Google Pay script')), { once: true });
+              return;
+            }
+
+            const script = document.createElement('script');
+            script.setAttribute('data-xpass-google-pay', '1');
+            script.src = 'https://pay.google.com/gp/p/js/pay.js';
+            script.async = true;
+            script.defer = true;
+            script.onload = () => {
+              if ((window as any).google?.payments?.api) {
+                resolve();
+              } else {
+                reject(new Error('Google Pay script loaded but API is missing'));
+              }
+            };
+            script.onerror = () => reject(new Error('Failed to load Google Pay script'));
+            document.head.appendChild(script);
+          });
+        };
+
+        try {
+          await loadGooglePayScript();
+          // Check Google Pay availability after script loads
+          const isGooglePayAvailable = 
+            (window as any).google && 
+            (window as any).google.payments && 
+            (window as any).google.payments.api;
+          setGooglePayAvailable(isGooglePayAvailable || false);
+          console.log('[Payment] Google Pay available:', isGooglePayAvailable);
+        } catch (error) {
+          console.warn('[Payment] Failed to load Google Pay script:', error);
+          setGooglePayAvailable(false);
+        }
+
+        // Check Apple Pay availability (Safari on iOS/macOS)
+        try {
+          const isApplePayAvailable = 
+            (window as any).ApplePaySession && 
+            (window as any).ApplePaySession.canMakePayments();
+          setApplePayAvailable(isApplePayAvailable || false);
+          console.log('[Payment] Apple Pay available:', isApplePayAvailable);
+        } catch (e) {
+          console.warn('[Payment] Apple Pay check failed:', e);
+          setApplePayAvailable(false);
+        }
+      } else if (Platform.OS === 'ios') {
+        // iOS native - Apple Pay is typically available
+        setApplePayAvailable(true);
+        setGooglePayAvailable(false);
+      } else if (Platform.OS === 'android') {
+        // Android - Check Google Pay availability
+        const available = await isGooglePayAvailable();
+        setApplePayAvailable(false);
+        setGooglePayAvailable(available);
+      }
+    };
+
+    checkPaymentMethods();
+  }, []);
+
+  // Auto-select payment method based on availability
+  useEffect(() => {
+    if (cardAmount === 0) return; // No external payment needed
+    
+    if (applePayAvailable && paymentMethod !== 'apple_pay') {
+      setPaymentMethod('apple_pay');
+    } else if (googlePayAvailable && paymentMethod !== 'google_pay') {
+      setPaymentMethod('google_pay');
+    }
+  }, [applePayAvailable, googlePayAvailable, cardAmount]);
+
   // For native (non-web) 3DS challenge, provide a manual "Continue" button as a fallback
   // if the redirect/callback flow cannot return cleanly to the app.
   useEffect(() => {
@@ -210,28 +281,76 @@ export default function PaymentScreen() {
     setShowNativeContinueButton(false);
   }, [challengeHtml]);
 
-  const handleFinalizePayment = async (
-    currentOrderId: string, 
-    currentAuthTransactionId: string,
-    authStatus?: string
-  ) => {
-    setStatusMessage('Capturing payment...');
-    const cleanedCard = cardNumber.replace(/\s/g, '');
-    const { month, year } = parsedExpiry;
 
-    await payWith3dsMutation.mutateAsync({
-      userId: user!.id,
-      tier: tier as any,
-      duration: parseInt(duration) as any,
-      orderId: currentOrderId,
-      authenticationTransactionId: currentAuthTransactionId,
-      authenticationStatus: authStatus, // Pass the 3DS authentication status (Y, N, U, I, A)
-      cardNumber: cleanedCard,
-      expiryMonth: month,
-      expiryYear: year,
-      currency: 'JOD',
-      couponCode: appliedCoupon?.coupon?.code || undefined,
-    });
+  const handleApplePayPayment = async () => {
+    if (!user || cardAmount === 0) return;
+
+    setPaymentMethod('apple_pay');
+    setPaymentProcessing(true);
+    setStatusMessage('Processing Apple Pay...');
+
+    try {
+      // In production, integrate with Apple Pay SDK to get payment token
+      // For now, using a placeholder token - replace with actual Apple Pay token
+      const paymentToken = 'apple_pay_token_placeholder'; // Replace with actual token from Apple Pay SDK
+      
+      await checkoutMutation.mutateAsync({
+        userId: user.id,
+        tier: tier as any,
+        duration: parseInt(duration) as any,
+        useWallet: useWallet,
+        paymentMethod: 'apple_pay',
+        paymentToken: paymentToken,
+        couponCode: appliedCoupon?.coupon?.code || undefined,
+        currency: 'JOD',
+      });
+    } catch (error: any) {
+      setPaymentProcessing(false);
+      setStatusMessage('');
+      Alert.alert('Error', error.message || 'Failed to process Apple Pay payment');
+    }
+  };
+
+  const handleGooglePayPayment = async () => {
+    if (!user || cardAmount === 0) return;
+
+    setPaymentMethod('google_pay');
+    setPaymentProcessing(true);
+    setStatusMessage('Processing Google Pay...');
+
+    try {
+      // Request Google Pay payment and get token
+      const googlePayResult = await requestGooglePayPayment({
+        merchantName: 'XPASS',
+        merchantId: 'BCR2DN5T22RLHU35',
+        gateway: 'mastercard',
+        gatewayMerchantId: '9589667361EP',
+        allowedNetworks: ['VISA', 'MASTERCARD'],
+        currency: 'JOD',
+        country: 'JO',
+        totalPrice: cardAmount, // Use remaining amount after wallet
+      });
+
+      if (!googlePayResult.success || !googlePayResult.paymentToken) {
+        throw new Error(googlePayResult.error || 'Failed to get Google Pay token');
+      }
+
+      // Send token to unified checkout endpoint
+      await checkoutMutation.mutateAsync({
+        userId: user.id,
+        tier: tier as any,
+        duration: parseInt(duration) as any,
+        useWallet: useWallet,
+        paymentMethod: 'google_pay',
+        paymentToken: googlePayResult.paymentToken,
+        couponCode: appliedCoupon?.coupon?.code || undefined,
+        currency: 'JOD',
+      });
+    } catch (error: any) {
+      setPaymentProcessing(false);
+      setStatusMessage('');
+      Alert.alert('Payment Failed', error.message || 'Failed to process Google Pay payment. Please try another method.');
+    }
   };
 
   const handleFreeCheckout = async () => {
@@ -245,15 +364,14 @@ export default function PaymentScreen() {
     try {
       const orderId = `order-${Date.now()}`;
       
-      await payWith3dsMutation.mutateAsync({
+      await checkoutMutation.mutateAsync({
         userId: user!.id,
         tier: tier as any,
         duration: parseInt(duration) as any,
-        orderId,
-        authenticationTransactionId: '',
-        currency: 'JOD',
+        useWallet: true,
+        paymentMethod: 'card', // Will be ignored since remainingAmount is 0
         couponCode: appliedCoupon.coupon.code,
-        // No card details needed for 100% discount
+        currency: 'JOD',
       });
     } catch (error: any) {
       setPaymentProcessing(false);
@@ -281,9 +399,36 @@ export default function PaymentScreen() {
       return;
     }
 
+    // If wallet covers full amount, skip card payment
+    if (cardAmount === 0 && walletUsed > 0) {
+      setPaymentProcessing(true);
+      setStatusMessage('Processing wallet payment...');
+      try {
+        const orderId = `order-${Date.now()}`;
+        await checkoutMutation.mutateAsync({
+          userId: user!.id,
+          tier: tier as any,
+          duration: parseInt(duration) as any,
+          useWallet: true,
+          paymentMethod: 'card', // Will be ignored since remainingAmount is 0
+          couponCode: appliedCoupon?.coupon?.code || undefined,
+          currency: 'JOD',
+        });
+      } catch (error: any) {
+        setPaymentProcessing(false);
+        setStatusMessage('');
+        Alert.alert('Error', error.message || 'Failed to process wallet payment');
+      }
+      return;
+    }
+
     if (!isCardValid()) {
       console.warn('[Payment] Card validation failed');
-      Alert.alert('Error', 'Please complete all card details');
+      if (selectedSavedCardId) {
+        Alert.alert('Error', 'Please enter CVV for your saved card');
+      } else {
+        Alert.alert('Error', 'Please complete all card details');
+      }
       return;
     }
 
@@ -346,326 +491,33 @@ export default function PaymentScreen() {
     }
 
     setPaymentProcessing(true);
-    setStatusMessage('Starting authentication...');
+    setStatusMessage('Processing payment...');
 
     try {
       const cleanedCard = cardNumber.replace(/\s/g, '');
       const { month, year } = parsedExpiry;
 
-      console.log('[Payment] Step 1: Initiating 3DS authentication...', {
+      // Use unified checkout endpoint
+      await checkoutMutation.mutateAsync({
         userId: user.id,
-        tier,
-        duration: parseInt(duration),
-        cardNumberPrefix: cleanedCard.substring(0, 6) + '****',
-        currency: 'JOD',
-        apiBaseUrl: config.api.baseUrl,
-      });
-
-      console.log('[Payment] About to call initiateAuthMutation.mutateAsync');
-      console.log('[Payment] tRPC client URL should be:', `${config.api.baseUrl}/trpc`);
-      console.log('[Payment] Mutation payload:', {
-        userId: user.id,
-        tier,
-        duration: parseInt(duration),
-        cardNumberLength: cleanedCard.length,
-        currency: 'JOD',
-        hasMethodNotificationUrl: !!redirectUrl,
-      });
-
-      // Test the API endpoint directly first
-      try {
-        const testUrl = `${config.api.baseUrl}/trpc/payments.initiate3ds`;
-        console.log('[Payment] Testing API endpoint:', testUrl);
-      } catch (testError) {
-        console.error('[Payment] Test error:', testError);
-      }
-
-      console.log('[Payment] Calling mutation now...');
-      const startTime = Date.now();
-      
-      const initiate = await initiateAuthMutation.mutateAsync({
-        userId: user!.id,
         tier: tier as any,
         duration: parseInt(duration) as any,
-        cardNumber: cleanedCard,
+        useWallet: useWallet,
+        paymentMethod: 'card',
+        cardNumber: selectedSavedCardId ? undefined : cleanedCard, // Don't send card number if using saved card
+        expiryMonth: selectedSavedCardId ? undefined : month,
+        expiryYear: selectedSavedCardId ? undefined : year,
+        cardholderName: selectedSavedCardId ? undefined : cardholderName,
+        savedCardId: selectedSavedCardId || undefined, // Send saved card ID if using saved card
+        saveCard: saveCard && !selectedSavedCardId, // Only save if it's a new card
+        couponCode: appliedCoupon?.coupon?.code || undefined,
         currency: 'JOD',
-        methodNotificationUrl: redirectUrl,
       });
-
-      const endTime = Date.now();
-      console.log(`[Payment] Mutation completed in ${endTime - startTime}ms`);
-      console.log('[Payment] Initiate response:', {
-        orderId: initiate.orderId,
-        transactionId: initiate.transactionId,
-        hasMethodHtml: !!initiate.methodHtml,
-        gatewayRecommendation: initiate.gatewayRecommendation,
-      });
-
-      setOrderId(initiate.orderId);
-      setAuthTransactionId(initiate.transactionId);
-      setStatusMessage('Running issuer checks...');
-
-      if (initiate.methodHtml) {
-        console.log('[Payment] Method HTML received, waiting for completion...');
-        setMethodHtml(initiate.methodHtml);
-        await new Promise((resolve) => setTimeout(resolve, 4000));
-      }
-
-      console.log('[Payment] Step 2: Authenticating payer...');
-      setStatusMessage('Authenticating...');
-      const authenticate = await authenticatePayerMutation.mutateAsync({
-        userId: user!.id,
-        tier: tier as any,
-        duration: parseInt(duration) as any,
-        orderId: initiate.orderId,
-        transactionId: initiate.transactionId,
-        cardNumber: cleanedCard,
-        expiryMonth: month,
-        expiryYear: year,
-        currency: 'JOD',
-        redirectUrl,
-        browserUserAgent: Platform.OS === 'web' ? navigator.userAgent : 'ReactNativeWebView',
-        cardholderName,
-      });
-
-      console.log('[Payment] Authenticate response:', {
-        gatewayRecommendation: authenticate.gatewayRecommendation,
-        hasRedirectHtml: !!authenticate.redirectHtml,
-        result: authenticate.result,
-        authenticationStatus: authenticate.authenticationStatus,
-        fullResponse: authenticate,
-      });
-
-      // Log the full response for debugging
-      console.log('[Payment] Full authenticate response:', JSON.stringify(authenticate, null, 2));
-
-      if (authenticate.redirectHtml) {
-        console.log('[Payment] Challenge required - showing 3DS challenge');
-        setStatusMessage('Challenge required - complete verification');
-        setChallengeHtml(authenticate.redirectHtml);
-        
-        // On web, inject the HTML directly into an iframe with sandbox permissions
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          // Create a container for the 3DS challenge
-          const container = document.createElement('div');
-          container.id = 'threeds-challenge-container';
-          container.style.position = 'fixed';
-          container.style.top = '0';
-          container.style.left = '0';
-          container.style.width = '100%';
-          container.style.height = '100%';
-          container.style.zIndex = '9999';
-          container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-          
-          // Create iframe with sandbox that allows scripts
-          const iframe = document.createElement('iframe');
-          iframe.id = 'threeds-challenge-iframe';
-          iframe.style.width = '100%';
-          iframe.style.height = '100%';
-          iframe.style.border = 'none';
-          iframe.sandbox.add('allow-scripts', 'allow-same-origin', 'allow-forms', 'allow-popups', 'allow-top-navigation');
-          iframe.srcdoc = authenticate.redirectHtml;
-          
-          container.appendChild(iframe);
-          document.body.appendChild(container);
-          
-          console.log('[Payment] 3DS challenge iframe created');
-          
-          // Listen for redirect via postMessage (for cross-origin)
-          const messageHandler = (event: MessageEvent) => {
-            console.log('[Payment] Received message from iframe:', event.data);
-            if (event.data === '3DS_AUTH_COMPLETE' || event.origin.includes('mastercard.com')) {
-              window.removeEventListener('message', messageHandler);
-              if (document.body.contains(container)) {
-                document.body.removeChild(container);
-              }
-              setChallengeHtml(null);
-              // After challenge completion, authentication status is typically 'Y' (successful)
-              handleFinalizePayment(initiate.orderId, initiate.transactionId, 'Y');
-            }
-          };
-          window.addEventListener('message', messageHandler);
-          
-          // Check iframe location (for same-origin) - but expect cross-origin errors
-          const checkInterval = setInterval(() => {
-            try {
-              if (iframe.contentWindow?.location.href.includes(redirectUrl || '')) {
-                clearInterval(checkInterval);
-                window.removeEventListener('message', messageHandler);
-                if (document.body.contains(container)) {
-                  document.body.removeChild(container);
-                }
-                setChallengeHtml(null);
-                // After challenge completion, authentication status is typically 'Y' (successful)
-                handleFinalizePayment(initiate.orderId, initiate.transactionId, 'Y');
-              }
-            } catch (e) {
-              // Cross-origin - expected, will be handled by message handler or timeout
-            }
-          }, 500);
-
-          // Add a manual continue button for when the redirect is blocked
-          // Some browsers may block certain cross-origin redirects during 3DS flows
-          // This button appears after 2 seconds to let user proceed manually
-          let continueButtonTimeout: NodeJS.Timeout;
-          let continueButton: HTMLButtonElement | null = null;
-          
-          const createContinueButton = () => {
-            if (continueButton || !document.body.contains(container)) return;
-            
-            continueButton = document.createElement('button');
-            continueButton.textContent = 'Continue Payment →';
-            continueButton.style.cssText = `
-              position: fixed;
-              bottom: 30px;
-              left: 50%;
-              transform: translateX(-50%);
-              padding: 14px 32px;
-              background-color: #4F46E5;
-              color: white;
-              border: none;
-              border-radius: 8px;
-              font-size: 16px;
-              font-weight: 600;
-              z-index: 10000;
-              cursor: pointer;
-              box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
-              transition: background-color 0.2s;
-            `;
-            continueButton.onmouseover = () => {
-              if (continueButton) continueButton.style.backgroundColor = '#4338CA';
-            };
-            continueButton.onmouseout = () => {
-              if (continueButton) continueButton.style.backgroundColor = '#4F46E5';
-            };
-            continueButton.onclick = () => {
-              clearInterval(checkInterval);
-              window.removeEventListener('message', messageHandler);
-              if (continueButtonTimeout) clearTimeout(continueButtonTimeout);
-              if (document.body.contains(container)) {
-                document.body.removeChild(container);
-              }
-              if (continueButton && document.body.contains(continueButton)) {
-                document.body.removeChild(continueButton);
-              }
-              setChallengeHtml(null);
-              // After challenge completion, authentication status is typically 'Y' (successful)
-              handleFinalizePayment(initiate.orderId, initiate.transactionId, 'Y');
-            };
-            document.body.appendChild(continueButton);
-            console.log('[Payment] Continue button added - click after completing the challenge');
-          };
-          
-          continueButtonTimeout = setTimeout(createContinueButton, 2000);
-          
-          // Cleanup after 5 minutes
-          setTimeout(() => {
-            if (document.body.contains(container)) {
-              clearInterval(checkInterval);
-              window.removeEventListener('message', messageHandler);
-              if (continueButtonTimeout) clearTimeout(continueButtonTimeout);
-              if (continueButton && document.body.contains(continueButton)) {
-                document.body.removeChild(continueButton);
-              }
-              document.body.removeChild(container);
-              setChallengeHtml(null);
-              setPaymentProcessing(false);
-              Alert.alert('Timeout', '3DS authentication timed out. Please try again.');
-            }
-          }, 300000);
-        }
-        return;
-      }
-
-      // Check gateway recommendation - it might be undefined, PROCEED, or other values
-      console.log('[Payment] Checking gateway recommendation:', authenticate.gatewayRecommendation);
-      console.log('[Payment] Authentication result:', authenticate.result);
-      console.log('[Payment] Authentication status:', authenticate.authenticationStatus);
-
-      // If there's no redirectHtml, check if we should proceed
-      // Some gateways return SUCCESS/YES in result or authenticationStatus instead of PROCEED in gatewayRecommendation
-      const shouldProceed = 
-        authenticate.gatewayRecommendation === 'PROCEED' ||
-        authenticate.result === 'SUCCESS' ||
-        authenticate.authenticationStatus === 'Y' ||
-        authenticate.authenticationStatus === 'AUTHENTICATION_SUCCESSFUL';
-
-      if (!shouldProceed) {
-        // Handle failure case - show error regardless of whether gatewayRecommendation exists
-        const errorMsg = `Gateway recommendation: ${authenticate.gatewayRecommendation || 'UNKNOWN'}. Result: ${authenticate.result || 'UNKNOWN'}. Status: ${authenticate.authenticationStatus || 'UNKNOWN'}`;
-        console.error('[Payment] Gateway did not recommend proceeding:', errorMsg);
-        console.error('[Payment] Full response that failed:', authenticate);
-        setPaymentProcessing(false);
-        setStatusMessage('');
-        Alert.alert(
-          'Payment Authentication Failed', 
-          `Authentication was not successful. ${errorMsg}`,
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      console.log('[Payment] Step 3: Finalizing payment...');
-      setStatusMessage('Finalizing payment...');
-      // Map authenticationStatus to the format expected by gateway (Y, N, U, I, A)
-      // If authenticationStatus is 'AUTHENTICATION_SUCCESSFUL', use 'Y'
-      // If it's undefined/null and gatewayRecommendation is PROCEED, default to 'Y'
-      let authStatus = authenticate.authenticationStatus;
-      if (authStatus === 'AUTHENTICATION_SUCCESSFUL' || authStatus === 'SUCCESS') {
-        authStatus = 'Y';
-      } else if (!authStatus && authenticate.gatewayRecommendation === 'PROCEED') {
-        authStatus = 'Y'; // Default to success if gateway recommends proceeding
-      }
-      await handleFinalizePayment(initiate.orderId, initiate.transactionId, authStatus);
     } catch (error: any) {
-      console.error('[Payment] Error details:', {
-        message: error?.message,
-        code: error?.code,
-        stack: error?.stack,
-        data: error?.data,
-        cause: error?.cause,
-        name: error?.name,
-        toString: error?.toString(),
-      });
-      
-      // Log to console for debugging
-      console.error('[Payment] Full error object:', error);
-      
-      // Extract user-friendly error message
-      let errorMessage = 'There was an error processing your payment.';
-      
-      if (error?.message) {
-        errorMessage = error.message;
-        // Remove technical details for user-facing messages
-        if (errorMessage.includes('[Mastercard]')) {
-          errorMessage = errorMessage.replace(/\[Mastercard\]\s*/g, '');
-        }
-        if (errorMessage.includes('Missing configuration')) {
-          errorMessage = 'Payment gateway is not configured. Please contact support.';
-        }
-        if (errorMessage.includes('Failed to connect') || errorMessage.includes('Network')) {
-          errorMessage = 'Unable to connect to payment server. Please check your internet connection and try again.';
-        }
-      } else if (error?.data?.message) {
-        errorMessage = error.data.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      }
-      
-      Alert.alert(
-        'Payment Failed',
-        errorMessage,
-        [{ text: 'OK', onPress: () => {
-          setChallengeHtml(null);
-          setMethodHtml(null);
-          setPaymentProcessing(false);
-          setStatusMessage('');
-        }}]
-      );
-      setChallengeHtml(null);
-      setMethodHtml(null);
+      console.error('[Payment] Checkout error:', error);
       setPaymentProcessing(false);
       setStatusMessage('');
+      Alert.alert('Payment Failed', error.message || 'Failed to process payment. Please try again.');
     }
   };
 
@@ -709,6 +561,13 @@ export default function PaymentScreen() {
     }
     return parseFloat(price) || 0;
   };
+
+  // Calculate wallet usage
+  const walletBalance = user?.walletBalance || 0;
+  const packagePrice = getFinalPrice();
+  const walletUsed = useWallet ? Math.min(walletBalance, packagePrice) : 0;
+  const cardAmount = Math.max(0, packagePrice - walletUsed);
+  const remainingWalletBalance = walletBalance - walletUsed;
 
   const getTierName = () => {
     const tierNames: Record<string, string> = {
@@ -824,12 +683,200 @@ export default function PaymentScreen() {
                 )}
               </View>
             )}
+
+            {/* Wallet Section */}
+            {walletBalance > 0 && !appliedCoupon?.isFree && (
+              <View style={styles.walletSection}>
+                <View style={styles.walletHeader}>
+                  <Text style={styles.walletLabel}>Wallet Balance: {walletBalance.toFixed(2)} JOD</Text>
+                  <TouchableOpacity
+                    style={styles.walletToggle}
+                    onPress={() => setUseWallet(!useWallet)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.toggle, useWallet && styles.toggleActive]}>
+                      {useWallet && <View style={styles.toggleIndicator} />}
+                    </View>
+                    <Text style={styles.walletToggleText}>Use wallet balance</Text>
+                  </TouchableOpacity>
+                </View>
+                {useWallet && (
+                  <View style={styles.walletDetails}>
+                    <View style={styles.priceRow}>
+                      <Text style={styles.priceBreakdownLabel}>Wallet Contribution:</Text>
+                      <Text style={[styles.priceBreakdownValue, styles.walletValue]}>
+                        {walletUsed.toFixed(2)} JOD
+                      </Text>
+                    </View>
+                    <View style={styles.priceRow}>
+                      <Text style={styles.priceBreakdownLabel}>Remaining to pay:</Text>
+                      <Text style={[styles.priceBreakdownValue, styles.cardValue]}>
+                        {cardAmount.toFixed(2)} JOD
+                      </Text>
+                    </View>
+                    {remainingWalletBalance > 0 && (
+                      <View style={styles.priceRow}>
+                        <Text style={styles.priceBreakdownLabel}>Remaining wallet balance:</Text>
+                        <Text style={styles.priceBreakdownValue}>
+                          {remainingWalletBalance.toFixed(2)} JOD
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
-          {!appliedCoupon?.isFree && (
+          {!appliedCoupon?.isFree && cardAmount > 0 && (
             <>
-              <View style={styles.cardFieldContainer}>
-                <Text style={styles.label}>Cardholder Name</Text>
+              {/* VERSION 1: Payment Method Selection - Only Card Payment Enabled */}
+              {/* Apple Pay and Google Pay are hidden for Version 1 but code remains for Version 2 */}
+              {/* 
+              <View style={styles.paymentMethodSection}>
+                <Text style={styles.sectionTitle}>Payment Method</Text>
+                
+                {applePayAvailable && (
+                  <TouchableOpacity
+                    style={[
+                      styles.paymentMethodOption,
+                      paymentMethod === 'apple_pay' && styles.paymentMethodOptionSelected,
+                    ]}
+                    onPress={() => setPaymentMethod('apple_pay')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.radioButton}>
+                      {paymentMethod === 'apple_pay' && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <Text style={styles.paymentMethodLabel}>Apple Pay</Text>
+                    {Platform.OS === 'web' && (
+                      <View style={styles.applePayBadge}>
+                        <Text style={styles.applePayBadgeText}>🍎</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                {googlePayAvailable && (
+                  <TouchableOpacity
+                    style={[
+                      styles.paymentMethodOption,
+                      paymentMethod === 'google_pay' && styles.paymentMethodOptionSelected,
+                    ]}
+                    onPress={() => setPaymentMethod('google_pay')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.radioButton}>
+                      {paymentMethod === 'google_pay' && <View style={styles.radioButtonInner} />}
+                    </View>
+                    <Text style={styles.paymentMethodLabel}>Google Pay</Text>
+                    {Platform.OS === 'web' && (
+                      <View style={styles.googlePayBadge}>
+                        <Text style={styles.googlePayBadgeText}>G</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodOption,
+                    paymentMethod === 'card' && styles.paymentMethodOptionSelected,
+                  ]}
+                  onPress={() => setPaymentMethod('card')}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.radioButton}>
+                    {paymentMethod === 'card' && <View style={styles.radioButtonInner} />}
+                  </View>
+                  <Text style={styles.paymentMethodLabel}>Credit / Debit Card</Text>
+                </TouchableOpacity>
+              </View>
+              */}
+
+              {/* Saved Cards Selection */}
+              {savedCards.length > 0 && (
+                <View style={styles.savedCardsSection}>
+                  <Text style={styles.sectionTitle}>Saved Cards</Text>
+                  {savedCards.map((card) => (
+                    <TouchableOpacity
+                      key={card.id}
+                      style={[
+                        styles.savedCardOption,
+                        selectedSavedCardId === card.id && styles.savedCardOptionSelected,
+                      ]}
+                      onPress={() => {
+                        setSelectedSavedCardId(card.id);
+                        // Clear card input fields when using saved card
+                        setCardNumber('');
+                        setExpiryDate('');
+                        setCvv('');
+                        setCardholderName(card.cardholderName || '');
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.radioButton}>
+                        {selectedSavedCardId === card.id && <View style={styles.radioButtonInner} />}
+                      </View>
+                      <View style={styles.savedCardInfo}>
+                        <Text style={styles.savedCardLabel}>
+                          {card.brand || 'Card'} •••• {card.last4}
+                        </Text>
+                        {card.expiryMonth && card.expiryYear && (
+                          <Text style={styles.savedCardExpiry}>
+                            Expires {card.expiryMonth}/{card.expiryYear}
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.useNewCardButton}
+                    onPress={() => {
+                      setSelectedSavedCardId(null);
+                      setCardNumber('');
+                      setExpiryDate('');
+                      setCvv('');
+                      setCardholderName('');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.useNewCardText}>+ Use New Card</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* CVV Field for Saved Cards */}
+              {selectedSavedCardId && (
+                <View style={styles.cardFieldContainer}>
+                  <Text style={styles.label}>CVV</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="123"
+                    placeholderTextColor={Colors.textSecondary}
+                    value={cvv}
+                    onChangeText={(text) => {
+                      if (text.length <= 4 && /^\d*$/.test(text)) {
+                        setCvv(text);
+                      }
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    secureTextEntry
+                    returnKeyType="done"
+                    testID="cvv-input-saved-card"
+                  />
+                  <Text style={styles.hint}>
+                    Enter CVV for your saved card ending in {savedCards.find(c => c.id === selectedSavedCardId)?.last4}
+                  </Text>
+                </View>
+              )}
+
+              {/* Card Fields - Show when no saved card selected */}
+              {!selectedSavedCardId && (
+                <>
+                  <View style={styles.cardFieldContainer}>
+                    <Text style={styles.label}>Cardholder Name</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="John Smith"
@@ -839,6 +886,7 @@ export default function PaymentScreen() {
                   autoCapitalize="words"
                   returnKeyType="next"
                   testID="cardholder-name-input"
+                  editable={!selectedSavedCardId}
                 />
               </View>
 
@@ -908,56 +956,202 @@ export default function PaymentScreen() {
               />
             </View>
           </View>
+
+                  {/* Save Card Option - Only show when entering new card */}
+                  {!selectedSavedCardId && (
+                    <View style={styles.saveCardContainer}>
+                      <TouchableOpacity
+                        style={styles.saveCardCheckbox}
+                        onPress={() => setSaveCard(!saveCard)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.checkbox, saveCard && styles.checkboxChecked]}>
+                          {saveCard && <Text style={styles.checkboxCheckmark}>✓</Text>}
+                        </View>
+                        <Text style={styles.saveCardLabel}>Save this card for future payments</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {/* VERSION 1: Apple Pay and Google Pay buttons hidden - code preserved for Version 2 */}
+              {/* 
+              {cardAmount > 0 && (applePayAvailable || googlePayAvailable) && (
+                <View style={styles.quickPaymentSection}>
+                  <Text style={styles.quickPaymentTitle}>Quick Payment Options</Text>
+                  
+                  {applePayAvailable && (
+                    <View style={styles.applePayButtonContainer}>
+                      <TouchableOpacity
+                        style={styles.applePayButton}
+                        onPress={handleApplePayPayment}
+                        disabled={paymentProcessing}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.applePayButtonText}>🍎 Pay with Apple Pay</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {googlePayAvailable && (
+                    <View style={styles.googlePayButtonContainer}>
+                      <TouchableOpacity
+                        style={styles.googlePayButton}
+                        onPress={handleGooglePayPayment}
+                        disabled={paymentProcessing}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.googlePayButtonText}>G Pay with Google Pay</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )}
+              */}
             </>
           )}
 
-          <TouchableOpacity
-            style={[
-              styles.payButton,
-              ((!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing) && styles.payButtonDisabled,
-            ]}
-            onPress={() => {
-              console.log('[Payment] TouchableOpacity onPress triggered');
-              console.log('[Payment] Button state:', {
-                isCardValid: isCardValid(),
-                paymentProcessing,
-                hasFreeCoupon: appliedCoupon?.isFree,
-                disabled: (!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing,
-              });
-              if ((!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing) {
-                console.warn('[Payment] Button is disabled, ignoring press');
-                return;
-              }
-              handlePayment().catch((error) => {
-                console.error('[Payment] Unhandled error in handlePayment:', error);
-                setPaymentProcessing(false);
-                setStatusMessage('');
-              });
-            }}
-            onPressIn={() => {
-              console.log('[Payment] Button pressed in - touch detected');
-            }}
-            disabled={(!appliedCoupon?.isFree && !isCardValid()) || paymentProcessing}
-            testID="pay-button"
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            {paymentProcessing ? (
-              <>
-                <ActivityIndicator size="small" color={Colors.white} />
-                <Text style={styles.payButtonText}>{statusMessage || 'Processing...'}</Text>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 size={20} color={Colors.white} />
-                <Text style={styles.payButtonText}>
-                  {appliedCoupon?.isFree
-                    ? 'Activate Free Subscription'
-                    : `Pay ${getFinalPrice().toFixed(2)} JOD`}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {/* Payment Summary */}
+          {!appliedCoupon?.isFree && (
+            <View style={styles.paymentSummary}>
+              <Text style={styles.paymentSummaryTitle}>Payment Summary</Text>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceBreakdownLabel}>Subscription Price:</Text>
+                <Text style={styles.priceBreakdownValue}>{packagePrice.toFixed(2)} JOD</Text>
+              </View>
+              {walletUsed > 0 && (
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceBreakdownLabel}>Wallet Used:</Text>
+                  <Text style={[styles.priceBreakdownValue, styles.walletValue]}>
+                    {walletUsed.toFixed(2)} JOD
+                  </Text>
+                </View>
+              )}
+              {cardAmount > 0 && (
+                <>
+                  <View style={styles.priceRow}>
+                    <Text style={styles.priceBreakdownLabel}>External Payment:</Text>
+                    <Text style={[styles.priceBreakdownValue, styles.cardValue]}>
+                      {cardAmount.toFixed(2)} JOD
+                    </Text>
+                  </View>
+                  <View style={styles.priceRow}>
+                    <Text style={styles.priceBreakdownLabel}>Payment Method:</Text>
+                    <Text style={styles.priceBreakdownValue}>
+                      {paymentMethod === 'apple_pay' ? 'Apple Pay' : 
+                       paymentMethod === 'google_pay' ? 'Google Pay' : 
+                       'Credit / Debit Card'}
+                    </Text>
+                  </View>
+                </>
+              )}
+              {cardAmount === 0 && walletUsed > 0 && (
+                <View style={styles.fullWalletBadge}>
+                  <Text style={styles.fullWalletBadgeText}>✓ Fully paid with wallet</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Card Payment Button - Only show when card method is selected */}
+          {(!appliedCoupon?.isFree && cardAmount > 0 && paymentMethod === 'card') && (
+            <TouchableOpacity
+              style={[
+                styles.payButton,
+                (!isCardValid() || paymentProcessing) && styles.payButtonDisabled,
+              ]}
+              onPress={() => {
+                console.log('[Payment] TouchableOpacity onPress triggered');
+                console.log('[Payment] Button state:', {
+                  isCardValid: isCardValid(),
+                  paymentProcessing,
+                  hasFreeCoupon: appliedCoupon?.isFree,
+                  disabled: (!isCardValid() || paymentProcessing),
+                });
+                if (!isCardValid() || paymentProcessing) {
+                  console.warn('[Payment] Button is disabled, ignoring press');
+                  return;
+                }
+                handlePayment().catch((error) => {
+                  console.error('[Payment] Unhandled error in handlePayment:', error);
+                  setPaymentProcessing(false);
+                  setStatusMessage('');
+                });
+              }}
+              onPressIn={() => {
+                console.log('[Payment] Button pressed in - touch detected');
+              }}
+              disabled={!isCardValid() || paymentProcessing}
+              testID="pay-button"
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              {paymentProcessing ? (
+                <>
+                  <ActivityIndicator size="small" color={Colors.white} />
+                  <Text style={styles.payButtonText}>{statusMessage || 'Processing...'}</Text>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={20} color={Colors.white} />
+                  <Text style={styles.payButtonText}>
+                    Pay {cardAmount.toFixed(2)} JOD{walletUsed > 0 ? ` (${walletUsed.toFixed(2)} JOD from wallet)` : ''}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Wallet-only Payment Button */}
+          {!appliedCoupon?.isFree && cardAmount === 0 && walletUsed > 0 && (
+            <TouchableOpacity
+              style={[
+                styles.payButton,
+                paymentProcessing && styles.payButtonDisabled,
+              ]}
+              onPress={async () => {
+                if (paymentProcessing) return;
+                setPaymentProcessing(true);
+                setStatusMessage('Processing wallet payment...');
+                try {
+                  const orderId = `order-${Date.now()}`;
+                  await payWith3dsMutation.mutateAsync({
+                    userId: user!.id,
+                    tier: tier as any,
+                    duration: parseInt(duration) as any,
+                    orderId,
+                    authenticationTransactionId: '',
+                    currency: 'JOD',
+                    couponCode: appliedCoupon?.coupon?.code || undefined,
+                    useWallet: true,
+                    paymentMethod: 'wallet',
+                  });
+                } catch (error: any) {
+                  setPaymentProcessing(false);
+                  setStatusMessage('');
+                  Alert.alert('Error', error.message || 'Failed to process wallet payment');
+                }
+              }}
+              disabled={paymentProcessing}
+              testID="wallet-pay-button"
+              activeOpacity={0.7}
+            >
+              {paymentProcessing ? (
+                <>
+                  <ActivityIndicator size="small" color={Colors.white} />
+                  <Text style={styles.payButtonText}>{statusMessage || 'Processing...'}</Text>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={20} color={Colors.white} />
+                  <Text style={styles.payButtonText}>
+                    Activate Subscription ({walletUsed.toFixed(2)} JOD from wallet)
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
           {/* Debug info */}
           {__DEV__ && (
@@ -1011,21 +1205,6 @@ export default function PaymentScreen() {
                 }
               }}
             />
-            {showNativeContinueButton && orderId && authTransactionId && (
-              <TouchableOpacity
-                style={styles.nativeContinueButton}
-                onPress={() => {
-                  console.log('[Payment] Native continue button pressed after 3DS challenge');
-                  setChallengeHtml(null);
-                  setShowNativeContinueButton(false);
-                  // Assume successful authentication when user confirms manually
-                  handleFinalizePayment(orderId, authTransactionId, 'Y');
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.nativeContinueButtonText}>I’ve completed verification</Text>
-              </TouchableOpacity>
-            )}
           </View>
         )}
       </View>
@@ -1351,5 +1530,315 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700' as const,
     color: '#92400E',
+  },
+  // Wallet styles
+  walletSection: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  walletHeader: {
+    marginBottom: 12,
+  },
+  walletLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  walletToggle: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+  },
+  toggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.border,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 2,
+  },
+  toggleActive: {
+    backgroundColor: Colors.primary,
+  },
+  toggleIndicator: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Colors.white,
+    alignSelf: 'flex-end' as const,
+  },
+  walletToggleText: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    color: Colors.text,
+  },
+  walletDetails: {
+    marginTop: 12,
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  walletValue: {
+    color: '#16A34A',
+  },
+  cardValue: {
+    color: Colors.primary,
+  },
+  paymentSummary: {
+    marginTop: 20,
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  paymentSummaryTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  fullWalletBadge: {
+    marginTop: 12,
+    backgroundColor: '#D1FAE5',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center' as const,
+  },
+  fullWalletBadgeText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#065F46',
+  },
+  // Payment method selection styles
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 16,
+  },
+  paymentMethodSection: {
+    marginTop: 24,
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  paymentMethodOption: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  paymentMethodOptionSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: '#F3F4F6',
+  },
+  radioButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    marginRight: 12,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: Colors.white,
+  },
+  radioButtonInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.primary,
+  },
+  paymentMethodLabel: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    flex: 1,
+  },
+  applePayBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#000',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  applePayBadgeText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  googlePayBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#4285F4',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  googlePayBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700' as const,
+  },
+  applePayButtonContainer: {
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  applePayButton: {
+    backgroundColor: '#000',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    minHeight: 56,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  applePayButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  googlePayButtonContainer: {
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  googlePayButton: {
+    backgroundColor: '#4285F4',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    minHeight: 56,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  googlePayButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  quickPaymentSection: {
+    marginTop: 24,
+    marginBottom: 24,
+    padding: 20,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  quickPaymentTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: 'center' as const,
+  },
+  // Saved Cards Styles
+  savedCardsSection: {
+    marginTop: 24,
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  savedCardOption: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  savedCardOptionSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: '#F3F4F6',
+  },
+  savedCardInfo: {
+    flex: 1,
+  },
+  savedCardLabel: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  savedCardExpiry: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+  },
+  useNewCardButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.white,
+    alignItems: 'center' as const,
+    marginTop: 8,
+  },
+  useNewCardText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.primary,
+  },
+  saveCardContainer: {
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  saveCardCheckbox: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    marginRight: 12,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: Colors.white,
+  },
+  checkboxChecked: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  checkboxCheckmark: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
+  saveCardLabel: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    color: Colors.text,
   },
 });

@@ -71,7 +71,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/images/favicon.png",
+      "favicon": "./assets/images/favicon2.png",
       "build": {
         "babel": {
           "include": [
@@ -107,7 +107,8 @@
           }
         }
       ],
-      "./plugins/withExpoFirebaseCoreFix"
+      "./plugins/withExpoFirebaseCoreFix",
+      "./plugins/withGooglePay.js"
     ],
     "experiments": {
       "typedRoutes": true

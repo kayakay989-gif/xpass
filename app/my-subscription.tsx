@@ -1,50 +1,16 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
-import { trpc } from '@/lib/trpc';
 import Colors from '@/constants/colors';
 
 export default function MySubscriptionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { subscription, subscriptionQuery } = useApp();
-  
-  const cancelMutation = trpc.subscriptions.cancel.useMutation({
-    onSuccess: () => {
-      Alert.alert('Success', 'Your subscription has been cancelled.');
-      subscriptionQuery?.refetch();
-      router.replace('/(tabs)/home');
-    },
-    onError: (error) => {
-      Alert.alert('Error', error.message || 'Failed to cancel subscription. Please try again.');
-    },
-  });
-
-  const handleCancelSubscription = () => {
-    if (!subscription) return;
-    
-    Alert.alert(
-      'Cancel Subscription',
-      'Are you sure you want to cancel your subscription? You will lose access to all gyms when your current subscription expires.',
-      [
-        { text: 'Keep Subscription', style: 'cancel' },
-        {
-          text: 'Cancel Subscription',
-          style: 'destructive',
-          onPress: () => {
-            cancelMutation.mutate({
-              userId: user?.id || '',
-              subscriptionId: subscription.id,
-            });
-          },
-        },
-      ]
-    );
-  };
+  const { subscription } = useApp();
 
   const goBackOrHome = () => {
     const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
@@ -63,7 +29,7 @@ export default function MySubscriptionScreen() {
                 <ChevronLeft size={22} color={Colors.text} />
               </TouchableOpacity>
               <Image 
-                source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+                source={require('../assets/images/main logo.png')}
                 style={styles.logo}
                 resizeMode="contain"
               />
@@ -118,7 +84,7 @@ export default function MySubscriptionScreen() {
               <ChevronLeft size={22} color={Colors.text} />
             </TouchableOpacity>
             <Image 
-              source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+              source={require('../assets/images/main logo.png')}
               style={styles.logo}
               resizeMode="contain"
             />
@@ -153,38 +119,9 @@ export default function MySubscriptionScreen() {
             <Text style={styles.detailValue}>{getRemainingPasses()}</Text>
           </View>
 
-          <View style={styles.priceCard}>
-            <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Selected</Text>
-              <Text style={styles.priceValue}>Monthly Active</Text>
-            </View>
-
-            <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Subtotal</Text>
-              <Text style={styles.priceValue}>65.00 JOD</Text>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.priceRow}>
-              <Text style={styles.totalLabel}>Total due today</Text>
-              <Text style={styles.totalValue}>65.00 JOD</Text>
-            </View>
-          </View>
-
-          <TouchableOpacity style={styles.upgradeButton}>
-            <Text style={styles.upgradeButtonText}>Upgrade Tier</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.renewalText}>
-            Subscription auto renews on {getExpiryDate()}
+          <Text style={styles.expiryText}>
+            This subscription will expire on {getExpiryDate()}
           </Text>
-
-          <TouchableOpacity onPress={handleCancelSubscription} disabled={cancelMutation.isPending}>
-            <Text style={styles.cancelText}>
-              {cancelMutation.isPending ? 'Cancelling...' : 'Cancel Subscription'}
-            </Text>
-          </TouchableOpacity>
         </ScrollView>
       </View>
     </>
@@ -272,67 +209,11 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: Colors.text,
   },
-  priceCard: {
-    backgroundColor: Colors.black,
-    borderRadius: 16,
-    padding: 24,
-    marginTop: 24,
-    marginBottom: 20,
-  },
-  priceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  priceLabel: {
-    fontSize: 16,
-    color: Colors.white,
-    fontWeight: '500' as const,
-  },
-  priceValue: {
-    fontSize: 16,
-    color: Colors.white,
-    fontWeight: '500' as const,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginVertical: 8,
-  },
-  totalLabel: {
-    fontSize: 18,
-    color: Colors.white,
-    fontWeight: '700' as const,
-  },
-  totalValue: {
-    fontSize: 18,
-    color: Colors.white,
-    fontWeight: '700' as const,
-  },
-  upgradeButton: {
-    backgroundColor: '#EF4444',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  upgradeButtonText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: Colors.white,
-  },
-  renewalText: {
+  expiryText: {
     fontSize: 12,
     color: Colors.textSecondary,
     textAlign: 'center',
-    marginBottom: 8,
-  },
-  cancelText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    textDecorationLine: 'underline',
+    marginTop: 16,
   },
   content: {
     flex: 1,

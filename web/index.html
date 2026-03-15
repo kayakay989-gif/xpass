@@ -5,15 +5,15 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
   
-  <!-- Content Security Policy - Allow unsafe-eval for 3DS payment gateway -->
+  <!-- Content Security Policy - Allow unsafe-eval for 3DS payment gateway and Google Pay -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.mastercard.com;
+    script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.mastercard.com https://pay.google.com;
     style-src 'self' 'unsafe-inline';
     img-src 'self' data: https:;
     font-src 'self' data:;
-    connect-src 'self' https://*.mastercard.com wss:;
-    frame-src 'self' https://*.mastercard.com;
+    connect-src 'self' https://*.mastercard.com https://pay.google.com wss:;
+    frame-src 'self' https://*.mastercard.com https://pay.google.com;
     frame-ancestors 'self';
     form-action 'self' https://*.mastercard.com;
   ">

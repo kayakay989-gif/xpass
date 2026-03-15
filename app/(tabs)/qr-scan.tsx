@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 
@@ -11,9 +11,17 @@ export default function QRScanScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState<boolean>(false);
+  const scanLockedRef = useRef(false);
   const { checkIn } = useApp();
   const { isGuest } = useAuth();
   const { subscription } = useApp();
+
+  useEffect(() => {
+    // Unlock scanner when screen unmounts
+    return () => {
+      scanLockedRef.current = false;
+    };
+  }, []);
 
   if (isGuest || !subscription) {
     return (
@@ -55,8 +63,10 @@ export default function QRScanScreen() {
   }
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
-    if (scanned) return;
+    // Hard lock to prevent multiple executions from rapid duplicate events
+    if (scanLockedRef.current || scanned) return;
 
+    scanLockedRef.current = true;
     setScanned(true);
 
     console.log('[QRScan] QR code scanned (tabs):', data);
@@ -85,16 +95,17 @@ export default function QRScanScreen() {
     if (checkInResult.success) {
       router.push({
         pathname: '/qr-success',
-        params: { message: checkInResult.message || 'Check in Successful' },
+        params: { message: checkInResult.message || 'Check-in successful!' },
       } as any);
     } else {
+      // Allow retry only when the operation failed
+      scanLockedRef.current = false;
+      setScanned(false);
       router.push({
         pathname: '/qr-error',
-        params: { message: checkInResult.message || 'Check in unsuccessful' },
+        params: { message: checkInResult.message || 'Check-in unsuccessful' },
       } as any);
     }
-
-    setScanned(false);
   };
 
   return (

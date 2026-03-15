@@ -1,11 +1,11 @@
-import { StyleSheet, Text, View, TouchableOpacity, Image, ImageBackground } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ImageBackground } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Stack } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Local splash background asset (as provided in assets/images)
-const splashBackground = require('../assets/images/splash background.png');
+// The logo is already embedded in this image
+const splashBackground = require('../assets/images/splash.jpeg');
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -19,47 +19,34 @@ export default function SplashScreen() {
           source={splashBackground}
           resizeMode="cover"
           style={styles.backgroundImage}
-        />
+        >
+          <View style={styles.content}>
+            {/* Logo is already embedded in the splash image, no separate logo needed */}
+            
+            <View style={styles.buttonsContainer}>
+              <TouchableOpacity 
+                style={styles.loginButton}
+                onPress={() => router.push('/login')}
+              >
+                <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  Login/Register
+                </Text>
+              </TouchableOpacity>
 
-        {/* Subtle overlay to match the dark gradient at the bottom */}
-        <LinearGradient
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.75)']}
-          locations={[0.2, 0.55, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-
-        <View style={styles.content}>
-          <View style={styles.logoContainer}>
-            <Image 
-              source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }} 
-              style={styles.logo}
-              resizeMode="contain"
-            />
+              <TouchableOpacity 
+                style={styles.discoverButton}
+                onPress={() => {
+                  continueAsGuest();
+                  router.replace('/(tabs)/home');
+                }}
+              >
+                <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  Discover
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-
-          <View style={styles.buttonsContainer}>
-            <TouchableOpacity 
-              style={styles.loginButton}
-              onPress={() => router.push('/login')}
-            >
-              <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                Login/Register
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.discoverButton}
-              onPress={() => {
-                continueAsGuest();
-                router.replace('/(tabs)/home');
-              }}
-            >
-              <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                Discover
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ImageBackground>
       </View>
     </>
   );
@@ -70,39 +57,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backgroundImage: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
     width: '100%',
     height: '100%',
   },
   content: {
     flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     paddingHorizontal: 24,
-    paddingTop: 80,
     paddingBottom: 40,
-  },
-  logoContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logo: {
-    width: 150,
-    height: 150,
-    marginBottom: 16,
-  },
-  logoText: {
-    fontSize: 40,
-    fontWeight: '700' as const,
-    color: '#DC143C',
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  tagline: {
-    fontSize: 11,
-    fontWeight: '500' as const,
-    color: '#DC143C',
-    letterSpacing: 1.5,
   },
   buttonsContainer: {
     flexDirection: 'row',

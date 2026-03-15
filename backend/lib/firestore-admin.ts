@@ -1,5 +1,5 @@
 import { adminDb } from './firebase-admin';
-import { User, Subscription, Gym, CheckIn, GymOwner, Coupon, Payout } from '@/types';
+import { User, Subscription, Gym, CheckIn, GymOwner, Coupon, Payout, WalletTransaction } from '@/types';
 import admin from 'firebase-admin';
 
 // Helper to convert Firestore Timestamp to Date
@@ -25,6 +25,19 @@ export const firestoreUsers = {
     const data = userDoc.data();
     if (!data) return null;
     
+    // Convert savedCards from Firestore format
+    const savedCards = data.savedCards ? data.savedCards.map((card: any) => ({
+      id: card.id || '',
+      token: card.token || '',
+      last4: card.last4 || '',
+      brand: card.brand || '',
+      expiryMonth: card.expiryMonth || '',
+      expiryYear: card.expiryYear || '',
+      cardholderName: card.cardholderName || '',
+      isDefault: card.isDefault || false,
+      createdAt: timestampToDate(card.createdAt) || new Date(),
+    })) : undefined;
+
     return {
       id: userDoc.id,
       name: data.name || '',
@@ -33,6 +46,7 @@ export const firestoreUsers = {
       referralCode: data.referralCode || '',
       walletBalance: data.walletBalance || 0,
       createdAt: timestampToDate(data.createdAt),
+      savedCards: savedCards,
     };
   },
 
@@ -47,6 +61,20 @@ export const firestoreUsers = {
     const snapshot = await adminDb.collection('users').get();
     return snapshot.docs.map(doc => {
       const data = doc.data();
+      
+      // Convert savedCards from Firestore format
+      const savedCards = data.savedCards ? data.savedCards.map((card: any) => ({
+        id: card.id || '',
+        token: card.token || '',
+        last4: card.last4 || '',
+        brand: card.brand || '',
+        expiryMonth: card.expiryMonth || '',
+        expiryYear: card.expiryYear || '',
+        cardholderName: card.cardholderName || '',
+        isDefault: card.isDefault || false,
+        createdAt: timestampToDate(card.createdAt) || new Date(),
+      })) : undefined;
+
       return {
         id: doc.id,
         name: data.name || '',
@@ -55,6 +83,7 @@ export const firestoreUsers = {
         referralCode: data.referralCode || '',
         walletBalance: data.walletBalance || 0,
         createdAt: timestampToDate(data.createdAt),
+        savedCards: savedCards,
       };
     });
   },
@@ -79,6 +108,10 @@ export const firestoreSubscriptions = {
       visitsUsed: data.visitsUsed || 0,
       maxVisitsPerMonth: data.maxVisitsPerMonth,
       isActive: data.isActive,
+      status: data.status ?? null,
+      paymentStatus: data.paymentStatus ?? null,
+      autoRenew: data.autoRenew ?? null,
+      createdAt: data.createdAt ? timestampToDate(data.createdAt) : undefined,
     };
   },
 
@@ -114,6 +147,10 @@ export const firestoreSubscriptions = {
       visitsUsed: data.visitsUsed || 0,
       maxVisitsPerMonth: data.maxVisitsPerMonth,
       isActive: data.isActive,
+      status: data.status ?? null,
+      paymentStatus: data.paymentStatus ?? null,
+      autoRenew: data.autoRenew ?? null,
+      createdAt: data.createdAt ? timestampToDate(data.createdAt) : undefined,
     };
   },
 
@@ -169,6 +206,10 @@ export const firestoreSubscriptions = {
         visitsUsed: data.visitsUsed || 0,
         maxVisitsPerMonth: data.maxVisitsPerMonth,
         isActive: data.isActive,
+        status: data.status ?? null,
+        paymentStatus: data.paymentStatus ?? null,
+        autoRenew: data.autoRenew ?? null,
+        createdAt: data.createdAt ? timestampToDate(data.createdAt) : undefined,
       };
     });
   },
@@ -438,6 +479,15 @@ export const firestorePayments = {
       .get();
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
   },
+
+  async listAll(): Promise<any[]> {
+    const snapshot = await adminDb
+      .collection('payments')
+      .where('status', '==', 'succeeded')
+      .get();
+
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  },
 };
 
 // Coupons collection
@@ -634,6 +684,40 @@ export const firestorePayouts = {
   },
 };
 
+// Wallet Transactions collection
+export const firestoreWalletTransactions = {
+  async create(transaction: Omit<WalletTransaction, 'id'>): Promise<string> {
+    const ref = adminDb.collection('walletTransactions').doc();
+    await ref.set({
+      ...transaction,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return ref.id;
+  },
+
+  async getByUserId(userId: string): Promise<WalletTransaction[]> {
+    const snapshot = await adminDb
+      .collection('walletTransactions')
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .get();
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        userId: data.userId,
+        type: data.type,
+        amount: data.amount,
+        description: data.description,
+        relatedUserId: data.relatedUserId,
+        subscriptionId: data.subscriptionId,
+        createdAt: timestampToDate(data.createdAt),
+      };
+    });
+  },
+};
+
 // Export all services
 export default {
   users: firestoreUsers,
@@ -643,5 +727,6 @@ export default {
   gymOwners: firestoreGymOwners,
   payments: firestorePayments,
   coupons: firestoreCoupons,
+  walletTransactions: firestoreWalletTransactions,
 };
 

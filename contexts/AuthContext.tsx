@@ -42,6 +42,19 @@ function generateReferralCode(): string {
 
 // Convert Firestore user data to User type
 function firestoreDataToUser(id: string, data: any): User {
+  // Convert savedCards from Firestore format
+  const savedCards = data.savedCards ? data.savedCards.map((card: any) => ({
+    id: card.id || '',
+    token: card.token || '',
+    last4: card.last4 || '',
+    brand: card.brand || '',
+    expiryMonth: card.expiryMonth || '',
+    expiryYear: card.expiryYear || '',
+    cardholderName: card.cardholderName || '',
+    isDefault: card.isDefault || false,
+    createdAt: card.createdAt?.toDate() || new Date(),
+  })) : undefined;
+
   return {
     id,
     name: data.name || '',
@@ -54,6 +67,7 @@ function firestoreDataToUser(id: string, data: any): User {
     createdAt: data.createdAt?.toDate() || new Date(),
     phoneVerified: data.phoneVerified === true,
     phoneVerifiedAt: data.phoneVerifiedAt?.toDate() || undefined,
+    savedCards: savedCards,
   };
 }
 

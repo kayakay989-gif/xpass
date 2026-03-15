@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { X, CheckCircle, XCircle } from 'lucide-react-native';
@@ -11,6 +11,7 @@ export default function QRScannerScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState<boolean>(false);
+  const scanLockedRef = useRef(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const { checkIn, subscription } = useApp();
   const { isGuest } = useAuth();
@@ -34,6 +35,13 @@ export default function QRScannerScreen() {
     );
   }
 
+  useEffect(() => {
+    return () => {
+      // Unlock scanner on unmount
+      scanLockedRef.current = false;
+    };
+  }, []);
+
   if (!permission) {
     return <View style={styles.container} />;
   }
@@ -55,8 +63,10 @@ export default function QRScannerScreen() {
   }
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
-    if (scanned) return;
+    // Prevent multiple executions from rapid duplicate events
+    if (scanLockedRef.current || scanned) return;
     
+    scanLockedRef.current = true;
     setScanned(true);
     
     console.log('[QRScanner] QR code scanned:', data);
@@ -95,10 +105,12 @@ export default function QRScannerScreen() {
         if (checkInResult.success) {
           router.back();
         } else {
+          // Allow retry only on failure
+          scanLockedRef.current = false;
           setScanned(false);
           setResult(null);
         }
-      }, 3000);
+      }, 2000);
     } catch (error: any) {
       console.error('[QRScanner] Check-in error:', error);
       setResult({ 
@@ -106,9 +118,10 @@ export default function QRScannerScreen() {
         message: error?.message || 'Check-in failed. Please try again.' 
       });
       setTimeout(() => {
+        scanLockedRef.current = false;
         setScanned(false);
         setResult(null);
-      }, 3000);
+      }, 2000);
     }
   };
 

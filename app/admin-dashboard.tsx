@@ -52,7 +52,7 @@ import { trpc } from '@/lib/trpc';
 import { TIER_COLORS as SHARED_TIER_COLORS } from '@/constants/tier-colors';
 import DatePicker from '@/components/DatePicker';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'revenue';
 
 // Use shared tier colors for consistency
 const TIER_COLORS = {
@@ -592,11 +592,19 @@ export default function AdminDashboardScreen() {
   const [users, setUsers] = useState<any[]>([]);
   const [checkIns, setCheckIns] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [userStatusFilter, setUserStatusFilter] = useState<'active' | 'inactive'>('active');
   const [checkInsStartDateFilter, setCheckInsStartDateFilter] = useState<Date | null>(null);
   const [checkInsEndDateFilter, setCheckInsEndDateFilter] = useState<Date | null>(null);
+
+  // Revenue analytics filters
+  const [revenueRange, setRevenueRange] = useState<
+    'THIS_MONTH' | 'LAST_MONTH' | 'LAST_3_MONTHS' | 'LAST_12_MONTHS' | 'ALL_TIME' | 'CUSTOM'
+  >('THIS_MONTH');
+  const [revenueStartDate, setRevenueStartDate] = useState<Date | null>(null);
+  const [revenueEndDate, setRevenueEndDate] = useState<Date | null>(null);
 
   // Admin payouts (pending / paid)
   const payoutsQuery = trpc.admin.payouts.getAll.useQuery(undefined, {
@@ -612,6 +620,179 @@ export default function AdminDashboardScreen() {
 
   const pendingPayouts = payoutsQuery.data?.pending || [];
   const paidPayouts = payoutsQuery.data?.paid || [];
+
+  // Revenue analytics derived from already-loaded subscriptions data
+  const revenueMetrics = useMemo(() => {
+    if (!subscriptions || subscriptions.length === 0) {
+      return {
+        thisMonthRevenue: 0,
+        lastMonthRevenue: 0,
+        allTimeRevenue: 0,
+        activeSubscribers: 0,
+        byMonth: [] as { monthKey: string; label: string; amount: number }[],
+        payments: [] as any[],
+      };
+    }
+
+    const now = new Date();
+    const startOfMonth = (year: number, monthIndex: number) =>
+      new Date(year, monthIndex, 1, 0, 0, 0, 0);
+    const endOfMonth = (year: number, monthIndex: number) =>
+      new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+    const toDate = (val: any): Date | null => {
+      if (!val) return null;
+      if (val instanceof Date) return val;
+      if (val.toDate) return val.toDate();
+      if (typeof val === 'string') return new Date(val);
+      if (val._seconds) return new Date(val._seconds * 1000);
+      return null;
+    };
+
+    const enriched = subscriptions.map((sub: any) => {
+      const createdAt = toDate(sub.createdAt) || toDate(sub.startDate);
+      const endDate = toDate(sub.endDate);
+      return {
+        ...sub,
+        createdAt,
+        endDate,
+      };
+    });
+
+    // Active subscribers: use same logic as stats (isActive flag + not expired)
+    const activeSubscribers = enriched.filter((sub: any) => {
+      if (!sub.isActive) return false;
+      if (!sub.endDate) return true;
+      return sub.endDate.getTime() >= now.getTime();
+    }).length;
+
+    const isPaid = (sub: any) => {
+      const paymentStatus = (sub.paymentStatus || '').toLowerCase();
+      const status = (sub.status || '').toLowerCase();
+      const amount = sub.totalPrice || 0;
+      return amount > 0 && (paymentStatus === 'paid' || status === 'active');
+    };
+
+    const paidSubs = enriched.filter((sub: any) => sub.createdAt && isPaid(sub));
+
+    const sameMonth = (d: Date, base: Date) =>
+      d.getFullYear() === base.getFullYear() && d.getMonth() === base.getMonth();
+
+    const thisMonthRevenue = paidSubs
+      .filter((s: any) => sameMonth(s.createdAt, now))
+      .reduce((sum: number, s: any) => sum + (s.totalPrice || 0), 0);
+
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthRevenue = paidSubs
+      .filter((s: any) => sameMonth(s.createdAt, lastMonthDate))
+      .reduce((sum: number, s: any) => sum + (s.totalPrice || 0), 0);
+
+    const allTimeRevenue = paidSubs.reduce(
+      (sum: number, s: any) => sum + (s.totalPrice || 0),
+      0
+    );
+
+    // Range filtering for trend + details
+    let rangeStart: Date | null = null;
+    let rangeEnd: Date | null = null;
+    const year = now.getFullYear();
+    const month = now.getMonth();
+
+    switch (revenueRange) {
+      case 'THIS_MONTH':
+        rangeStart = startOfMonth(year, month);
+        rangeEnd = endOfMonth(year, month);
+        break;
+      case 'LAST_MONTH': {
+        const last = new Date(year, month - 1, 1);
+        rangeStart = startOfMonth(last.getFullYear(), last.getMonth());
+        rangeEnd = endOfMonth(last.getFullYear(), last.getMonth());
+        break;
+      }
+      case 'LAST_3_MONTHS': {
+        const start = new Date(year, month - 2, 1);
+        rangeStart = startOfMonth(start.getFullYear(), start.getMonth());
+        rangeEnd = endOfMonth(year, month);
+        break;
+      }
+      case 'LAST_12_MONTHS': {
+        const start = new Date(year, month - 11, 1);
+        rangeStart = startOfMonth(start.getFullYear(), start.getMonth());
+        rangeEnd = endOfMonth(year, month);
+        break;
+      }
+      case 'ALL_TIME':
+        rangeStart = null;
+        rangeEnd = null;
+        break;
+      case 'CUSTOM':
+        if (revenueStartDate) {
+          const s = new Date(revenueStartDate);
+          s.setHours(0, 0, 0, 0);
+          rangeStart = s;
+        }
+        if (revenueEndDate) {
+          const e = new Date(revenueEndDate);
+          e.setHours(23, 59, 59, 999);
+          rangeEnd = e;
+        }
+        break;
+      default:
+        break;
+    }
+
+    const inRange = paidSubs.filter((sub: any) => {
+      if (!sub.createdAt) return false;
+      if (rangeStart && sub.createdAt < rangeStart) return false;
+      if (rangeEnd && sub.createdAt > rangeEnd) return false;
+      return true;
+    });
+
+    // Group by month for chart
+    const monthBuckets: Record<string, number> = {};
+    inRange.forEach((sub: any) => {
+      const d: Date = sub.createdAt;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthBuckets[key] = (monthBuckets[key] || 0) + (sub.totalPrice || 0);
+    });
+
+    const byMonth = Object.entries(monthBuckets)
+      .map(([monthKey, amount]) => {
+        const [y, m] = monthKey.split('-').map((v) => parseInt(v, 10));
+        const label = new Date(y, m - 1, 1).toLocaleDateString('en-US', {
+          month: 'short',
+          year: 'numeric',
+        });
+        return { monthKey, label, amount };
+      })
+      .sort((a, b) => (a.monthKey < b.monthKey ? -1 : 1));
+
+    // Details table payments
+    const payments = inRange
+      .slice()
+      .sort(
+        (a: any, b: any) =>
+          (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime()
+      )
+      .map((sub: any) => ({
+        id: sub.id,
+        userId: sub.userId,
+        tier: sub.tier,
+        duration: sub.duration,
+        amount: sub.totalPrice || 0,
+        currency: 'JOD',
+        createdAt: sub.createdAt ? sub.createdAt.toISOString() : null,
+      }));
+
+    return {
+      thisMonthRevenue,
+      lastMonthRevenue,
+      allTimeRevenue,
+      activeSubscribers,
+      byMonth,
+      payments,
+    };
+  }, [subscriptions, revenueRange, revenueStartDate, revenueEndDate]);
 
   const formatPayoutMonth = (monthKey: string): string => {
     const [year, month] = monthKey.split('-').map(Number);
@@ -670,6 +851,7 @@ export default function AdminDashboardScreen() {
       setUsers(usersWithSubs);
       
       setCheckIns(checkInsData);
+      setSubscriptions(subscriptionsData);
 
       // Calculate stats
       const today = new Date();
@@ -1865,7 +2047,7 @@ export default function AdminDashboardScreen() {
       <View style={styles.topBar}>
         <View style={styles.brandRow}>
           <Image
-            source={{ uri: 'https://pub-e001eb4506b145aa938b5d3badbff6a5.r2.dev/attachments/t5u7px23rxplxx8gfxveq' }}
+            source={require('../assets/images/main logo.png')}
             style={styles.brandLogo}
             resizeMode="contain"
           />
@@ -1921,6 +2103,19 @@ export default function AdminDashboardScreen() {
               >
                 <Text style={styles.statLabelMinimal}>Total Gyms</Text>
                 <Text style={styles.statValueMinimal}>{stats?.totalGyms || 0}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.statsGrid2x2, { marginTop: 24 }]}>
+              <TouchableOpacity
+                style={styles.statCardMinimal}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('revenue')}
+              >
+                <Text style={styles.statLabelMinimal}>Revenue This Month</Text>
+                <Text style={styles.statValueMinimal}>
+                  {`JOD ${revenueMetrics.thisMonthRevenue.toFixed(0)}`}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -2658,6 +2853,169 @@ export default function AdminDashboardScreen() {
           </View>
         )}
 
+        {activeTab === 'revenue' && (
+          <View style={styles.content}>
+            <Text style={styles.pageTitle}>Revenue</Text>
+
+            <View style={styles.revenueFilterRow}>
+              {[
+                { key: 'THIS_MONTH', label: 'This Month' },
+                { key: 'LAST_MONTH', label: 'Last Month' },
+                { key: 'LAST_3_MONTHS', label: 'Last 3 Months' },
+                { key: 'LAST_12_MONTHS', label: 'Last 12 Months' },
+                { key: 'ALL_TIME', label: 'All Time' },
+                { key: 'CUSTOM', label: 'Custom' },
+              ].map((opt) => (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.userFilterChip,
+                    revenueRange === opt.key && styles.userFilterChipActive,
+                  ]}
+                  activeOpacity={0.85}
+                  onPress={() => setRevenueRange(opt.key as any)}
+                >
+                  <Text
+                    style={[
+                      styles.userFilterChipText,
+                      revenueRange === opt.key && styles.userFilterChipTextActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {revenueRange === 'CUSTOM' && (
+              <View style={styles.dateRangeRow}>
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={styles.dateFilterLabel}>From</Text>
+                  <DatePicker
+                    date={revenueStartDate}
+                    onChange={setRevenueStartDate}
+                    placeholder="Select start date"
+                  />
+                </View>
+                <View style={{ flex: 1, marginLeft: 8 }}>
+                  <Text style={styles.dateFilterLabel}>To</Text>
+                  <DatePicker
+                    date={revenueEndDate}
+                    onChange={setRevenueEndDate}
+                    placeholder="Select end date"
+                  />
+                </View>
+              </View>
+            )}
+
+            <View style={styles.statsGrid2x2}>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>This Month</Text>
+                <Text style={styles.statValueMinimal}>
+                  {`JOD ${revenueMetrics.thisMonthRevenue.toFixed(0)}`}
+                </Text>
+              </View>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>Last Month</Text>
+                <Text style={styles.statValueMinimal}>
+                  {`JOD ${revenueMetrics.lastMonthRevenue.toFixed(0)}`}
+                </Text>
+              </View>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>All Time Revenue</Text>
+                <Text style={styles.statValueMinimal}>
+                  {`JOD ${revenueMetrics.allTimeRevenue.toFixed(0)}`}
+                </Text>
+              </View>
+              <View style={styles.statCardMinimal}>
+                <Text style={styles.statLabelMinimal}>Active Subscribers</Text>
+                <Text style={styles.statValueMinimal}>
+                  {revenueMetrics.activeSubscribers}
+                </Text>
+              </View>
+            </View>
+
+            {/* Simple revenue chart */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Revenue Trend</Text>
+              {revenueMetrics.byMonth.length === 0 ? (
+                <Text style={styles.emptyStateText}>No revenue data for this period.</Text>
+              ) : (
+                <View style={{ marginTop: 12 }}>
+                  {revenueMetrics.byMonth.map((m) => {
+                    const maxAmount = Math.max(
+                      ...revenueMetrics.byMonth.map((x) => x.amount || 0),
+                    );
+                    const widthPercent =
+                      maxAmount > 0 ? Math.max(5, (m.amount / maxAmount) * 100) : 0;
+                    return (
+                      <View key={m.monthKey} style={{ marginBottom: 8 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={styles.revenueChartLabel}>{m.label}</Text>
+                          <Text style={styles.revenueChartValue}>
+                            {`JOD ${m.amount.toFixed(0)}`}
+                          </Text>
+                        </View>
+                        <View style={styles.revenueChartBarBackground}>
+                          <View
+                            style={[
+                              styles.revenueChartBarFill,
+                              { width: `${widthPercent}%` },
+                            ]}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            {/* Revenue table */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Revenue Details</Text>
+
+              {revenueMetrics.payments.length === 0 ? (
+                <Text style={styles.emptyStateText}>No payments found for this period.</Text>
+              ) : (
+                revenueMetrics.payments.map((p) => {
+                  const user = users.find((u: any) => u.id === p.userId);
+                  const date = p.createdAt
+                    ? new Date(p.createdAt).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })
+                    : '-';
+                  const plan = `${(p.tier || '').toString().toUpperCase()} ${p.duration || ''}mo`;
+                  return (
+                    <View key={p.id} style={styles.revenueRow}>
+                      <View style={{ flex: 1.4 }}>
+                        <Text style={styles.revenueRowPrimary}>{date}</Text>
+                      </View>
+                      <View style={{ flex: 2 }}>
+                        <Text style={styles.revenueRowPrimary}>{user?.name || 'Unknown'}</Text>
+                        <Text style={styles.revenueRowSecondary}>{user?.email || ''}</Text>
+                      </View>
+                      <View style={{ flex: 1.8 }}>
+                        <Text style={styles.revenueRowPrimary}>{plan}</Text>
+                      </View>
+                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                        <Text style={styles.revenueRowPrimary}>
+                          {`JOD ${(p.amount || 0).toFixed(0)}`}
+                        </Text>
+                        <Text style={styles.revenueRowSecondary}>
+                          {p.paymentMethod === 'coupon' ? 'Coupon' : 'Card'}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          </View>
+        )}
+
         {showCouponsView && (
           <CouponsManagementSection onClose={() => setShowCouponsView(false)} />
         )}
@@ -2726,6 +3084,19 @@ export default function AdminDashboardScreen() {
           </View>
           <Text style={[styles.bottomTabLabel, activeTab === 'payouts' && styles.bottomTabLabelActive]}>
             Payouts
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.bottomTabItem, activeTab === 'revenue' && styles.bottomTabItemActive]}
+          onPress={() => setActiveTab('revenue')}
+          activeOpacity={0.85}
+        >
+          <View style={[styles.bottomTabIconWrap, activeTab === 'revenue' && styles.bottomTabIconWrapActive]}>
+            <TrendingUp size={20} color={activeTab === 'revenue' ? '#FFFFFF' : '#111827'} />
+          </View>
+          <Text style={[styles.bottomTabLabel, activeTab === 'revenue' && styles.bottomTabLabelActive]}>
+            Revenue
           </Text>
         </TouchableOpacity>
       </View>
@@ -5697,6 +6068,53 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600' as const,
     color: '#DC2626',
+  },
+  // Revenue analytics styles
+  revenueFilterRow: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  revenueChartLabel: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '500' as const,
+  },
+  revenueChartValue: {
+    fontSize: 12,
+    color: '#111827',
+    fontWeight: '600' as const,
+  },
+  revenueChartBarBackground: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+    marginTop: 4,
+    overflow: 'hidden' as const,
+  },
+  revenueChartBarFill: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#E31E24',
+  },
+  revenueRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  revenueRowPrimary: {
+    fontSize: 13,
+    color: '#111827',
+    fontWeight: '500' as const,
+  },
+  revenueRowSecondary: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 2,
   },
   checkboxRow: {
     flexDirection: 'row' as const,

@@ -390,3 +390,97 @@ export async function payWithAuthentication(params: {
   return putToGateway(orderId, paymentTransactionId, payload);
 }
 
+/**
+ * Pay with payment token (Apple Pay / Google Pay)
+ */
+export async function payWithToken(params: {
+  orderId: string;
+  paymentTransactionId: string;
+  paymentToken: string;
+  amount: number;
+  currency: string;
+  reference?: string;
+}) {
+  const {
+    orderId,
+    paymentTransactionId,
+    paymentToken,
+    amount,
+    currency,
+    reference,
+  } = params;
+
+  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+
+  const payload: Record<string, any> = {
+    apiOperation: 'PAY',
+    order: {
+      amount: amountStr,
+      currency,
+      reference: reference || orderId,
+    },
+    sourceOfFunds: {
+      type: 'CARD',
+      provided: {
+        card: {
+          token: paymentToken,
+        },
+      },
+    },
+    transaction: {
+      reference: reference || orderId,
+    },
+  };
+
+  return putToGateway(orderId, paymentTransactionId, payload);
+}
+
+/**
+ * Pay with card details (simplified - for direct card payments)
+ * Note: In production, use 3DS flow for card payments
+ */
+export async function payWithCard(params: {
+  orderId: string;
+  paymentTransactionId: string;
+  card: CardDetails;
+  amount: number;
+  currency: string;
+  reference?: string;
+}) {
+  const {
+    orderId,
+    paymentTransactionId,
+    card,
+    amount,
+    currency,
+    reference,
+  } = params;
+
+  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+
+  const payload: Record<string, any> = {
+    apiOperation: 'PAY',
+    order: {
+      amount: amountStr,
+      currency,
+      reference: reference || orderId,
+    },
+    sourceOfFunds: {
+      type: 'CARD',
+      provided: {
+        card: {
+          number: card.number,
+          expiry: {
+            month: card.expiryMonth,
+            year: card.expiryYear,
+          },
+        },
+      },
+    },
+    transaction: {
+      reference: reference || orderId,
+    },
+  };
+
+  return putToGateway(orderId, paymentTransactionId, payload);
+}

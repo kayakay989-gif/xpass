@@ -2,6 +2,18 @@ export type SubscriptionTier = 'silver' | 'gold' | 'diamond' | 'elite';
 export type SubscriptionDuration = 1 | 3 | 6 | 9 | 12;
 export type GymCategory = 'standard' | 'premium' | 'diamond' | 'elite';
 
+export interface SavedCard {
+  id: string; // Unique ID for this saved card
+  token: string; // MPGS card token (never store raw card numbers)
+  last4: string; // Last 4 digits of card
+  brand?: string; // Card brand (VISA, MASTERCARD, etc.)
+  expiryMonth?: string; // Expiry month (MM)
+  expiryYear?: string; // Expiry year (YY)
+  cardholderName?: string; // Cardholder name
+  isDefault?: boolean; // Whether this is the default card
+  createdAt: Date; // When the card was saved
+}
+
 export interface User {
   id: string;
   name: string;
@@ -18,6 +30,7 @@ export interface User {
   createdAt: Date;
   phoneVerified?: boolean;
   phoneVerifiedAt?: Date;
+  savedCards?: SavedCard[]; // Saved payment cards (Version 1 feature)
 }
 
 export interface Subscription {
@@ -32,6 +45,11 @@ export interface Subscription {
   visitsUsed: number;
   maxVisitsPerMonth: number;
   isActive: boolean;
+  // Optional lifecycle / billing metadata (for admin analytics)
+  status?: string | null; // e.g. "active", "active_until_expiry"
+  paymentStatus?: string | null; // e.g. "paid", "pending"
+  autoRenew?: boolean | null;
+  createdAt?: Date;
 }
 
 export interface Gym {
@@ -102,6 +120,13 @@ export interface Payment {
   duration: SubscriptionDuration;
   createdAt: Date;
   completedAt?: Date;
+  // Wallet payment fields
+  walletUsed?: number; // Amount paid from wallet
+  cardAmount?: number; // Amount paid via card (deprecated, use externalPaymentAmount)
+  totalAmount?: number; // Total amount (walletUsed + cardAmount)
+  // Payment method fields
+  paymentMethod?: 'card' | 'apple_pay' | 'google_pay' | 'wallet'; // Payment method used
+  externalPaymentAmount?: number; // Amount paid via external payment method (Apple Pay, Google Pay, or Card)
 }
 
 export interface GymOwner {
@@ -143,7 +168,7 @@ export interface Payout {
   createdAt: Date;
 }
 
-export type WalletTransactionType = 'referral_reward' | 'payment' | 'refund' | 'adjustment';
+export type WalletTransactionType = 'referral_reward' | 'payment' | 'refund' | 'adjustment' | 'subscription_payment';
 
 export interface WalletTransaction {
   id: string;
@@ -152,6 +177,7 @@ export interface WalletTransaction {
   amount: number; // Positive for credit, negative for debit
   description: string;
   relatedUserId?: string; // For referral rewards, the referred user's ID
+  subscriptionId?: string; // For subscription payments, the subscription ID
   createdAt: Date;
 }
 
