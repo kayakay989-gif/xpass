@@ -159,6 +159,19 @@ export default protectedProcedure
           cvvPreview: input.cvv ? `${input.cvv.substring(0, 1)}**` : 'missing',
         });
 
+        // Validate CVV is provided and valid (required for all card payments)
+        if (!input.cvv || typeof input.cvv !== 'string' || input.cvv.trim().length < 3) {
+          console.error('[Checkout] CVV validation failed:', {
+            hasCvv: !!input.cvv,
+            cvvType: typeof input.cvv,
+            cvvLength: input.cvv ? input.cvv.length : 0,
+            cvvValue: input.cvv ? `[${input.cvv}]` : 'undefined',
+          });
+          throw new Error('CVV is required for card payment');
+        }
+
+        const cvvValue = input.cvv.trim();
+
         // Handle saved card or new card
         if (input.savedCardId) {
           // Use saved card token
@@ -167,17 +180,13 @@ export default protectedProcedure
             throw new Error('Saved card not found or invalid');
           }
 
-          // CVV is still required for saved card payments
-          if (!input.cvv || input.cvv.trim().length < 3) {
-            throw new Error('CVV is required for saved card payment');
-          }
-
           // Charge via saved card token (CVV still required for security)
+          console.log('[Checkout] Using saved card with CVV length:', cvvValue.length);
           gatewayResponse = await payWithToken({
             orderId,
             paymentTransactionId,
             paymentToken: savedCard.token,
-            securityCode: input.cvv.trim(), // CVV required even for tokenized cards
+            securityCode: cvvValue, // Map frontend 'cvv' to Mastercard 'securityCode'
             amount: remainingAmount,
             currency,
           });
@@ -187,19 +196,8 @@ export default protectedProcedure
             throw new Error('Card details are required for card payment');
           }
 
-          // Validate CVV is provided and not empty
-          if (!input.cvv || input.cvv.trim().length < 3) {
-            console.error('[Checkout] CVV validation failed:', {
-              hasCvv: !!input.cvv,
-              cvvType: typeof input.cvv,
-              cvvLength: input.cvv ? input.cvv.length : 0,
-              cvvValue: input.cvv ? `[${input.cvv}]` : 'undefined',
-            });
-            throw new Error('CVV is required for card payment');
-          }
-
           // Charge via card (simplified - in production, use 3DS flow)
-          console.log('[Checkout] Calling payWithCard with CVV length:', input.cvv.trim().length);
+          console.log('[Checkout] Calling payWithCard with CVV length:', cvvValue.length);
           gatewayResponse = await payWithCard({
             orderId,
             paymentTransactionId,
@@ -208,7 +206,7 @@ export default protectedProcedure
               expiryMonth: input.expiryMonth,
               expiryYear: input.expiryYear,
               nameOnCard: input.cardholderName,
-              securityCode: input.cvv.trim(), // CVV required for payment - ensure trimmed
+              securityCode: cvvValue, // Map frontend 'cvv' to Mastercard 'securityCode'
             },
             amount: remainingAmount,
             currency,
