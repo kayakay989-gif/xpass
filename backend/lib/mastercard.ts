@@ -17,7 +17,7 @@ type CardDetails = {
   expiryMonth?: string;
   expiryYear?: string;
   nameOnCard?: string;
-  securityCode?: string; // CVV/CSC
+  securityCode?: string;
 };
 
 type AmountInput = {
@@ -49,8 +49,11 @@ function normalizeGatewayHost(rawHost: string): string {
 
 function assertProductionGatewayHost(host: string) {
   const lower = host.toLowerCase();
+
   const looksSandbox =
-    lower.includes('test-network') || lower.includes('.mtf.') || lower.includes('sandbox');
+    lower.includes('test-network') ||
+    lower.includes('.mtf.') ||
+    lower.includes('sandbox');
 
   const isKnownProd =
     lower === 'ap-gateway.mastercard.com' ||
@@ -59,13 +62,13 @@ function assertProductionGatewayHost(host: string) {
 
   if (looksSandbox) {
     throw new Error(
-      `[Mastercard] Refusing to use a sandbox/test gateway host in production: "${host}". Set MPG_HOST to ap-gateway.mastercard.com.`
+      `[Mastercard] Refusing to use sandbox gateway in production: "${host}".`
     );
   }
 
   if (!isKnownProd) {
     throw new Error(
-      `[Mastercard] MPG_HOST "${host}" doesn't look like a valid Mastercard gateway host.`
+      `[Mastercard] MPG_HOST "${host}" doesn't look like a valid Mastercard gateway.`
     );
   }
 }
@@ -87,9 +90,12 @@ function getGatewayConfig(): GatewayConfig {
   const hostRaw = process.env['MPG_HOST'];
   const host = hostRaw ? normalizeGatewayHost(hostRaw) : undefined;
 
-  const merchantId = process.env['MPG_MERCHANT_ID'] || process.env['MPG_MERCHANT'];
+  const merchantId =
+    process.env['MPG_MERCHANT_ID'] || process.env['MPG_MERCHANT'];
+
   const apiUsername =
-    process.env['MPG_API_USERNAME'] || (merchantId ? `merchant.${merchantId}` : undefined);
+    process.env['MPG_API_USERNAME'] ||
+    (merchantId ? `merchant.${merchantId}` : undefined);
 
   const apiPassword = process.env['MPG_API_PASSWORD'];
   const apiVersion = process.env['MPG_API_VERSION'] || '100';
@@ -105,12 +111,14 @@ function getGatewayConfig(): GatewayConfig {
   return { host, merchantId, apiUsername, apiPassword, apiVersion };
 }
 
-function buildUrl(orderId: string, transactionId: string, cfg: GatewayConfig): string {
+function buildUrl(orderId: string, transactionId: string, cfg: GatewayConfig) {
   return `https://${cfg.host}/api/rest/version/${cfg.apiVersion}/merchant/${cfg.merchantId}/order/${orderId}/transaction/${transactionId}`;
 }
 
-function buildAuthHeader(cfg: GatewayConfig): string {
-  return `Basic ${Buffer.from(`${cfg.apiUsername}:${cfg.apiPassword}`).toString('base64')}`;
+function buildAuthHeader(cfg: GatewayConfig) {
+  return `Basic ${Buffer.from(
+    `${cfg.apiUsername}:${cfg.apiPassword}`
+  ).toString('base64')}`;
 }
 
 async function putToGateway(
@@ -119,6 +127,7 @@ async function putToGateway(
   payload: Record<string, any>
 ) {
   const cfg = getGatewayConfig();
+
   const url = buildUrl(orderId, transactionId, cfg);
 
   const response = await fetch(url, {
@@ -133,6 +142,7 @@ async function putToGateway(
   const text = await response.text();
 
   let json: any = {};
+
   try {
     json = text ? JSON.parse(text) : {};
   } catch {
@@ -147,13 +157,16 @@ async function putToGateway(
 }
 
 export function computeAmount({ tier, duration }: AmountInput) {
-  const { totalPrice, monthlyPrice } = calculateSubscriptionPrice(tier, duration);
+  const { totalPrice, monthlyPrice } = calculateSubscriptionPrice(
+    tier,
+    duration
+  );
+
   return { amount: totalPrice, monthlyPrice };
 }
 
-/**
- * Pay with payment token (Google Pay / Apple Pay / Stored Card)
- */
+/* TOKEN PAYMENT */
+
 export async function payWithToken(params: {
   orderId: string;
   paymentTransactionId: string;
@@ -161,7 +174,7 @@ export async function payWithToken(params: {
   amount: number;
   currency: string;
   reference?: string;
-  securityCode?: string; // CVV/CSC required for tokenized payments
+  securityCode?: string;
 }) {
   const {
     orderId,
@@ -173,9 +186,15 @@ export async function payWithToken(params: {
     securityCode,
   } = params;
 
-  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+  if (!securityCode) {
+    throw new Error('CVV is required for tokenized payment');
+  }
 
-  const payload: Record<string, any> = {
+  const amountStr = Number.isFinite(amount)
+    ? amount.toFixed(2)
+    : String(amount);
+
+  const payload = {
     apiOperation: 'PAY',
     order: {
       amount: amountStr,
@@ -187,7 +206,7 @@ export async function payWithToken(params: {
       provided: {
         card: {
           token: paymentToken,
-          securityCode: securityCode, // CVV required
+          securityCode,
         },
       },
     },
@@ -199,9 +218,8 @@ export async function payWithToken(params: {
   return putToGateway(orderId, paymentTransactionId, payload);
 }
 
-/**
- * Direct card payment
- */
+/* DIRECT CARD PAYMENT */
+
 export async function payWithCard(params: {
   orderId: string;
   paymentTransactionId: string;
@@ -210,11 +228,26 @@ export async function payWithCard(params: {
   currency: string;
   reference?: string;
 }) {
-  const { orderId, paymentTransactionId, card, amount, currency, reference } = params;
+  const { orderId, paymentTransactionId, card, amount, currency, reference } =
+    params;
 
-  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+  if (!card?.securityCode) {
+    throw new Error('CVV is required for card payment');
+  }
 
-  const payload: Record<string, any> = {
+  if (!card.number) {
+    throw new Error('Card number missing');
+  }
+
+  if (!card.expiryMonth || !card.expiryYear) {
+    throw new Error('Card expiry missing');
+  }
+
+  const amountStr = Number.isFinite(amount)
+    ? amount.toFixed(2)
+    : String(amount);
+
+  const payload = {
     apiOperation: 'PAY',
     order: {
       amount: amountStr,
@@ -230,7 +263,8 @@ export async function payWithCard(params: {
             month: card.expiryMonth,
             year: card.expiryYear,
           },
-          securityCode: card.securityCode, // CVV required
+          securityCode: card.securityCode,
+          nameOnCard: card.nameOnCard,
         },
       },
     },
@@ -242,8 +276,175 @@ export async function payWithCard(params: {
   return putToGateway(orderId, paymentTransactionId, payload);
 }
 
-export async function initiateAuthentication(params: { orderId: string; transactionId: string; card: CardDetails; currency: string; channel?: 'PAYER_BROWSER' | 'PAYER_APP'; methodNotificationUrl?: string; }) { const { orderId, transactionId, card, currency, channel = 'PAYER_BROWSER', methodNotificationUrl } = params; const payload: Record<string, any> = { apiOperation: 'INITIATE_AUTHENTICATION', authentication: { channel }, order: { currency }, sourceOfFunds: { provided: { card: { number: card.number } } }, }; if (methodNotificationUrl) { try { const url = new URL(methodNotificationUrl); if (url.hostname === 'localhost' && url.port && url.port !== '80' && url.port !== '443') { console.warn('[Mastercard] Skipping methodNotificationUrl'); } else { payload.authentication.methodNotificationUrl = methodNotificationUrl; } } catch (e) {} } return putToGateway(orderId, transactionId, payload); }
+/* 3DS INIT */
 
-export async function authenticatePayer(params: { orderId: string; transactionId: string; card: CardDetails; amount: number; currency: string; redirectResponseUrl: string; ipAddress?: string; browser?: string; browserDetails?: BrowserDetails; }) { const { orderId, transactionId, card, amount, currency, redirectResponseUrl, ipAddress = '0.0.0.0', browser = 'MOZILLA', browserDetails = defaultBrowserDetails } = params; const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount); const payload = { apiOperation: 'AUTHENTICATE_PAYER', sourceOfFunds: { provided: { card: { number: card.number, expiry: { month: card.expiryMonth, year: card.expiryYear }, nameOnCard: card.nameOnCard } } }, order: { amount: amountStr, currency }, authentication: { redirectResponseUrl }, device: { browser, browserDetails, ipAddress }, }; return putToGateway(orderId, transactionId, payload); }
+export async function initiateAuthentication(params: {
+  orderId: string;
+  transactionId: string;
+  card: CardDetails;
+  currency: string;
+  channel?: 'PAYER_BROWSER' | 'PAYER_APP';
+  methodNotificationUrl?: string;
+}) {
+  const {
+    orderId,
+    transactionId,
+    card,
+    currency,
+    channel = 'PAYER_BROWSER',
+    methodNotificationUrl,
+  } = params;
 
-export async function payWithAuthentication(params: { orderId: string; paymentTransactionId: string; authenticationTransactionId: string; authenticationStatus?: string; card: CardDetails; amount: number; currency: string; reference?: string; }) { const { orderId, paymentTransactionId, authenticationTransactionId, authenticationStatus, card, amount, currency, reference } = params; const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount); const authentication: Record<string, any> = { transactionId: authenticationTransactionId }; const payload: Record<string, any> = { apiOperation: 'PAY', authentication, order: { amount: amountStr, currency, reference: reference || orderId }, sourceOfFunds: { provided: { card: { number: card.number, expiry: { month: card.expiryMonth, year: card.expiryYear } } }, type: 'CARD' }, transaction: { reference: reference || orderId }, }; return putToGateway(orderId, paymentTransactionId, payload); }
+  const payload: Record<string, any> = {
+    apiOperation: 'INITIATE_AUTHENTICATION',
+    authentication: { channel },
+    order: { currency },
+    sourceOfFunds: {
+      provided: {
+        card: {
+          number: card.number,
+        },
+      },
+    },
+  };
+
+  if (methodNotificationUrl) {
+    try {
+      const url = new URL(methodNotificationUrl);
+
+      if (
+        url.hostname === 'localhost' &&
+        url.port &&
+        url.port !== '80' &&
+        url.port !== '443'
+      ) {
+        console.warn('[Mastercard] Skipping methodNotificationUrl');
+      } else {
+        payload.authentication.methodNotificationUrl = methodNotificationUrl;
+      }
+    } catch {}
+  }
+
+  return putToGateway(orderId, transactionId, payload);
+}
+
+/* AUTHENTICATE PAYER */
+
+export async function authenticatePayer(params: {
+  orderId: string;
+  transactionId: string;
+  card: CardDetails;
+  amount: number;
+  currency: string;
+  redirectResponseUrl: string;
+  ipAddress?: string;
+  browser?: string;
+  browserDetails?: BrowserDetails;
+}) {
+  const {
+    orderId,
+    transactionId,
+    card,
+    amount,
+    currency,
+    redirectResponseUrl,
+    ipAddress = '0.0.0.0',
+    browser = 'MOZILLA',
+    browserDetails = defaultBrowserDetails,
+  } = params;
+
+  const amountStr = Number.isFinite(amount)
+    ? amount.toFixed(2)
+    : String(amount);
+
+  const payload = {
+    apiOperation: 'AUTHENTICATE_PAYER',
+    sourceOfFunds: {
+      provided: {
+        card: {
+          number: card.number,
+          expiry: {
+            month: card.expiryMonth,
+            year: card.expiryYear,
+          },
+          nameOnCard: card.nameOnCard,
+        },
+      },
+    },
+    order: {
+      amount: amountStr,
+      currency,
+    },
+    authentication: {
+      redirectResponseUrl,
+    },
+    device: {
+      browser,
+      browserDetails,
+      ipAddress,
+    },
+  };
+
+  return putToGateway(orderId, transactionId, payload);
+}
+
+/* FINAL PAY AFTER 3DS */
+
+export async function payWithAuthentication(params: {
+  orderId: string;
+  paymentTransactionId: string;
+  authenticationTransactionId: string;
+  authenticationStatus?: string;
+  card: CardDetails;
+  amount: number;
+  currency: string;
+  reference?: string;
+}) {
+  const {
+    orderId,
+    paymentTransactionId,
+    authenticationTransactionId,
+    card,
+    amount,
+    currency,
+    reference,
+  } = params;
+
+  if (!card?.securityCode) {
+    throw new Error('CVV required for authenticated payment');
+  }
+
+  const amountStr = Number.isFinite(amount)
+    ? amount.toFixed(2)
+    : String(amount);
+
+  const payload = {
+    apiOperation: 'PAY',
+    authentication: {
+      transactionId: authenticationTransactionId,
+    },
+    order: {
+      amount: amountStr,
+      currency,
+      reference: reference || orderId,
+    },
+    sourceOfFunds: {
+      type: 'CARD',
+      provided: {
+        card: {
+          number: card.number,
+          expiry: {
+            month: card.expiryMonth,
+            year: card.expiryYear,
+          },
+          securityCode: card.securityCode,
+        },
+      },
+    },
+    transaction: {
+      reference: reference || orderId,
+    },
+  };
+
+  return putToGateway(orderId, paymentTransactionId, payload);
+}
