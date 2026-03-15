@@ -218,14 +218,32 @@ export default protectedProcedure
 
       // Check payment result
       if (gatewayResponse?.result !== 'SUCCESS') {
-        // Payment failed - update payment record and return error
+        // Payment failed - log full response for debugging
+        console.error('[Checkout] Payment failed - Gateway response:', JSON.stringify(gatewayResponse, null, 2));
+        
+        // Extract detailed error information
+        const errorReason = gatewayResponse?.error?.explanation || 
+                           gatewayResponse?.error?.message ||
+                           gatewayResponse?.response?.gatewayCode ||
+                           gatewayResponse?.response?.gatewayMessage ||
+                           gatewayResponse?.result;
+        
+        const errorDetails = gatewayResponse?.error?.detail || 
+                             gatewayResponse?.response?.acquirerMessage ||
+                             'No additional details available';
+
+        // Update payment record and return error
         await firestorePayments.update(`${orderId}-${paymentTransactionId}`, {
           status: 'failed',
           gatewayResponse,
         });
-        throw new Error(
-          `Payment failed: ${gatewayResponse?.result || 'Unknown error'}`
-        );
+        
+        // Provide more detailed error message
+        const errorMessage = errorReason 
+          ? `Payment failed: ${errorReason}${errorDetails && errorDetails !== errorReason ? ` (${errorDetails})` : ''}`
+          : 'Payment failed: Unknown error from payment gateway';
+        
+        throw new Error(errorMessage);
       }
 
       paymentSuccess = true;
