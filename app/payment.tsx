@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
-import { isGooglePayAvailable, requestGooglePayPayment } from '@/lib/google-pay';
+// Google Pay and Apple Pay removed - card payments only
 
 export default function PaymentScreen() {
   const { tier, duration, price } = useLocalSearchParams<{ tier: string; duration: string; price: string }>();
@@ -35,10 +35,8 @@ export default function PaymentScreen() {
   const [couponError, setCouponError] = useState<string>('');
   const [isValidatingCoupon, setIsValidatingCoupon] = useState<boolean>(false);
   const [useWallet, setUseWallet] = useState<boolean>(false);
-  // VERSION 1: Only card payments enabled, Google Pay and Apple Pay hidden
-  const [paymentMethod, setPaymentMethod] = useState<'apple_pay' | 'google_pay' | 'card'>('card');
-  const [applePayAvailable, setApplePayAvailable] = useState<boolean>(false);
-  const [googlePayAvailable, setGooglePayAvailable] = useState<boolean>(false);
+  // Card payments only
+  const [paymentMethod] = useState<'card'>('card');
   const [saveCard, setSaveCard] = useState<boolean>(false);
   const [selectedSavedCardId, setSelectedSavedCardId] = useState<string | null>(null);
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -176,98 +174,7 @@ export default function PaymentScreen() {
     }
   }, [user]);
 
-  // Load Google Pay script on web and detect payment method availability
-  // VERSION 1: This is disabled but code preserved for Version 2
-  useEffect(() => {
-    const checkPaymentMethods = async () => {
-      // VERSION 1: Skip payment method detection - only card payments enabled
-      return;
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        // Load Google Pay script if not already loaded
-        const loadGooglePayScript = () => {
-          return new Promise<void>((resolve, reject) => {
-            if ((window as any).google?.payments?.api) {
-              resolve();
-              return;
-            }
-
-            const existing = document.querySelector<HTMLScriptElement>(
-              'script[data-xpass-google-pay="1"]'
-            );
-
-            if (existing) {
-              existing.addEventListener('load', () => resolve(), { once: true });
-              existing.addEventListener('error', () => reject(new Error('Failed to load Google Pay script')), { once: true });
-              return;
-            }
-
-            const script = document.createElement('script');
-            script.setAttribute('data-xpass-google-pay', '1');
-            script.src = 'https://pay.google.com/gp/p/js/pay.js';
-            script.async = true;
-            script.defer = true;
-            script.onload = () => {
-              if ((window as any).google?.payments?.api) {
-                resolve();
-              } else {
-                reject(new Error('Google Pay script loaded but API is missing'));
-              }
-            };
-            script.onerror = () => reject(new Error('Failed to load Google Pay script'));
-            document.head.appendChild(script);
-          });
-        };
-
-        try {
-          await loadGooglePayScript();
-          // Check Google Pay availability after script loads
-          const isGooglePayAvailable = 
-            (window as any).google && 
-            (window as any).google.payments && 
-            (window as any).google.payments.api;
-          setGooglePayAvailable(isGooglePayAvailable || false);
-          console.log('[Payment] Google Pay available:', isGooglePayAvailable);
-        } catch (error) {
-          console.warn('[Payment] Failed to load Google Pay script:', error);
-          setGooglePayAvailable(false);
-        }
-
-        // Check Apple Pay availability (Safari on iOS/macOS)
-        try {
-          const isApplePayAvailable = 
-            (window as any).ApplePaySession && 
-            (window as any).ApplePaySession.canMakePayments();
-          setApplePayAvailable(isApplePayAvailable || false);
-          console.log('[Payment] Apple Pay available:', isApplePayAvailable);
-        } catch (e) {
-          console.warn('[Payment] Apple Pay check failed:', e);
-          setApplePayAvailable(false);
-        }
-      } else if (Platform.OS === 'ios') {
-        // iOS native - Apple Pay is typically available
-        setApplePayAvailable(true);
-        setGooglePayAvailable(false);
-      } else if (Platform.OS === 'android') {
-        // Android - Check Google Pay availability
-        const available = await isGooglePayAvailable();
-        setApplePayAvailable(false);
-        setGooglePayAvailable(available);
-      }
-    };
-
-    checkPaymentMethods();
-  }, []);
-
-  // Auto-select payment method based on availability
-  useEffect(() => {
-    if (cardAmount === 0) return; // No external payment needed
-    
-    if (applePayAvailable && paymentMethod !== 'apple_pay') {
-      setPaymentMethod('apple_pay');
-    } else if (googlePayAvailable && paymentMethod !== 'google_pay') {
-      setPaymentMethod('google_pay');
-    }
-  }, [applePayAvailable, googlePayAvailable, cardAmount]);
+  // Google Pay and Apple Pay removed - card payments only
 
   // For native (non-web) 3DS challenge, provide a manual "Continue" button as a fallback
   // if the redirect/callback flow cannot return cleanly to the app.
@@ -282,76 +189,7 @@ export default function PaymentScreen() {
   }, [challengeHtml]);
 
 
-  const handleApplePayPayment = async () => {
-    if (!user || cardAmount === 0) return;
-
-    setPaymentMethod('apple_pay');
-    setPaymentProcessing(true);
-    setStatusMessage('Processing Apple Pay...');
-
-    try {
-      // In production, integrate with Apple Pay SDK to get payment token
-      // For now, using a placeholder token - replace with actual Apple Pay token
-      const paymentToken = 'apple_pay_token_placeholder'; // Replace with actual token from Apple Pay SDK
-      
-      await checkoutMutation.mutateAsync({
-        userId: user.id,
-        tier: tier as any,
-        duration: parseInt(duration) as any,
-        useWallet: useWallet,
-        paymentMethod: 'apple_pay',
-        paymentToken: paymentToken,
-        couponCode: appliedCoupon?.coupon?.code || undefined,
-        currency: 'JOD',
-      });
-    } catch (error: any) {
-      setPaymentProcessing(false);
-      setStatusMessage('');
-      Alert.alert('Error', error.message || 'Failed to process Apple Pay payment');
-    }
-  };
-
-  const handleGooglePayPayment = async () => {
-    if (!user || cardAmount === 0) return;
-
-    setPaymentMethod('google_pay');
-    setPaymentProcessing(true);
-    setStatusMessage('Processing Google Pay...');
-
-    try {
-      // Request Google Pay payment and get token
-      const googlePayResult = await requestGooglePayPayment({
-        merchantName: 'XPASS',
-        merchantId: 'BCR2DN5T22RLHU35',
-        gateway: 'mastercard',
-        gatewayMerchantId: '9589667361EP',
-        allowedNetworks: ['VISA', 'MASTERCARD'],
-        currency: 'JOD',
-        country: 'JO',
-        totalPrice: cardAmount, // Use remaining amount after wallet
-      });
-
-      if (!googlePayResult.success || !googlePayResult.paymentToken) {
-        throw new Error(googlePayResult.error || 'Failed to get Google Pay token');
-      }
-
-      // Send token to unified checkout endpoint
-      await checkoutMutation.mutateAsync({
-        userId: user.id,
-        tier: tier as any,
-        duration: parseInt(duration) as any,
-        useWallet: useWallet,
-        paymentMethod: 'google_pay',
-        paymentToken: googlePayResult.paymentToken,
-        couponCode: appliedCoupon?.coupon?.code || undefined,
-        currency: 'JOD',
-      });
-    } catch (error: any) {
-      setPaymentProcessing(false);
-      setStatusMessage('');
-      Alert.alert('Payment Failed', error.message || 'Failed to process Google Pay payment. Please try another method.');
-    }
-  };
+  // Apple Pay and Google Pay handlers removed - card payments only
 
   const handleFreeCheckout = async () => {
     if (!appliedCoupon || !appliedCoupon.isFree) {
@@ -1039,9 +877,7 @@ export default function PaymentScreen() {
                   <View style={styles.priceRow}>
                     <Text style={styles.priceBreakdownLabel}>Payment Method:</Text>
                     <Text style={styles.priceBreakdownValue}>
-                      {paymentMethod === 'apple_pay' ? 'Apple Pay' : 
-                       paymentMethod === 'google_pay' ? 'Google Pay' : 
-                       'Credit / Debit Card'}
+                      Credit / Debit Card
                     </Text>
                   </View>
                 </>

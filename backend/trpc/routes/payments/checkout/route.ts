@@ -22,9 +22,8 @@ export default protectedProcedure
       tier: z.enum(['silver', 'gold', 'diamond', 'elite']),
       duration: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(9), z.literal(12)]),
       useWallet: z.boolean().default(false),
-      paymentMethod: z.enum(['apple_pay', 'google_pay', 'card']).default('card'), // VERSION 1: Default to card only
-      // For Apple Pay / Google Pay (VERSION 1: Disabled but preserved for Version 2)
-      paymentToken: z.string().optional(),
+      paymentMethod: z.enum(['card']).default('card'), // Card payments only
+      // paymentToken removed - not needed for card payments
       // For Card payments
       cardNumber: z.string().optional(),
       expiryMonth: z.string().optional(),

@@ -107,8 +107,7 @@
           }
         }
       ],
-      "./plugins/withExpoFirebaseCoreFix",
-      "./plugins/withGooglePay.js"
+      "./plugins/withExpoFirebaseCoreFix"
     ],
     "experiments": {
       "typedRoutes": true

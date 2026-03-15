@@ -19,7 +19,7 @@ export default protectedProcedure
       currency: z.string().optional(),
       couponCode: z.string().optional(),
       useWallet: z.boolean().optional().default(false),
-      paymentMethod: z.enum(['card', 'apple_pay', 'google_pay', 'wallet']).optional().default('card'),
+      paymentMethod: z.enum(['card', 'wallet']).optional().default('card'),
     })
   )
   .mutation(async ({ input, ctx }) => {
