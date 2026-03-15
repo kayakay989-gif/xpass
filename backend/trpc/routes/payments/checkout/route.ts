@@ -255,11 +255,39 @@ export default protectedProcedure
         
         // For BLOCKED payments, provide more context
         if (gatewayResponse?.result === 'BLOCKED' || errorReason === 'BLOCKED') {
-          const blockReason = gatewayResponse?.response?.gatewayCode || 
-                             gatewayResponse?.response?.acquirerResponse?.code ||
-                             gatewayResponse?.response?.decision ||
-                             'Card or transaction blocked by issuer';
-          errorMessage = `Payment blocked: ${blockReason}. Please contact your bank or try a different payment method.`;
+          // Extract all possible block reasons from the response
+          const blockReasons = [
+            gatewayResponse?.response?.gatewayCode,
+            gatewayResponse?.response?.gatewayMessage,
+            gatewayResponse?.response?.acquirerResponse?.code,
+            gatewayResponse?.response?.acquirerResponse?.message,
+            gatewayResponse?.response?.acquirerResponse?.issuerMessage,
+            gatewayResponse?.response?.decision,
+            gatewayResponse?.response?.reason,
+            gatewayResponse?.response?.acquirerMessage,
+            gatewayResponse?.error?.explanation,
+            gatewayResponse?.error?.message,
+            gatewayResponse?.error?.cause,
+          ].filter(Boolean); // Remove undefined/null values
+          
+          const blockReason = blockReasons.length > 0 
+            ? blockReasons.join(' - ') 
+            : 'Card or transaction blocked by issuer';
+          
+          // If we only got "BLOCKED" as the reason, try to get more details
+          if (blockReason === 'BLOCKED' || blockReasons.length === 0) {
+            // Log the full response structure for debugging
+            console.error('[Checkout] BLOCKED payment - Full response structure:', {
+              result: gatewayResponse?.result,
+              response: gatewayResponse?.response,
+              error: gatewayResponse?.error,
+              transaction: gatewayResponse?.transaction,
+              order: gatewayResponse?.order,
+            });
+            errorMessage = 'Payment blocked by issuer. Please contact your bank or try a different payment method.';
+          } else {
+            errorMessage = `Payment blocked: ${blockReason}. Please contact your bank or try a different payment method.`;
+          }
         }
         
         throw new Error(errorMessage);
