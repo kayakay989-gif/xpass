@@ -451,8 +451,16 @@ export const firestorePayments = {
     if (!id || typeof id !== 'string') {
       throw new Error('[firestorePayments] Missing payment.id');
     }
+    // Filter out undefined values (Firestore doesn't allow undefined)
+    const filteredPayment: any = {};
+    for (const [key, value] of Object.entries(payment)) {
+      if (value !== undefined) {
+        filteredPayment[key] = value;
+      }
+    }
+    
     const data: any = {
-      ...payment,
+      ...filteredPayment,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     // Avoid storing raw card numbers if accidentally passed in
@@ -462,8 +470,16 @@ export const firestorePayments = {
   },
 
   async update(paymentId: string, updates: any): Promise<void> {
+    // Filter out undefined values (Firestore doesn't allow undefined)
+    const filteredUpdates: any = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) {
+        filteredUpdates[key] = value;
+      }
+    }
+    
     const data: any = {
-      ...updates,
+      ...filteredUpdates,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     if (data.cardNumber) delete data.cardNumber;
