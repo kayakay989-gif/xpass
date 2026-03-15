@@ -219,16 +219,24 @@ export default protectedProcedure
         // Payment failed - log full response for debugging
         console.error('[Checkout] Payment failed - Gateway response:', JSON.stringify(gatewayResponse, null, 2));
         
-        // Extract detailed error information
+        // Extract detailed error information from various possible locations in gateway response
         const errorReason = gatewayResponse?.error?.explanation || 
                            gatewayResponse?.error?.message ||
+                           gatewayResponse?.error?.cause ||
                            gatewayResponse?.response?.gatewayCode ||
                            gatewayResponse?.response?.gatewayMessage ||
+                           gatewayResponse?.response?.acquirerResponse?.code ||
+                           gatewayResponse?.response?.acquirerResponse?.message ||
                            gatewayResponse?.result;
         
         const errorDetails = gatewayResponse?.error?.detail || 
                              gatewayResponse?.response?.acquirerMessage ||
-                             'No additional details available';
+                             gatewayResponse?.response?.acquirerResponse?.issuerMessage ||
+                             gatewayResponse?.response?.acquirerResponse?.responseCode ||
+                             gatewayResponse?.response?.decision ||
+                             gatewayResponse?.response?.reason ||
+                             (gatewayResponse?.response?.gatewayCode ? `Gateway Code: ${gatewayResponse.response.gatewayCode}` : null) ||
+                             null;
 
         // Update payment record and return error
         await firestorePayments.update(`${orderId}-${paymentTransactionId}`, {
@@ -237,9 +245,22 @@ export default protectedProcedure
         });
         
         // Provide more detailed error message
-        const errorMessage = errorReason 
-          ? `Payment failed: ${errorReason}${errorDetails && errorDetails !== errorReason ? ` (${errorDetails})` : ''}`
-          : 'Payment failed: Unknown error from payment gateway';
+        let errorMessage = 'Payment failed: Unknown error from payment gateway';
+        if (errorReason) {
+          errorMessage = `Payment failed: ${errorReason}`;
+          if (errorDetails && errorDetails !== errorReason && errorDetails !== `Gateway Code: ${errorReason}`) {
+            errorMessage += ` (${errorDetails})`;
+          }
+        }
+        
+        // For BLOCKED payments, provide more context
+        if (gatewayResponse?.result === 'BLOCKED' || errorReason === 'BLOCKED') {
+          const blockReason = gatewayResponse?.response?.gatewayCode || 
+                             gatewayResponse?.response?.acquirerResponse?.code ||
+                             gatewayResponse?.response?.decision ||
+                             'Card or transaction blocked by issuer';
+          errorMessage = `Payment blocked: ${blockReason}. Please contact your bank or try a different payment method.`;
+        }
         
         throw new Error(errorMessage);
       }
