@@ -68,8 +68,20 @@ export default function PaymentScreen() {
         [{ text: 'OK' }]
       );
     },
-    onSuccess: async (data) => {
+    onSuccess: async (data: any) => {
       console.log('[Payment] Checkout mutation success:', data);
+      
+      // Check if 3DS authentication is required
+      if (data.requires3DS && data.redirectHtml) {
+        console.log('[Payment] 3DS challenge required, showing authentication page');
+        setOrderId(data.orderId);
+        setAuthTransactionId(data.authenticationTransactionId);
+        setChallengeHtml(data.redirectHtml);
+        setPaymentProcessing(false);
+        setStatusMessage('Please complete bank verification');
+        return; // Don't proceed with success flow yet
+      }
+
       setPaymentProcessing(false);
       setStatusMessage('');
 
@@ -372,6 +384,49 @@ export default function PaymentScreen() {
       setPaymentProcessing(false);
       setStatusMessage('');
       Alert.alert('Payment Failed', error.message || 'Failed to process payment. Please try again.');
+    }
+  };
+
+  // Handle finalizing payment after 3DS authentication
+  const handleFinalizePayment = async (finalOrderId: string, finalAuthTransactionId: string, authStatus: string) => {
+    console.log('[Payment] Finalizing payment after 3DS:', {
+      orderId: finalOrderId,
+      authTransactionId: finalAuthTransactionId,
+      authStatus,
+    });
+
+    setPaymentProcessing(true);
+    setStatusMessage('Completing payment...');
+
+    try {
+      const cleanedCard = cardNumber.replace(/\s/g, '');
+      const { month, year } = parsedExpiry;
+      const trimmedCvv = cvv.trim();
+
+      // Call checkout again with authentication details
+      await checkoutMutation.mutateAsync({
+        userId: user.id,
+        tier: tier as any,
+        duration: parseInt(duration) as any,
+        useWallet: useWallet,
+        paymentMethod: 'card',
+        cardNumber: selectedSavedCardId ? undefined : cleanedCard,
+        expiryMonth: selectedSavedCardId ? undefined : month,
+        expiryYear: selectedSavedCardId ? undefined : year,
+        cardholderName: selectedSavedCardId ? undefined : cardholderName,
+        cvv: trimmedCvv,
+        savedCardId: selectedSavedCardId || undefined,
+        saveCard: saveCard && !selectedSavedCardId,
+        authenticationTransactionId: finalAuthTransactionId,
+        authenticationStatus: authStatus,
+        couponCode: appliedCoupon?.coupon?.code || undefined,
+        currency: 'JOD',
+      });
+    } catch (error: any) {
+      console.error('[Payment] Failed to finalize payment after 3DS:', error);
+      setPaymentProcessing(false);
+      setStatusMessage('');
+      Alert.alert('Payment Failed', error.message || 'Failed to complete payment after authentication. Please try again.');
     }
   };
 
@@ -1043,14 +1098,29 @@ export default function PaymentScreen() {
               source={{ html: challengeHtml }}
               style={styles.challengeWebview}
               onMessage={(event) => {
-                if (event.nativeEvent.data === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
-                  setChallengeHtml(null);
-                  // After challenge completion, authentication status is typically 'Y' (successful)
-                  handleFinalizePayment(orderId, authTransactionId, 'Y');
+                try {
+                  const message = typeof event.nativeEvent.data === 'string' 
+                    ? JSON.parse(event.nativeEvent.data) 
+                    : event.nativeEvent.data;
+                  
+                  if (message?.type === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
+                    console.log('[Payment] 3DS authentication complete via message:', message);
+                    setChallengeHtml(null);
+                    // Complete payment with authentication
+                    handleFinalizePayment(orderId, authTransactionId, message.result || 'Y');
+                  }
+                } catch (e) {
+                  // If message is not JSON, check for string match
+                  if (event.nativeEvent.data === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
+                    console.log('[Payment] 3DS authentication complete via string message');
+                    setChallengeHtml(null);
+                    handleFinalizePayment(orderId, authTransactionId, 'Y');
+                  }
                 }
               }}
               onNavigationStateChange={(navState) => {
-                if (navState.url.startsWith(redirectUrl) && orderId && authTransactionId) {
+                if (navState.url && redirectUrl && navState.url.includes(redirectUrl.split('/').pop() || '') && orderId && authTransactionId) {
+                  console.log('[Payment] 3DS callback URL detected:', navState.url);
                   setChallengeHtml(null);
                   // After challenge completion, authentication status is typically 'Y' (successful)
                   handleFinalizePayment(orderId, authTransactionId, 'Y');
