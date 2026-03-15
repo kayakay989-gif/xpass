@@ -1031,8 +1031,6 @@ export default function PaymentScreen() {
                     userId: user!.id,
                     tier: tier as any,
                     duration: parseInt(duration) as any,
-                    orderId,
-                    authenticationTransactionId: '',
                     currency: 'JOD',
                     couponCode: appliedCoupon?.coupon?.code || undefined,
                     useWallet: true,
