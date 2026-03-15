@@ -270,6 +270,13 @@ export default function PaymentScreen() {
       return;
     }
 
+    // Explicit CVV validation - ensure CVV is not empty
+    if (!cvv || cvv.trim().length < 3) {
+      console.warn('[Payment] CVV validation failed - CVV is empty or too short');
+      Alert.alert('Error', 'Please enter a valid CVV (3-4 digits)');
+      return;
+    }
+
     if (!user) {
       console.warn('[Payment] No user found');
       Alert.alert('Error', 'Please log in to make a payment');
@@ -282,8 +289,10 @@ export default function PaymentScreen() {
       duration,
       cardNumberLength: cardNumber.replace(/\s/g, '').length,
       hasExpiry: !!expiryDate,
-      hasCvv: !!cvv,
+      cvvLength: cvv ? cvv.length : 0,
+      cvvValue: cvv ? `${cvv.substring(0, 1)}**` : 'empty', // Log first digit only for debugging
       hasName: !!cardholderName,
+      selectedSavedCardId,
       apiBaseUrl: config.api.baseUrl,
     });
 
@@ -336,6 +345,12 @@ export default function PaymentScreen() {
       const { month, year } = parsedExpiry;
 
       // Use unified checkout endpoint
+      // Ensure CVV is trimmed and has value (validation already checked above)
+      const trimmedCvv = cvv.trim();
+      if (!trimmedCvv || trimmedCvv.length < 3) {
+        throw new Error('CVV is required and must be at least 3 digits');
+      }
+
       await checkoutMutation.mutateAsync({
         userId: user.id,
         tier: tier as any,
@@ -346,7 +361,7 @@ export default function PaymentScreen() {
         expiryMonth: selectedSavedCardId ? undefined : month,
         expiryYear: selectedSavedCardId ? undefined : year,
         cardholderName: selectedSavedCardId ? undefined : cardholderName,
-        cvv: cvv || undefined, // Always send CVV (required for both new and saved cards)
+        cvv: trimmedCvv, // Always send CVV as string (required for both new and saved cards)
         savedCardId: selectedSavedCardId || undefined, // Send saved card ID if using saved card
         saveCard: saveCard && !selectedSavedCardId, // Only save if it's a new card
         couponCode: appliedCoupon?.coupon?.code || undefined,
