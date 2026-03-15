@@ -146,21 +146,10 @@ export default protectedProcedure
     let paymentSuccess = false;
 
     if (remainingAmount > 0) {
-      // Validate payment method requirements
-      if (input.paymentMethod === 'apple_pay' || input.paymentMethod === 'google_pay') {
-        if (!input.paymentToken) {
-          throw new Error('Payment token is required for Apple Pay / Google Pay');
-        }
-
-        // Charge via payment token
-        gatewayResponse = await payWithToken({
-          orderId,
-          paymentTransactionId,
-          paymentToken: input.paymentToken,
-          amount: remainingAmount,
-          currency,
-        });
-      } else if (input.paymentMethod === 'card') {
+      // VERSION 1: Only card payments are supported
+      // Apple Pay and Google Pay code preserved for Version 2
+      // After the check on line 49, TypeScript knows paymentMethod can only be 'card'
+      if (input.paymentMethod === 'card') {
         // Handle saved card or new card
         if (input.savedCardId) {
           // Use saved card token

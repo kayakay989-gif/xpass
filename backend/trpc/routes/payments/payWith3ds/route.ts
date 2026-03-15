@@ -162,14 +162,13 @@ export default protectedProcedure
         orderId: input.orderId,
         transactionId: isFree ? 'coupon' : 'wallet',
         status: 'succeeded',
-        paymentMethod: isFree ? 'coupon' : 'wallet',
+        paymentMethod: isFree ? 'coupon' : input.paymentMethod || 'wallet',
         couponCode: input.couponCode?.toUpperCase().trim() || null,
         completedAt: new Date(),
         walletUsed: walletUsed,
         cardAmount: 0,
         externalPaymentAmount: 0,
         totalAmount: finalAmount,
-        paymentMethod: isFree ? 'coupon' : input.paymentMethod || 'wallet',
       });
 
       // Increment coupon usage
@@ -199,7 +198,9 @@ export default protectedProcedure
 
     // For PAY operation, use transaction ID "2" (or increment from auth transaction)
     // The authentication used transaction "1", so payment uses "2"
-    const parsedAuthTxn = Number.parseInt(input.authenticationTransactionId, 10);
+    const parsedAuthTxn = input.authenticationTransactionId 
+      ? Number.parseInt(input.authenticationTransactionId, 10)
+      : NaN;
     const paymentTransactionId =
       Number.isFinite(parsedAuthTxn) && parsedAuthTxn > 0 ? String(parsedAuthTxn + 1) : '2';
 
