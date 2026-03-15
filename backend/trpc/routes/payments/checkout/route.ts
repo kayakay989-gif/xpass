@@ -150,6 +150,15 @@ export default protectedProcedure
       // Apple Pay and Google Pay code preserved for Version 2
       // After the check on line 49, TypeScript knows paymentMethod can only be 'card'
       if (input.paymentMethod === 'card') {
+        // Debug: Log received CVV (masked for security)
+        console.log('[Checkout] Received payment data:', {
+          hasSavedCardId: !!input.savedCardId,
+          hasCardNumber: !!input.cardNumber,
+          hasCvv: !!input.cvv,
+          cvvLength: input.cvv ? input.cvv.length : 0,
+          cvvPreview: input.cvv ? `${input.cvv.substring(0, 1)}**` : 'missing',
+        });
+
         // Handle saved card or new card
         if (input.savedCardId) {
           // Use saved card token
@@ -159,7 +168,7 @@ export default protectedProcedure
           }
 
           // CVV is still required for saved card payments
-          if (!input.cvv) {
+          if (!input.cvv || input.cvv.trim().length < 3) {
             throw new Error('CVV is required for saved card payment');
           }
 
@@ -168,7 +177,7 @@ export default protectedProcedure
             orderId,
             paymentTransactionId,
             paymentToken: savedCard.token,
-            securityCode: input.cvv, // CVV required even for tokenized cards
+            securityCode: input.cvv.trim(), // CVV required even for tokenized cards
             amount: remainingAmount,
             currency,
           });
@@ -178,12 +187,19 @@ export default protectedProcedure
             throw new Error('Card details are required for card payment');
           }
 
-          // Validate CVV is provided
-          if (!input.cvv) {
+          // Validate CVV is provided and not empty
+          if (!input.cvv || input.cvv.trim().length < 3) {
+            console.error('[Checkout] CVV validation failed:', {
+              hasCvv: !!input.cvv,
+              cvvType: typeof input.cvv,
+              cvvLength: input.cvv ? input.cvv.length : 0,
+              cvvValue: input.cvv ? `[${input.cvv}]` : 'undefined',
+            });
             throw new Error('CVV is required for card payment');
           }
 
           // Charge via card (simplified - in production, use 3DS flow)
+          console.log('[Checkout] Calling payWithCard with CVV length:', input.cvv.trim().length);
           gatewayResponse = await payWithCard({
             orderId,
             paymentTransactionId,
@@ -192,7 +208,7 @@ export default protectedProcedure
               expiryMonth: input.expiryMonth,
               expiryYear: input.expiryYear,
               nameOnCard: input.cardholderName,
-              securityCode: input.cvv, // CVV required for payment
+              securityCode: input.cvv.trim(), // CVV required for payment - ensure trimmed
             },
             amount: remainingAmount,
             currency,
