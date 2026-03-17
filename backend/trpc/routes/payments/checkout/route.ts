@@ -195,159 +195,25 @@ export default protectedProcedure
             currency,
           });
         } else {
-          // New card payment - Use 3DS2 flow
+          // New card payment - process directly without 3DS for now
           if (!input.cardNumber || !input.expiryMonth || !input.expiryYear) {
             throw new Error('Card details are required for card payment');
           }
 
-          // Check if this is completing a 3DS authentication
-          if (input.authenticationTransactionId && input.authenticationStatus) {
-            // Step 3: Complete payment after 3DS authentication
-            console.log('[Checkout] Completing payment after 3DS authentication');
-            const authTxnId = input.authenticationTransactionId;
-            const parsedAuthTxn = Number.parseInt(authTxnId, 10);
-            const finalPaymentTransactionId = Number.isFinite(parsedAuthTxn) && parsedAuthTxn > 0 
-              ? String(parsedAuthTxn + 1) 
-              : '2';
-
-            gatewayResponse = await payWithAuthentication({
-              orderId,
-              paymentTransactionId: finalPaymentTransactionId,
-              authenticationTransactionId: authTxnId,
-              authenticationStatus: input.authenticationStatus,
-              card: {
-                number: input.cardNumber,
-                expiryMonth: input.expiryMonth,
-                expiryYear: input.expiryYear,
-                nameOnCard: input.cardholderName,
-                securityCode: cvvValue,
-              },
-              amount: remainingAmount,
-              currency,
-            });
-          } else {
-            // Step 1 & 2: Initiate 3DS authentication flow
-            console.log('[Checkout] Starting 3DS2 authentication flow');
-
-            // Get base URL for 3DS callback
-            const isProd = process.env['NODE_ENV'] === 'production';
-            const envBaseUrlRaw = process.env['EXPO_PUBLIC_RORK_API_BASE_URL'];
-            const envBaseUrl = envBaseUrlRaw ? envBaseUrlRaw.replace(/\/+$/, '') : undefined;
-
-            if (isProd && !envBaseUrl) {
-              throw new Error('Missing EXPO_PUBLIC_RORK_API_BASE_URL for 3DS callback');
-            }
-
-            const methodNotificationUrl = isProd && envBaseUrl
-              ? `${envBaseUrl}/api/3ds/callback`
-              : undefined;
-
-            // Step 1: Initiate Authentication
-            const authTransactionId = '1'; // Use transaction ID "1" for authentication
-            const initiateResponse = await initiateAuthentication({
-              orderId,
-              transactionId: authTransactionId,
-              card: {
-                number: input.cardNumber,
-              },
-              currency,
-              methodNotificationUrl,
-            });
-
-            console.log('[Checkout] Initiate authentication response:', {
-              hasAuthentication: !!initiateResponse.authentication,
-              gatewayRecommendation: initiateResponse.response?.gatewayRecommendation,
-            });
-
-            // Update payment record with authentication initiation
-            await firestorePayments.update(`${orderId}-${paymentTransactionId}`, {
-              status: 'AUTHENTICATION_INITIATED',
-              gatewayRecommendation: initiateResponse.response?.gatewayRecommendation,
-              authentication: initiateResponse.authentication,
-            });
-
-            // Step 2: Authenticate Payer
-            const redirectResponseUrl = isProd && envBaseUrl
-              ? `${envBaseUrl}/api/3ds/callback`
-              : (input.redirectUrl || (envBaseUrl ? `${envBaseUrl}/api/3ds/callback` : undefined));
-
-            if (!redirectResponseUrl) {
-              throw new Error('Redirect URL is required for 3DS authentication');
-            }
-
-            // Get IP address and browser info from request
-            const ipAddress = ctx.req.headers.get('cf-connecting-ip') ||
-                            (ctx.req.headers.get('x-forwarded-for') || '').split(',')[0]?.trim() ||
-                            undefined;
-            const browser = ctx.req.headers.get('user-agent') || 'MOZILLA';
-
-            const authenticateResponse = await authenticatePayer({
-              orderId,
-              transactionId: authTransactionId,
-              card: {
-                number: input.cardNumber,
-                expiryMonth: input.expiryMonth,
-                expiryYear: input.expiryYear,
-                nameOnCard: input.cardholderName,
-              },
-              amount: remainingAmount,
-              currency,
-              redirectResponseUrl,
-              ipAddress,
-              browser,
-            });
-
-            console.log('[Checkout] Authenticate payer response:', {
-              result: authenticateResponse.result,
-              authenticationStatus: authenticateResponse.transaction?.authenticationStatus,
-              hasRedirectHtml: !!authenticateResponse.redirectHtml,
-              gatewayRecommendation: authenticateResponse.gatewayRecommendation,
-            });
-
-            // Update payment record with authentication response
-            await firestorePayments.update(`${orderId}-${authTransactionId}`, {
-              status: authenticateResponse.result || authenticateResponse.transaction?.authenticationStatus || 'AUTHENTICATING',
-              authentication: authenticateResponse.authentication,
-              gatewayRecommendation: authenticateResponse.gatewayRecommendation,
-            });
-
-            // Check if 3DS challenge is required
-            if (authenticateResponse.redirectHtml) {
-              // 3DS challenge required - return redirect HTML to frontend
-              return {
-                requires3DS: true,
-                orderId,
-                authenticationTransactionId: authTransactionId,
-                redirectHtml: authenticateResponse.redirectHtml,
-                authentication: authenticateResponse.authentication,
-                gatewayRecommendation: authenticateResponse.gatewayRecommendation,
-                message: '3DS authentication required. Please complete the challenge.',
-              };
-            }
-
-            // Frictionless authentication - proceed directly to payment
-            const authenticationStatus = authenticateResponse.transaction?.authenticationStatus || 
-                                       authenticateResponse.authenticationStatus || 
-                                       'Y'; // Default to Y if not provided
-
-            // Step 3: Complete payment with authentication
-            const finalPaymentTransactionId = '2'; // Use transaction ID "2" for payment
-            gatewayResponse = await payWithAuthentication({
-              orderId,
-              paymentTransactionId: finalPaymentTransactionId,
-              authenticationTransactionId: authTransactionId,
-              authenticationStatus,
-              card: {
-                number: input.cardNumber,
-                expiryMonth: input.expiryMonth,
-                expiryYear: input.expiryYear,
-                nameOnCard: input.cardholderName,
-                securityCode: cvvValue,
-              },
-              amount: remainingAmount,
-              currency,
-            });
-          }
+          console.log('[Checkout] Processing direct card payment without 3DS');
+          gatewayResponse = await payWithCard({
+            orderId,
+            paymentTransactionId,
+            card: {
+              number: input.cardNumber,
+              expiryMonth: input.expiryMonth,
+              expiryYear: input.expiryYear,
+              nameOnCard: input.cardholderName,
+              securityCode: cvvValue,
+            },
+            amount: remainingAmount,
+            currency,
+          });
         }
       }
 

@@ -514,8 +514,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   logo: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
   },
   headerTitle: {
     fontSize: 16,

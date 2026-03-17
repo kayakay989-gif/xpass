@@ -321,8 +321,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   brandLogo: {
-    width: 28,
-    height: 28,
+    width: 40,
+    height: 40,
   },
   brandText: {
     fontSize: 18,

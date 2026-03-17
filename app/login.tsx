@@ -673,8 +673,8 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   logo: {
-    width: 32,
-    height: 32,
+    width: 40,
+    height: 40,
   },
   brandText: {
     fontSize: 16,

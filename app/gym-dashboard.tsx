@@ -740,7 +740,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#EFEFEF',
   },
   brandRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10 },
-  brandLogo: { width: 28, height: 28 },
+  brandLogo: { width: 40, height: 40 },
   brandText: { fontSize: 18, fontWeight: '800' as const, color: '#111827', letterSpacing: 0.4 },
   topBarRight: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 10 },
   profilePill: {

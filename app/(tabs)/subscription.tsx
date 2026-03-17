@@ -354,8 +354,8 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   logo: {
-    width: 40,
-    height: 40,
+    width: 48,
+    height: 48,
   },
   headerRight: {
     flexDirection: 'row',
