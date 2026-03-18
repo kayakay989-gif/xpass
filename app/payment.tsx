@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { trpc } from '@/lib/trpc';
@@ -29,6 +29,7 @@ export default function PaymentScreen() {
   const [challengeHtml, setChallengeHtml] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [authTransactionId, setAuthTransactionId] = useState<string | null>(null);
+  const finalizeSentRef = useRef(false);
   const [showNativeContinueButton, setShowNativeContinueButton] = useState<boolean>(false);
   const [couponCode, setCouponCode] = useState<string>('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
@@ -111,6 +112,7 @@ export default function PaymentScreen() {
       // Check if 3DS authentication is required
       if (data.requires3DS && data.redirectHtml) {
         console.log('[Payment] 3DS challenge required, showing authentication page');
+        finalizeSentRef.current = false; // New challenge => allow finalize again
         setOrderId(data.orderId);
         setAuthTransactionId(data.authenticationTransactionId);
         setChallengeHtml(data.redirectHtml);
@@ -473,6 +475,7 @@ export default function PaymentScreen() {
       console.error('[Payment] Failed to finalize payment after 3DS:', error);
       setPaymentProcessing(false);
       setStatusMessage('');
+      finalizeSentRef.current = false; // Allow retry if finalize failed
       Alert.alert('Payment Failed', error.message || 'Failed to complete payment after authentication. Please try again.');
     }
     },
@@ -494,22 +497,43 @@ export default function PaymentScreen() {
 
   // Web: Mastercard 3DS callback posts a `message` event to the parent window.
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
-
     const handler = (event: any) => {
       try {
+        // Only available in web builds (iframe + postMessage).
+        if (typeof window === 'undefined') return;
+
         const data =
           typeof event?.data === 'string' ? JSON.parse(event.data) : event.data;
 
-        if (data?.type === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
-          console.log('[Payment] 3DS_AUTH_COMPLETE received via window message');
+        if (data?.type === '3DS_AUTH_COMPLETE') {
+          const finalOrderId = data.orderId ?? orderId;
+          const finalAuthTransactionId = data.authTransactionId ?? authTransactionId;
+
+          if (!finalOrderId || !finalAuthTransactionId) return;
+
+          if (finalizeSentRef.current) return;
+          finalizeSentRef.current = true;
+
+          if (__DEV__) {
+            console.log('[Payment] 3DS_AUTH_COMPLETE received via window message', {
+              finalOrderId,
+              finalAuthTransactionId,
+              result: data?.result,
+            });
+          }
+
           setChallengeHtml(null);
-          handleFinalizePayment(orderId, authTransactionId, data.result || 'Y');
+          handleFinalizePayment(finalOrderId, finalAuthTransactionId, data.result || 'Y');
         }
       } catch (e) {
         // Ignore non-JSON or unrelated messages
       }
     };
+
+    const finalizeSentRefLocal = finalizeSentRef.current;
+    if (finalizeSentRefLocal) {
+      // no-op; reference already set
+    }
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
