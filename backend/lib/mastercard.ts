@@ -13,7 +13,9 @@ type BrowserDetails = {
 };
 
 type CardDetails = {
-  number: string;
+  // Either `number` (PAN) or `token` (gateway token) must be provided depending on flow.
+  number?: string;
+  token?: string;
   expiryMonth?: string;
   expiryYear?: string;
   nameOnCard?: string;
@@ -33,6 +35,28 @@ type GatewayConfig = {
   apiPassword: string;
   apiVersion: string;
 };
+
+/**
+ * Lightweight error type so callers can distinguish:
+ * - Network / protocol errors
+ * - Gateway-declared payment failures (issuer decline, blocked, etc.)
+ *
+ * The raw gateway payload is attached for internal logging ONLY and must
+ * never be sent directly to the client.
+ */
+export class MastercardGatewayError extends Error {
+  status: number;
+  raw: any;
+  isNetworkError: boolean;
+
+  constructor(message: string, opts: { status: number; raw: any; isNetworkError?: boolean }) {
+    super(message);
+    this.name = 'MastercardGatewayError';
+    this.status = opts.status;
+    this.raw = opts.raw;
+    this.isNetworkError = !!opts.isNetworkError;
+  }
+}
 
 function normalizeGatewayHost(rawHost: string): string {
   const h = rawHost.trim();
@@ -130,14 +154,30 @@ async function putToGateway(
 
   const url = buildUrl(orderId, transactionId, cfg);
 
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: buildAuthHeader(cfg),
-    },
-    body: JSON.stringify(payload),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: buildAuthHeader(cfg),
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err: any) {
+    // Network-level failure (DNS, TLS, timeout, etc.)
+    console.error('[Mastercard] Network error while calling gateway', {
+      url,
+      orderId,
+      transactionId,
+      error: err?.message,
+    });
+    throw new MastercardGatewayError('Payment service is temporarily unavailable', {
+      status: 0,
+      raw: { error: err?.message ?? String(err) },
+      isNetworkError: true,
+    });
+  }
 
   const text = await response.text();
 
@@ -146,11 +186,40 @@ async function putToGateway(
   try {
     json = text ? JSON.parse(text) : {};
   } catch {
-    throw new Error('Invalid response from payment gateway');
+    console.error('[Mastercard] Failed to parse gateway JSON response', {
+      url,
+      orderId,
+      transactionId,
+      status: response.status,
+      bodyPreview: text?.slice(0, 500),
+    });
+    throw new MastercardGatewayError('Invalid response from payment gateway', {
+      status: response.status,
+      raw: text,
+    });
   }
 
   if (!response.ok) {
-    throw new Error(json.error?.explanation || 'Payment gateway error');
+    // Non-2xx from gateway – surface a structured error so callers can
+    // decide whether this is an issuer decline vs. transient error.
+    console.error('[Mastercard] Gateway returned non-OK HTTP status', {
+      url,
+      orderId,
+      transactionId,
+      status: response.status,
+      response: json,
+    });
+
+    const message =
+      json.error?.explanation ||
+      json.error?.message ||
+      json.result ||
+      'Payment gateway error';
+
+    throw new MastercardGatewayError(message, {
+      status: response.status,
+      raw: json,
+    });
   }
 
   return json;
@@ -302,11 +371,16 @@ export async function initiateAuthentication(params: {
     sourceOfFunds: {
       provided: {
         card: {
-          number: card.number,
+          ...(card.number ? { number: card.number } : {}),
+          ...(card.token ? { token: card.token } : {}),
         },
       },
     },
   };
+
+  if (!card.number && !card.token) {
+    throw new Error('Either card number or card token is required for 3DS initiation');
+  }
 
   if (methodNotificationUrl) {
     try {
@@ -362,7 +436,8 @@ export async function authenticatePayer(params: {
     sourceOfFunds: {
       provided: {
         card: {
-          number: card.number,
+          ...(card.number ? { number: card.number } : {}),
+          ...(card.token ? { token: card.token } : {}),
           expiry: {
             month: card.expiryMonth,
             year: card.expiryYear,
@@ -413,6 +488,14 @@ export async function payWithAuthentication(params: {
   if (!card?.securityCode) {
     throw new Error('CVV required for authenticated payment');
   }
+  const hasPan = !!card?.number;
+  const hasToken = !!card?.token;
+  if (!hasPan && !hasToken) {
+    throw new Error('Either card number or card token is required for authenticated payment');
+  }
+  if (hasPan && (!card.expiryMonth || !card.expiryYear)) {
+    throw new Error('Card expiry missing for authenticated payment');
+  }
 
   const amountStr = Number.isFinite(amount)
     ? amount.toFixed(2)
@@ -432,11 +515,12 @@ export async function payWithAuthentication(params: {
       type: 'CARD',
       provided: {
         card: {
-          number: card.number,
-          expiry: {
-            month: card.expiryMonth,
-            year: card.expiryYear,
-          },
+          ...(hasPan ? { number: card.number } : {}),
+          ...(hasToken ? { token: card.token } : {}),
+          expiry:
+            card.expiryMonth && card.expiryYear
+              ? { month: card.expiryMonth, year: card.expiryYear }
+              : undefined,
           securityCode: card.securityCode,
         },
       },

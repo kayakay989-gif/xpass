@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { protectedProcedure } from '@/backend/trpc/create-context';
-import { computeAmount } from '@/backend/lib/mastercard';
+import { TRPCError } from '@trpc/server';
+import { computeAmount, MastercardGatewayError } from '@/backend/lib/mastercard';
 import { Subscription } from '@/types';
 import { 
   firestorePayments, 
@@ -44,14 +45,55 @@ export default protectedProcedure
   )
   .mutation(async ({ input, ctx }) => {
     if (ctx.user?.uid !== input.userId) {
-      throw new Error('Unauthorized');
+      throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
 
     const currency = input.currency || 'JOD';
 
+    const declined = {
+      success: false,
+      error: {
+        type: 'payment_declined',
+        message:
+          'Your bank declined the payment. Try another card or contact your bank.',
+        code: 'ISSUER_DECLINED',
+      },
+    };
+
+    const isIssuerDeclinedFromRaw = (raw: any): boolean => {
+      const asText = JSON.stringify(raw ?? {}).toUpperCase();
+      if (asText.includes('PAYMENT BLOCKED BY ISSUER')) return true;
+      if (asText.includes('BLOCKED BY ISSUER')) return true;
+      if (asText.includes('DO_NOT_HONOR')) return true;
+      if (asText.includes('CARD_DECLINED')) return true;
+      if (asText.includes('EXPIRED_CARD')) return true;
+      if (asText.includes('INSUFFICIENT_FUNDS')) return true;
+      if (asText.includes('"DECLINED"')) return true;
+      if (asText.includes('"BLOCKED"')) return true;
+
+      const result = String(raw?.result ?? raw?.transaction?.result ?? '').toUpperCase();
+      if (['DECLINED', 'BLOCKED'].includes(result)) return true;
+
+      const gatewayCode = String(
+        raw?.response?.gatewayCode ?? raw?.gatewayCode ?? ''
+      ).toUpperCase();
+      if (
+        ['DO_NOT_HONOR', 'CARD_DECLINED', 'EXPIRED_CARD', 'INSUFFICIENT_FUNDS'].includes(
+          gatewayCode
+        )
+      ) {
+        return true;
+      }
+
+      return false;
+    };
+
     // VERSION 1: Restrict to card payments only - Apple Pay and Google Pay disabled
     if (input.paymentMethod !== 'card') {
-      throw new Error('Only card payments are supported in Version 1. Apple Pay and Google Pay will be available in Version 2.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only card payments are supported in Version 1. Apple Pay and Google Pay will be available in Version 2.',
+      });
     }
 
     // 1. Calculate subscription price
@@ -71,19 +113,19 @@ export default protectedProcedure
       const coupon = await firestoreCoupons.getByCode(upperCode);
 
       if (!coupon) {
-        throw new Error('Invalid coupon code');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid coupon code' });
       }
 
       if (!coupon.isActive) {
-        throw new Error('This coupon is not active');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This coupon is not active' });
       }
 
       if (coupon.expiresAt && coupon.expiresAt < new Date()) {
-        throw new Error('This coupon has expired');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This coupon has expired' });
       }
 
       if (coupon.usageLimit !== null && coupon.usedCount >= coupon.usageLimit) {
-        throw new Error('This coupon has reached its usage limit');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This coupon has reached its usage limit' });
       }
 
       discountAmount = (originalAmount * coupon.discountPercent) / 100;
@@ -97,14 +139,17 @@ export default protectedProcedure
       const endDate = existingSubscription.endDate ? new Date(existingSubscription.endDate) : null;
       const now = new Date();
       if (existingSubscription.isActive && endDate && endDate.getTime() > now.getTime()) {
-        throw new Error('You already have an active subscription');
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'You already have an active subscription',
+        });
       }
     }
 
     // 4. Get user wallet balance and calculate wallet usage
     const user = await firestoreUsers.getById(input.userId);
     if (!user) {
-      throw new Error('User not found');
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
     }
 
     const walletBalance = user.walletBalance || 0;
@@ -113,17 +158,22 @@ export default protectedProcedure
 
     // Validate wallet usage
     if (input.useWallet && walletUsed > walletBalance) {
-      throw new Error('Insufficient wallet balance');
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Insufficient wallet balance' });
     }
     if (walletUsed < 0) {
-      throw new Error('Wallet amount cannot be negative');
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Wallet amount cannot be negative' });
     }
 
     // 5. Generate order ID
     const timestamp = Date.now();
     const shortUserId = input.userId.substring(0, 10);
     const orderId = `ord-${timestamp}-${shortUserId}`;
-    const paymentTransactionId = '1';
+
+    // MPGS Direct REST best-practice for mandatory 3DS2 (see MPGS_GO_LIVE.md):
+    // - INITIATE_AUTHENTICATION + AUTHENTICATE_PAYER => transactionId "1"
+    // - PAY => transactionId "2" referencing authentication.transactionId "1"
+    const authTransactionId = '1';
+    const paymentTransactionId = '2';
 
     // 6. Create payment record (status: PROCESSING)
     await firestorePayments.create({
@@ -154,6 +204,7 @@ export default protectedProcedure
       // Apple Pay and Google Pay code preserved for Version 2
       // After the check on line 49, TypeScript knows paymentMethod can only be 'card'
       if (input.paymentMethod === 'card') {
+        try {
         // Debug: Log received CVV (masked for security)
         console.log('[Checkout] Received payment data:', {
           hasSavedCardId: !!input.savedCardId,
@@ -171,48 +222,235 @@ export default protectedProcedure
             cvvLength: input.cvv ? input.cvv.length : 0,
             cvvValue: input.cvv ? `[${input.cvv}]` : 'undefined',
           });
-          throw new Error('CVV is required for card payment');
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'CVV is required for card payment',
+          });
         }
 
         const cvvValue = input.cvv.trim();
 
         // Handle saved card or new card
-        if (input.savedCardId) {
-          // Use saved card token
-          const savedCard = user.savedCards?.find(card => card.id === input.savedCardId);
-          if (!savedCard || !savedCard.token) {
-            throw new Error('Saved card not found or invalid');
-          }
+        const isProd = process.env['NODE_ENV'] === 'production';
+        const ua = ctx.req.headers.get('user-agent') || '';
+        const authenticationChannel: 'PAYER_BROWSER' | 'PAYER_APP' = /expo|reactnative|okhttp|dart|android|iphone|ipad|mobile/i.test(ua)
+          ? 'PAYER_APP'
+          : 'PAYER_BROWSER';
 
-          // Charge via saved card token (CVV still required for security)
-          console.log('[Checkout] Using saved card with CVV length:', cvvValue.length);
-          gatewayResponse = await payWithToken({
-            orderId,
-            paymentTransactionId,
-            paymentToken: savedCard.token,
-            securityCode: cvvValue, // Map frontend 'cvv' to Mastercard 'securityCode'
-            amount: remainingAmount,
-            currency,
-          });
-        } else {
-          // New card payment - process directly without 3DS for now
-          if (!input.cardNumber || !input.expiryMonth || !input.expiryYear) {
-            throw new Error('Card details are required for card payment');
-          }
+        const savedCard =
+          input.savedCardId && user.savedCards
+            ? user.savedCards.find((card) => card.id === input.savedCardId)
+            : undefined;
 
-          console.log('[Checkout] Processing direct card payment without 3DS');
-          gatewayResponse = await payWithCard({
-            orderId,
-            paymentTransactionId,
-            card: {
+        const cardBase: any = input.savedCardId
+          ? {
+              token: savedCard?.token,
+              expiryMonth: savedCard?.expiryMonth ? String(savedCard.expiryMonth) : undefined,
+              expiryYear: savedCard?.expiryYear ? String(savedCard.expiryYear) : undefined,
+              nameOnCard: savedCard?.cardholderName,
+            }
+          : {
               number: input.cardNumber,
               expiryMonth: input.expiryMonth,
               expiryYear: input.expiryYear,
               nameOnCard: input.cardholderName,
+            };
+
+        if (input.savedCardId && (!savedCard || !savedCard.token)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Saved card not found or invalid',
+          });
+        }
+
+        if (!input.savedCardId && (!input.cardNumber || !input.expiryMonth || !input.expiryYear)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Card details are required for card payment',
+          });
+        }
+
+        // Production merchant: enforce mandatory 3DS2 (txn "1" auth, txn "2" PAY referencing auth.transactionId="1").
+        // - If 3DS is not completed yet, initiate authentication and return challenge HTML (when needed).
+        // - If frictionless auth is possible, complete PAY server-side and continue normally.
+        if (isProd) {
+          const redirectResponseUrlEnv = process.env['EXPO_PUBLIC_RORK_API_BASE_URL'];
+          const redirectResponseUrl = redirectResponseUrlEnv
+            ? `${redirectResponseUrlEnv.replace(/\/+$/, '')}/api/3ds/callback`
+            : undefined;
+
+          if (!redirectResponseUrl) {
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'Payment authentication callback URL is not configured.',
+            });
+          }
+
+          // If client already has a completed authentication, finalize using PAY referencing auth transaction id.
+          if (input.authenticationTransactionId) {
+            gatewayResponse = await payWithAuthentication({
+              orderId,
+              paymentTransactionId,
+              authenticationTransactionId: input.authenticationTransactionId,
+              authenticationStatus: input.authenticationStatus,
+              card: {
+                ...cardBase,
+                securityCode: cvvValue,
+              },
+              amount: remainingAmount,
+              currency,
+            });
+          } else {
+            // If 3DS isn't complete yet, initiate+authenticate.
+            // Note: We don't currently render the INITIATE_AUTHENTICATION method HTML in the client; this may reduce
+            // frictionless success rate if the gateway issues a method call. Challenge flow should still work.
+            const initResp = await initiateAuthentication({
+              orderId,
+              transactionId: authTransactionId,
+              currency,
+              channel: authenticationChannel,
+              card: cardBase,
+            });
+
+            const authResp = await authenticatePayer({
+              orderId,
+              transactionId: authTransactionId,
+              card: cardBase,
+              amount: remainingAmount,
+              currency,
+              redirectResponseUrl,
+              ipAddress:
+                ctx.req.headers.get('cf-connecting-ip') ||
+                (ctx.req.headers.get('x-forwarded-for') || '').split(',')[0]?.trim() ||
+                undefined,
+              browser: ua || 'MOZILLA',
+            });
+
+            const redirectHtml = authResp.authentication?.redirect?.html;
+            const gatewayRecommendation = authResp.response?.gatewayRecommendation;
+
+            // If gateway recommends not proceeding, treat it as an issuer-declined/auth decline for user messaging.
+            if (
+              gatewayRecommendation &&
+              gatewayRecommendation !== 'PROCEED'
+            ) {
+              await firestorePayments.update(`${orderId}-${paymentTransactionId}`, {
+                status: 'failed',
+                authentication: authResp.authentication,
+                gatewayRecommendation,
+                rawResponse: { authenticate: authResp },
+              });
+
+              const declined = {
+                success: false,
+                error: {
+                  type: 'payment_declined',
+                  message:
+                    'Your bank declined the payment. Try another card or contact your bank.',
+                  code: 'ISSUER_DECLINED',
+                },
+              };
+
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: declined.error.message,
+                cause: declined,
+              });
+            }
+
+            // If challenge is required, return HTML to the frontend and wait for callback before PAY.
+            if (redirectHtml) {
+              await firestorePayments.update(`${orderId}-${paymentTransactionId}`, {
+                status: 'AUTHENTICATION_REQUIRED',
+                gatewayRecommendation,
+                authentication: authResp.authentication,
+                rawResponse: { initiate: initResp, authenticate: authResp },
+              });
+
+              return {
+                success: true,
+                requires3DS: true,
+                redirectHtml,
+                orderId,
+                authenticationTransactionId: authTransactionId,
+                gatewayRecommendation,
+                walletUsed,
+                externalPaymentAmount: remainingAmount,
+                totalAmount: finalAmount,
+              };
+            }
+
+            // Frictionless auth: proceed with authenticated PAY immediately.
+            gatewayResponse = await payWithAuthentication({
+              orderId,
+              paymentTransactionId,
+              authenticationTransactionId: authTransactionId,
+              card: {
+                ...cardBase,
+                securityCode: cvvValue,
+              },
+              amount: remainingAmount,
+              currency,
+            });
+          }
+        } else {
+          // Non-production fallback: allow direct card PAY without 3DS.
+          if (input.savedCardId) {
+            gatewayResponse = await payWithToken({
+              orderId,
+              paymentTransactionId,
+              paymentToken: savedCard!.token,
               securityCode: cvvValue,
-            },
-            amount: remainingAmount,
-            currency,
+              amount: remainingAmount,
+              currency,
+            });
+          } else {
+            gatewayResponse = await payWithCard({
+              orderId,
+              paymentTransactionId,
+              card: {
+                number: input.cardNumber,
+                expiryMonth: input.expiryMonth,
+                expiryYear: input.expiryYear,
+                nameOnCard: input.cardholderName,
+                securityCode: cvvValue,
+              },
+              amount: remainingAmount,
+              currency,
+            });
+          }
+        }
+        } catch (err: any) {
+          if (err instanceof TRPCError) {
+            throw err;
+          }
+
+          if (err instanceof MastercardGatewayError) {
+            console.error('[Checkout] Mastercard gateway error caught:', {
+              message: err.message,
+              raw: err.raw,
+              isNetworkError: (err as any).isNetworkError,
+            });
+
+            const msgText = String(err?.message ?? '').toUpperCase();
+            if (isIssuerDeclinedFromRaw(err.raw) || msgText.includes('PAYMENT BLOCKED BY ISSUER') || msgText.includes('BLOCKED BY ISSUER')) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: declined.error.message,
+                cause: declined,
+              });
+            }
+
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message:
+                'We could not complete the payment due to a gateway error. Please try again later.',
+            });
+          }
+
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Payment processing failed',
           });
         }
       }
@@ -247,53 +485,42 @@ export default protectedProcedure
           gatewayResponse,
         });
         
-        // Provide more detailed error message
-        let errorMessage = 'Payment failed: Unknown error from payment gateway';
-        if (errorReason) {
-          errorMessage = `Payment failed: ${errorReason}`;
-          if (errorDetails && errorDetails !== errorReason && errorDetails !== `Gateway Code: ${errorReason}`) {
-            errorMessage += ` (${errorDetails})`;
-          }
+        // Determine if this is an issuer-declined / blocked payment
+        const result = String(gatewayResponse?.result || '').toUpperCase();
+        const gatewayCode = String(gatewayResponse?.response?.gatewayCode || '').toUpperCase();
+
+        const issuerDeclineResults = ['DECLINED', 'BLOCKED'];
+        const issuerDeclineCodes = ['DO_NOT_HONOR', 'CARD_DECLINED', 'EXPIRED_CARD', 'INSUFFICIENT_FUNDS'];
+
+        const isIssuerDeclined =
+          issuerDeclineResults.includes(result) ||
+          issuerDeclineCodes.includes(gatewayCode) ||
+          /BLOCKED BY ISSUER/i.test(String(errorReason || ''));
+
+        if (isIssuerDeclined) {
+          const declined = {
+            success: false,
+            error: {
+              type: 'payment_declined',
+              message:
+                'Your bank declined the payment. Try another card or contact your bank.',
+              code: 'ISSUER_DECLINED',
+            },
+          };
+
+          // Map to standardized payment_declined error
+          throw new TRPCError({
+            code: 'BAD_REQUEST', // HTTP 400
+            message: declined.error.message,
+            cause: declined,
+          });
         }
-        
-        // For BLOCKED payments, provide more context
-        if (gatewayResponse?.result === 'BLOCKED' || errorReason === 'BLOCKED') {
-          // Extract all possible block reasons from the response
-          const blockReasons = [
-            gatewayResponse?.response?.gatewayCode,
-            gatewayResponse?.response?.gatewayMessage,
-            gatewayResponse?.response?.acquirerResponse?.code,
-            gatewayResponse?.response?.acquirerResponse?.message,
-            gatewayResponse?.response?.acquirerResponse?.issuerMessage,
-            gatewayResponse?.response?.decision,
-            gatewayResponse?.response?.reason,
-            gatewayResponse?.response?.acquirerMessage,
-            gatewayResponse?.error?.explanation,
-            gatewayResponse?.error?.message,
-            gatewayResponse?.error?.cause,
-          ].filter(Boolean); // Remove undefined/null values
-          
-          const blockReason = blockReasons.length > 0 
-            ? blockReasons.join(' - ') 
-            : 'Card or transaction blocked by issuer';
-          
-          // If we only got "BLOCKED" as the reason, try to get more details
-          if (blockReason === 'BLOCKED' || blockReasons.length === 0) {
-            // Log the full response structure for debugging
-            console.error('[Checkout] BLOCKED payment - Full response structure:', {
-              result: gatewayResponse?.result,
-              response: gatewayResponse?.response,
-              error: gatewayResponse?.error,
-              transaction: gatewayResponse?.transaction,
-              order: gatewayResponse?.order,
-            });
-            errorMessage = 'Payment blocked by issuer. Please contact your bank or try a different payment method.';
-          } else {
-            errorMessage = `Payment blocked: ${blockReason}. Please contact your bank or try a different payment method.`;
-          }
-        }
-        
-        throw new Error(errorMessage);
+
+        // Non-issuer failure – treat as gateway / processing error
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'We could not complete the payment due to a gateway error. Please try again later.',
+        });
       }
 
       paymentSuccess = true;
@@ -435,5 +662,8 @@ export default protectedProcedure
       };
     }
 
-    throw new Error('Payment processing failed');
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Payment processing failed',
+    });
   });

@@ -18,6 +18,7 @@
       "bundleIdentifier": "com.xpass.app",
       "buildNumber": "15",
       "config": {},
+      "usesNonExemptEncryption": false,
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
         "applinks:xpass.app"
@@ -27,6 +28,7 @@
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone",
         "NSLocationWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to access your location to show nearby gyms",
         "NSLocationAlwaysUsageDescription": "Allow $(PRODUCT_NAME) to access your location for map features",
+        "ITSAppUsesNonExemptEncryption": false,
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleLocalizations": [
           "fr"

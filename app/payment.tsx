@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { trpc } from '@/lib/trpc';
@@ -60,11 +60,48 @@ export default function PaymentScreen() {
   const checkoutMutation = trpc.payments.checkout.useMutation({
     onError: (error) => {
       console.error('[Payment] Checkout mutation error:', error);
+
       setPaymentProcessing(false);
       setStatusMessage('');
+
+      const message = error.message || 'Failed to process payment. Please try again.';
+      const anyErr = error as any;
+      const structured =
+        anyErr?.cause?.error ||
+        anyErr?.data?.error ||
+        anyErr?.json?.error?.cause?.error ||
+        anyErr?.json?.error?.data?.error;
+
+      if (__DEV__) {
+        console.log('[Payment] tRPC error details:', {
+          message: error.message,
+          data: anyErr?.data,
+          shape: anyErr?.shape,
+          cause: anyErr?.cause,
+          structured,
+        });
+      }
+
+      if (
+        structured?.type === 'payment_declined' ||
+        message.includes('Your bank declined the payment') ||
+        message.includes('Payment blocked by issuer')
+      ) {
+        Alert.alert(
+          'Payment Declined',
+          structured?.message ||
+            'Your bank declined the payment. Try another card or contact your bank.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Network / gateway / unknown failure
       Alert.alert(
-        'Payment Failed',
-        error.message || 'Failed to process payment. Please try again.',
+        'Payment Error',
+        message.includes('temporarily unavailable') || message.includes('gateway')
+          ? 'We could not reach the payment service. Please check your connection and try again.'
+          : message,
         [{ text: 'OK' }]
       );
     },
@@ -388,7 +425,12 @@ export default function PaymentScreen() {
   };
 
   // Handle finalizing payment after 3DS authentication
-  const handleFinalizePayment = async (finalOrderId: string, finalAuthTransactionId: string, authStatus: string) => {
+  const handleFinalizePayment = useCallback(
+    async (
+      finalOrderId: string,
+      finalAuthTransactionId: string,
+      authStatus: string
+    ) => {
     console.log('[Payment] Finalizing payment after 3DS:', {
       orderId: finalOrderId,
       authTransactionId: finalAuthTransactionId,
@@ -433,7 +475,45 @@ export default function PaymentScreen() {
       setStatusMessage('');
       Alert.alert('Payment Failed', error.message || 'Failed to complete payment after authentication. Please try again.');
     }
-  };
+    },
+    [
+      user,
+      cardNumber,
+      parsedExpiry,
+      cvv,
+      selectedSavedCardId,
+      cardholderName,
+      tier,
+      duration,
+      useWallet,
+      saveCard,
+      appliedCoupon,
+      checkoutMutation,
+    ]
+  );
+
+  // Web: Mastercard 3DS callback posts a `message` event to the parent window.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    const handler = (event: any) => {
+      try {
+        const data =
+          typeof event?.data === 'string' ? JSON.parse(event.data) : event.data;
+
+        if (data?.type === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
+          console.log('[Payment] 3DS_AUTH_COMPLETE received via window message');
+          setChallengeHtml(null);
+          handleFinalizePayment(orderId, authTransactionId, data.result || 'Y');
+        }
+      } catch (e) {
+        // Ignore non-JSON or unrelated messages
+      }
+    };
+
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [orderId, authTransactionId, handleFinalizePayment]);
 
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) {
@@ -1129,6 +1209,23 @@ export default function PaymentScreen() {
                 }
               }}
             />
+          </View>
+        )}
+
+        {challengeHtml && Platform.OS === 'web' && (
+          <View style={styles.challengeOverlay}>
+            <Text style={styles.challengeTitle}>Complete bank verification</Text>
+            <Text style={styles.challengeSubtitle}>Follow the steps from your bank to continue</Text>
+            <View style={styles.challengeWebview}>
+              {/* srcDoc is required so the returned 3DS HTML actually executes in the iframe */}
+              {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
+              {/* @ts-ignore */}
+              <iframe
+                title="3DS Challenge"
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                srcDoc={challengeHtml}
+              />
+            </View>
           </View>
         )}
       </View>

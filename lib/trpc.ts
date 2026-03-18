@@ -116,7 +116,26 @@ export const trpcClient = trpc.createClient({
           
           if (!response.ok) {
             const text = await response.text();
-            throw new Error(`HTTP ${response.status}: ${text}`);
+            let json: any = null;
+            try {
+              json = text ? JSON.parse(text) : null;
+            } catch {
+              json = null;
+            }
+
+            const err = new Error(
+              json?.error?.message ||
+                json?.message ||
+                `HTTP ${response.status}: ${text}`
+            ) as any;
+
+            err.status = response.status;
+            err.json = json;
+            err.data = json?.error?.data;
+            err.shape = json?.error?.shape;
+            err.cause = json?.error?.cause;
+
+            throw err;
           }
           
           return response;
