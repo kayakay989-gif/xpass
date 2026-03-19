@@ -35,6 +35,7 @@ export default protectedProcedure
       savedCardId: z.string().optional(), // ID of saved card to use
       saveCard: z.boolean().optional().default(false), // Whether to save the card after payment
       // 3DS Authentication (for completing payment after challenge)
+      orderId: z.string().optional(), // Original orderId from 3DS initiation (required when finalizing auth)
       authenticationTransactionId: z.string().optional(), // Transaction ID from 3DS authentication
       authenticationStatus: z.string().optional(), // 3DS authentication status (Y, N, U, I, A)
       redirectUrl: z.string().url().optional(), // Redirect URL for 3DS callback (dev only)
@@ -164,10 +165,20 @@ export default protectedProcedure
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Wallet amount cannot be negative' });
     }
 
-    // 5. Generate order ID
-    const timestamp = Date.now();
-    const shortUserId = input.userId.substring(0, 10);
-    const orderId = `ord-${timestamp}-${shortUserId}`;
+    // 5. Resolve order ID:
+    // - Initial card checkout creates a new order ID
+    // - Post-3DS finalize must reuse the same original order ID
+    const isFinalizingAuthenticatedPayment = !!input.authenticationTransactionId;
+    const orderId = isFinalizingAuthenticatedPayment
+      ? input.orderId
+      : `ord-${Date.now()}-${input.userId.substring(0, 10)}`;
+
+    if (!orderId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Missing order ID for authenticated payment finalization.',
+      });
+    }
 
     // MPGS Direct REST best-practice for mandatory 3DS2 (see MPGS_GO_LIVE.md):
     // - INITIATE_AUTHENTICATION + AUTHENTICATE_PAYER => transactionId "1"
@@ -175,25 +186,36 @@ export default protectedProcedure
     const authTransactionId = '1';
     const paymentTransactionId = '2';
 
-    // 6. Create payment record (status: PROCESSING)
-    await firestorePayments.create({
-      id: `${orderId}-${paymentTransactionId}`,
-      userId: input.userId,
-      tier: input.tier,
-      duration: input.duration,
-      amount: remainingAmount,
-      originalAmount,
-      discountAmount,
-      currency,
-      orderId,
-      transactionId: paymentTransactionId,
-      status: 'PROCESSING_PAYMENT',
-      couponCode: input.couponCode?.toUpperCase().trim() || null,
-      walletUsed: walletUsed,
-      externalPaymentAmount: remainingAmount,
-      totalAmount: finalAmount,
-      paymentMethod: input.paymentMethod,
-    });
+    // 6. Upsert payment record:
+    // - First call creates the payment shell
+    // - Finalize call updates the same payment record for the original order
+    const paymentRecordId = `${orderId}-${paymentTransactionId}`;
+    if (isFinalizingAuthenticatedPayment) {
+      await firestorePayments.update(paymentRecordId, {
+        status: 'PROCESSING_PAYMENT',
+        authenticationTransactionId: input.authenticationTransactionId,
+        authenticationStatus: input.authenticationStatus || 'Y',
+      });
+    } else {
+      await firestorePayments.create({
+        id: paymentRecordId,
+        userId: input.userId,
+        tier: input.tier,
+        duration: input.duration,
+        amount: remainingAmount,
+        originalAmount,
+        discountAmount,
+        currency,
+        orderId,
+        transactionId: paymentTransactionId,
+        status: 'PROCESSING_PAYMENT',
+        couponCode: input.couponCode?.toUpperCase().trim() || null,
+        walletUsed: walletUsed,
+        externalPaymentAmount: remainingAmount,
+        totalAmount: finalAmount,
+        paymentMethod: input.paymentMethod,
+      });
+    }
 
     // 7. Process external payment if remaining amount > 0
     let gatewayResponse = null;

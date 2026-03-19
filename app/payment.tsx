@@ -30,7 +30,6 @@ export default function PaymentScreen() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [authTransactionId, setAuthTransactionId] = useState<string | null>(null);
   const finalizeSentRef = useRef(false);
-  const [showNativeContinueButton, setShowNativeContinueButton] = useState<boolean>(false);
   const [couponCode, setCouponCode] = useState<string>('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState<string>('');
@@ -226,19 +225,6 @@ export default function PaymentScreen() {
   }, [user]);
 
   // Google Pay and Apple Pay removed - card payments only
-
-  // For native (non-web) 3DS challenge, provide a manual "Continue" button as a fallback
-  // if the redirect/callback flow cannot return cleanly to the app.
-  useEffect(() => {
-    if (challengeHtml && Platform.OS !== 'web') {
-      const timer = setTimeout(() => {
-        setShowNativeContinueButton(true);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-    setShowNativeContinueButton(false);
-  }, [challengeHtml]);
-
 
   // Apple Pay and Google Pay handlers removed - card payments only
 
@@ -455,6 +441,7 @@ export default function PaymentScreen() {
       // Call checkout again with authentication details
       await checkoutMutation.mutateAsync({
         userId: user.id,
+        orderId: finalOrderId,
         tier: tier as any,
         duration: parseInt(duration) as any,
         useWallet: useWallet,
@@ -1209,24 +1196,44 @@ export default function PaymentScreen() {
                     ? JSON.parse(event.nativeEvent.data) 
                     : event.nativeEvent.data;
                   
-                  if (message?.type === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
+                  if (
+                    message?.type === '3DS_AUTH_COMPLETE' &&
+                    orderId &&
+                    authTransactionId &&
+                    !finalizeSentRef.current
+                  ) {
                     console.log('[Payment] 3DS authentication complete via message:', message);
+                    finalizeSentRef.current = true;
                     setChallengeHtml(null);
                     // Complete payment with authentication
                     handleFinalizePayment(orderId, authTransactionId, message.result || 'Y');
                   }
                 } catch (e) {
                   // If message is not JSON, check for string match
-                  if (event.nativeEvent.data === '3DS_AUTH_COMPLETE' && orderId && authTransactionId) {
+                  if (
+                    event.nativeEvent.data === '3DS_AUTH_COMPLETE' &&
+                    orderId &&
+                    authTransactionId &&
+                    !finalizeSentRef.current
+                  ) {
                     console.log('[Payment] 3DS authentication complete via string message');
+                    finalizeSentRef.current = true;
                     setChallengeHtml(null);
                     handleFinalizePayment(orderId, authTransactionId, 'Y');
                   }
                 }
               }}
               onNavigationStateChange={(navState) => {
-                if (navState.url && redirectUrl && navState.url.includes(redirectUrl.split('/').pop() || '') && orderId && authTransactionId) {
+                if (
+                  navState.url &&
+                  redirectUrl &&
+                  (navState.url.startsWith(redirectUrl) || navState.url.includes('/api/3ds/callback')) &&
+                  orderId &&
+                  authTransactionId &&
+                  !finalizeSentRef.current
+                ) {
                   console.log('[Payment] 3DS callback URL detected:', navState.url);
+                  finalizeSentRef.current = true;
                   setChallengeHtml(null);
                   // After challenge completion, authentication status is typically 'Y' (successful)
                   handleFinalizePayment(orderId, authTransactionId, 'Y');
@@ -1431,27 +1438,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderRadius: 12,
     overflow: 'hidden',
-  },
-  nativeContinueButton: {
-    position: 'absolute',
-    bottom: 40,
-    left: 24,
-    right: 24,
-    paddingVertical: 14,
-    borderRadius: 999,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  nativeContinueButtonText: {
-    color: Colors.white,
-    fontSize: 15,
-    fontWeight: '600' as const,
   },
   // Coupon styles
   couponSection: {
