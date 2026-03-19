@@ -167,10 +167,37 @@ export default protectedProcedure
 
     // 5. Resolve order ID:
     // - Initial card checkout creates a new order ID
-    // - Post-3DS finalize must reuse the same original order ID
+    // - Post-3DS finalize should reuse the same original order ID
+    //   (and can recover it from pending payment records if client payload is stale)
     const isFinalizingAuthenticatedPayment = !!input.authenticationTransactionId;
+    let resolvedFinalizeOrderId: string | undefined = input.orderId;
+    if (isFinalizingAuthenticatedPayment && !resolvedFinalizeOrderId) {
+      const recentPayments = await firestorePayments.listByUser(input.userId);
+      const matchingPendingPayment = recentPayments.find((payment: any) => {
+        const status = String(payment?.status || '').toUpperCase();
+        const hasPendingAuthStatus =
+          status === 'AUTHENTICATION_REQUIRED' || status === 'PROCESSING_PAYMENT';
+        const sameAuthTxn =
+          !!input.authenticationTransactionId &&
+          String(payment?.authenticationTransactionId || '') ===
+            String(input.authenticationTransactionId);
+        return hasPendingAuthStatus && !!payment?.orderId && sameAuthTxn;
+      });
+
+      const latestPendingPayment = recentPayments.find((payment: any) => {
+        const status = String(payment?.status || '').toUpperCase();
+        return (
+          (status === 'AUTHENTICATION_REQUIRED' || status === 'PROCESSING_PAYMENT') &&
+          !!payment?.orderId
+        );
+      });
+
+      resolvedFinalizeOrderId =
+        matchingPendingPayment?.orderId || latestPendingPayment?.orderId;
+    }
+
     const orderId = isFinalizingAuthenticatedPayment
-      ? input.orderId
+      ? resolvedFinalizeOrderId
       : `ord-${Date.now()}-${input.userId.substring(0, 10)}`;
 
     if (!orderId) {
@@ -384,6 +411,7 @@ export default protectedProcedure
             if (redirectHtml) {
               await firestorePayments.update(`${orderId}-${paymentTransactionId}`, {
                 status: 'AUTHENTICATION_REQUIRED',
+                authenticationTransactionId: authTransactionId,
                 gatewayRecommendation,
                 authentication: authResp.authentication,
                 rawResponse: { initiate: initResp, authenticate: authResp },
