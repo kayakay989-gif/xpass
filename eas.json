@@ -4,7 +4,16 @@
   },
   "build": {
     "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
       "distribution": "store"
+    },
+    "production-apk": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal"
