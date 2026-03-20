@@ -21,26 +21,36 @@ function withExpoFirebaseCoreFix(config) {
       config.modResults.contents = buildGradle + `
 
 subprojects {
-    afterEvaluate { project ->
-        // Ensure all Android projects have compileSdk (fixes expo-firebase-core issue)
-        if (project.hasProperty('android')) {
-            project.android {
-                if (!project.android.hasProperty('compileSdk') || project.android.compileSdk == null) {
-                    compileSdk 36
-                }
-            }
+    // NOTE: Do not use afterEvaluate here. Newer Gradle versions can throw:
+    // "Cannot run Project.afterEvaluate when the project is already evaluated."
+    plugins.withId('com.android.application') {
+        project.android {
+            compileSdk 36
         }
-        
-        // Fix androidSourcesJar classifier issue for expo-firebase-core (Gradle 8.x compatibility)
-        project.tasks.configureEach { task ->
+        tasks.configureEach { task ->
             if (task.name == 'androidSourcesJar') {
                 try {
-                    // Remove classifier property if it exists (not supported in Gradle 8.x)
                     if (task.hasProperty('classifier')) {
                         task.classifier = null
                     }
                 } catch (e) {
-                    // Ignore if classifier can't be modified
+                    // ignore
+                }
+            }
+        }
+    }
+    plugins.withId('com.android.library') {
+        project.android {
+            compileSdk 36
+        }
+        tasks.configureEach { task ->
+            if (task.name == 'androidSourcesJar') {
+                try {
+                    if (task.hasProperty('classifier')) {
+                        task.classifier = null
+                    }
+                } catch (e) {
+                    // ignore
                 }
             }
         }
@@ -57,25 +67,31 @@ subprojects {
           config.modResults.contents = buildGradle.replace(
             subprojectsRegex,
             `$1
-    afterEvaluate { project ->
-        // Ensure all Android projects have compileSdk (fixes expo-firebase-core issue)
-        if (project.hasProperty('android')) {
-            project.android {
-                if (!project.android.hasProperty('compileSdk') || project.android.compileSdk == null) {
-                    compileSdk 36
-                }
-            }
-        }
-        
-        // Fix androidSourcesJar classifier issue for expo-firebase-core (Gradle 8.x compatibility)
-        project.tasks.configureEach { task ->
+    // NOTE: Do not use afterEvaluate here (see comment above).
+    plugins.withId('com.android.application') {
+        project.android { compileSdk 36 }
+        tasks.configureEach { task ->
             if (task.name == 'androidSourcesJar') {
                 try {
                     if (task.hasProperty('classifier')) {
                         task.classifier = null
                     }
                 } catch (e) {
-                    // Ignore if classifier can't be modified
+                    // ignore
+                }
+            }
+        }
+    }
+    plugins.withId('com.android.library') {
+        project.android { compileSdk 36 }
+        tasks.configureEach { task ->
+            if (task.name == 'androidSourcesJar') {
+                try {
+                    if (task.hasProperty('classifier')) {
+                        task.classifier = null
+                    }
+                } catch (e) {
+                    // ignore
                 }
             }
         }
