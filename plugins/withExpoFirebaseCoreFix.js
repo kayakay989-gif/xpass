@@ -24,9 +24,6 @@ subprojects {
     // NOTE: Do not use afterEvaluate here. Newer Gradle versions can throw:
     // "Cannot run Project.afterEvaluate when the project is already evaluated."
     plugins.withId('com.android.application') {
-        project.android {
-            compileSdk 36
-        }
         tasks.configureEach { task ->
             if (task.name == 'androidSourcesJar') {
                 try {
@@ -40,9 +37,6 @@ subprojects {
         }
     }
     plugins.withId('com.android.library') {
-        project.android {
-            compileSdk 36
-        }
         tasks.configureEach { task ->
             if (task.name == 'androidSourcesJar') {
                 try {
@@ -123,16 +117,9 @@ $2`
         let modified = false;
 
         // Add compileSdk if missing
-        if (!buildGradle.includes('compileSdk')) {
-          if (buildGradle.includes('android {')) {
-            buildGradle = buildGradle.replace(
-              /(android\s*\{)/,
-              `$1
-    compileSdk 36`
-            );
-            modified = true;
-          }
-        }
+        // Intentionally do not modify compileSdk here.
+        // We rely on `expo-build-properties` (and Expo's standard config) so setting compileSdk later can crash with:
+        // "It is too late to set compileSdk ... has already been read".
 
         // Remove classifier from androidSourcesJar task
         if (buildGradle.includes('classifier')) {
