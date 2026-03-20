@@ -125,6 +125,23 @@ export default function PaymentScreen() {
 
       // After backend reports success, verify the subscription is active before redirecting.
       try {
+        const paymentOrderId = data.orderId ?? orderId;
+        if (!paymentOrderId) {
+          throw new Error('Missing orderId from backend payment result');
+        }
+
+        const verification = await verifyPaymentMutation.mutateAsync({
+          userId: user!.id,
+          orderId: paymentOrderId,
+          paymentTransactionId: data.paymentTransactionId ?? '2',
+        });
+
+        if (!verification?.confirmed) {
+          throw new Error(
+            `Payment not confirmed by backend (status=${String(verification?.status || 'unknown')})`
+          );
+        }
+
         const result = await subscriptionQuery.refetch();
         const sub = result.data;
         const now = new Date();
@@ -172,6 +189,9 @@ export default function PaymentScreen() {
       }
     },
   });
+
+  // Strict backend confirmation (used after 3DS so we don't show success until backend confirms).
+  const verifyPaymentMutation = trpc.payments.verify.useMutation();
 
   const formatCardNumber = (text: string) => {
     const cleaned = text.replace(/\s/g, '');
