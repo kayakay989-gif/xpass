@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { InteractionManager, TouchableOpacity } from "react-native";
+import { TouchableOpacity } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AppProvider } from "@/contexts/AppContext";
@@ -11,6 +11,10 @@ import { trpc, trpcClient } from "@/lib/trpc";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { validateConfig } from "@/lib/config";
 import { ChevronLeft } from "lucide-react-native";
+
+// Keep the native splash until we hide explicitly; hiding in the first tick leaves a black
+// window on Android release before the first React frame is painted.
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 const queryClient = new QueryClient();
 
@@ -90,24 +94,8 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
-    const hideSplash = () => {
-      SplashScreen.hideAsync().catch(() => undefined);
-    };
-
-    // Expo Router defers native splash hide until navigation is ready; if anything
-    // prevents that path, the OS splash can appear to "stick". Hide immediately and
-    // again after paint / interactions so the native layer always dismisses.
-    hideSplash();
-    const t1 = setTimeout(hideSplash, 250);
-    const t2 = setTimeout(hideSplash, 2000);
-    const task = InteractionManager.runAfterInteractions(() => hideSplash());
-
-    // Validate configuration on app start
     validateConfig();
 
-    // On web, proactively unregister any old service workers that might be
-    // caching stale bundles from previous PWA experiments. This ensures users
-    // always get the latest deployed version without needing to clear cache.
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker
         .getRegistrations()
@@ -122,11 +110,32 @@ export default function RootLayout() {
           console.warn('[RootLayout] Error querying service workers:', err);
         });
     }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let delayedHide: ReturnType<typeof setTimeout> | undefined;
+    const hide = () => {
+      if (!cancelled) {
+        SplashScreen.hideAsync().catch(() => undefined);
+      }
+    };
+
+    // Do not hide in the same tick as mount: Android release often shows a black window
+    // if the native splash is removed before the first React frame is painted.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        delayedHide = setTimeout(hide, 48);
+      });
+    });
+
+    const fallback = setTimeout(hide, 5000);
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      task.cancel?.();
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      if (delayedHide) clearTimeout(delayedHide);
+      clearTimeout(fallback);
     };
   }, []);
 
@@ -134,7 +143,7 @@ export default function RootLayout() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <trpc.Provider client={trpcClient} queryClient={queryClient}>
-          <GestureHandlerRootView style={{ flex: 1 }}>
+          <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.background }}>
             <AuthProvider>
               <AppProvider>
                 <RootLayoutNav />
