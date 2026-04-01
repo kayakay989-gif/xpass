@@ -1,11 +1,11 @@
-import { StyleSheet, Text, View, TouchableOpacity, ImageBackground } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Image, ImageBackground } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Stack } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
-// Local splash background asset (as provided in assets/images)
-// The logo is already embedded in this image
-const splashBackground = require('../assets/images/splash.jpeg');
+// Use a true full-screen splash image to match the web look.
+const splashBackground = require('../assets/images/splash background.png');
+const mainLogo = require('../assets/images/main logo.png');
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -21,8 +21,10 @@ export default function SplashScreen() {
           style={styles.backgroundImage}
         >
           <View style={styles.content}>
-            {/* Logo is already embedded in the splash image, no separate logo needed */}
-            
+            <View style={styles.logoWrap}>
+              <Image source={mainLogo} style={styles.logo} resizeMode="contain" />
+            </View>
+
             <View style={styles.buttonsContainer}>
               <TouchableOpacity 
                 style={styles.loginButton}
@@ -63,9 +65,20 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingTop: 100,
+    paddingBottom: 48,
+  },
+  logoWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+  },
+  logo: {
+    width: '92%',
+    maxWidth: 340,
+    height: 84,
   },
   buttonsContainer: {
     flexDirection: 'row',

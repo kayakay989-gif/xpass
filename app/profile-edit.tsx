@@ -5,15 +5,13 @@ import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { app } from '@/lib/firebase';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { app, db, auth } from '@/lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-import { config } from '@/lib/config';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
-  const { user, firebaseUser, updateProfileData } = useAuth();
+  const { user, firebaseUser, updateProfileData, logout } = useAuth();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -24,7 +22,7 @@ export default function ProfileEditScreen() {
   const [verificationId, setVerificationId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-profile-edit', []);
 
   const initialPhoneRef = useRef<string>(user?.phone || '');
@@ -193,7 +191,9 @@ export default function ProfileEditScreen() {
         const id = await provider.verifyPhoneNumber(fullPhone, verifier);
         setVerificationId(id);
       } else {
-        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current as any);
+        // For native platforms, we rely on Firebase's default verifier behavior.
+        // (This avoids depending on the deprecated `expo-firebase-recaptcha` package.)
+        const id = await provider.verifyPhoneNumber(fullPhone);
         setVerificationId(id);
       }
 
@@ -257,6 +257,56 @@ export default function ProfileEditScreen() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!firebaseUser) {
+      showAlert('Not logged in', 'Please log in again to delete your account.');
+      return;
+    }
+
+    Alert.alert(
+      'Delete account',
+      'This will permanently delete your account. This cannot be undone. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsDeletingAccount(true);
+            try {
+              // Firebase will require recent authentication for some providers.
+              await firebaseUser.delete();
+
+              // Best-effort cleanup for related user data.
+              await deleteDoc(doc(db, 'users', firebaseUser.uid)).catch(() => null);
+
+              const storage = getStorage(app);
+              const photoRef = ref(storage, `userUploads/${firebaseUser.uid}/profile.jpg`);
+              await deleteObject(photoRef).catch(() => null);
+
+              try {
+                await logout();
+              } catch {
+                // Account deletion already signs the user out server-side; ignore logout errors.
+              }
+
+              router.replace('/splash');
+            } catch (e: any) {
+              console.error('[ProfileEdit] Delete account failed:', e);
+              showAlert(
+                'Delete failed',
+                e?.message ||
+                  'Could not delete your account. Please try again after re-authenticating (log out and log back in).'
+              );
+            } finally {
+              setIsDeletingAccount(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -356,14 +406,6 @@ export default function ProfileEditScreen() {
             </View>
           )}
 
-          {Platform.OS !== 'web' && (
-            <FirebaseRecaptchaVerifierModal
-              ref={recaptchaVerifier}
-              firebaseConfig={config.firebase as any}
-              attemptInvisibleVerification
-            />
-          )}
-
           {Platform.OS === 'web' &&
             // RN Web: render an offscreen div for the invisible reCAPTCHA
             // @ts-ignore
@@ -381,6 +423,21 @@ export default function ProfileEditScreen() {
               <ActivityIndicator color={Colors.white} />
             ) : (
               <Text style={styles.saveButtonText}>Save changes</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.deleteAccountButton,
+              (isDeletingAccount || isSaving || isUploadingPhoto) && styles.saveButtonDisabled,
+            ]}
+            onPress={handleDeleteAccount}
+            disabled={isDeletingAccount || isSaving || isUploadingPhoto}
+          >
+            {isDeletingAccount ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={styles.deleteAccountButtonText}>Delete my account</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -495,6 +552,20 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: Colors.white,
     fontWeight: '700',
+    fontSize: 16,
+  },
+  deleteAccountButton: {
+    backgroundColor: '#ffffff',
+    borderColor: '#DC143C',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  deleteAccountButtonText: {
+    color: '#DC143C',
+    fontWeight: '800',
     fontSize: 16,
   },
 });

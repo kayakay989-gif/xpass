@@ -1,4 +1,4 @@
-import { ConfigPlugin, withAppBuildGradle } from '@expo/config-plugins';
+import { ConfigPlugin, withAppBuildGradle } from 'expo/config-plugins';
 
 /**
  * Expo config plugin to add Google Pay SDK dependency for Android

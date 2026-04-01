@@ -326,6 +326,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   // Listen to Firebase auth state changes
   useEffect(() => {
+    let authResolved = false;
+    const failSafe = setTimeout(() => {
+      if (!authResolved) {
+        console.warn(
+          '[AuthContext] Auth listener did not finish in time — unlocking UI so the app is usable.'
+        );
+        setIsLoadingAuth(false);
+      }
+    }, 15000);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
@@ -368,11 +378,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       } catch (error) {
         console.error('[AuthContext] Error in auth state change:', error);
       } finally {
+        authResolved = true;
+        clearTimeout(failSafe);
         setIsLoadingAuth(false);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(failSafe);
+      unsubscribe();
+    };
   }, [loadUserProfile, evaluateAdminClaim, repairUserAccountIfNeeded]);
 
   // Check for guest mode

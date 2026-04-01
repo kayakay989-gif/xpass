@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { TouchableOpacity } from "react-native";
+import { InteractionManager, TouchableOpacity } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AppProvider } from "@/contexts/AppContext";
@@ -11,8 +11,6 @@ import { trpc, trpcClient } from "@/lib/trpc";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { validateConfig } from "@/lib/config";
 import { ChevronLeft } from "lucide-react-native";
-
-SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -92,6 +90,18 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
+    const hideSplash = () => {
+      SplashScreen.hideAsync().catch(() => undefined);
+    };
+
+    // Expo Router defers native splash hide until navigation is ready; if anything
+    // prevents that path, the OS splash can appear to "stick". Hide immediately and
+    // again after paint / interactions so the native layer always dismisses.
+    hideSplash();
+    const t1 = setTimeout(hideSplash, 250);
+    const t2 = setTimeout(hideSplash, 2000);
+    const task = InteractionManager.runAfterInteractions(() => hideSplash());
+
     // Validate configuration on app start
     validateConfig();
 
@@ -113,8 +123,11 @@ export default function RootLayout() {
         });
     }
 
-    // Hide splash screen
-    SplashScreen.hideAsync();
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      task.cancel?.();
+    };
   }, []);
 
   return (

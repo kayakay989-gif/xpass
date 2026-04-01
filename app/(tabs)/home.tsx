@@ -228,7 +228,9 @@ export default function HomeScreen() {
   // While auth or core app data (subscription, gyms, check-ins) is loading,
   // show a unified loading state so we don't briefly render incorrect
   // subscription UI (e.g., "No Active Subscription" before data arrives).
-  if (isLoadingAuth || isLoading) {
+  // Guests must not block on gym/subscription fetches — Firestore can hang and would
+  // strand the app on this screen indefinitely.
+  if (isLoadingAuth || (!isGuest && isLoading)) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -599,9 +601,15 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   loadingContainer: {
+    flex: 1,
     padding: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: Colors.textSecondary,
   },
   spotlightContainer: {
     marginBottom: 24,

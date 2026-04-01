@@ -1,12 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { config } from '@/lib/config';
 import Toast from '@/components/Toast';
 import { CheckCircle } from 'lucide-react-native';
 
@@ -24,7 +22,6 @@ export default function SecurityScreen() {
     type: 'success',
   });
 
-  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-security', []);
 
   useEffect(() => {
@@ -88,7 +85,9 @@ export default function SecurityScreen() {
         const id = await provider.verifyPhoneNumber(fullPhone, verifier);
         setVerificationId(id);
       } else {
-        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current as any);
+        // For native platforms, we rely on Firebase's default verifier behavior.
+        // (This avoids depending on the deprecated `expo-firebase-recaptcha` package.)
+        const id = await provider.verifyPhoneNumber(fullPhone);
         setVerificationId(id);
       }
 
@@ -263,14 +262,6 @@ export default function SecurityScreen() {
               To change your phone number, please contact support.
             </Text>
           </View>
-        )}
-
-        {Platform.OS !== 'web' && (
-          <FirebaseRecaptchaVerifierModal
-            ref={recaptchaVerifier}
-            firebaseConfig={config.firebase as any}
-            attemptInvisibleVerification
-          />
         )}
 
         {Platform.OS === 'web' &&

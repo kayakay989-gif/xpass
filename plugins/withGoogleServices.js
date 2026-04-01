@@ -1,4 +1,4 @@
-const { withGradleProperties, withAppBuildGradle } = require('@expo/config-plugins');
+const { withGradleProperties, withAppBuildGradle } = require('expo/config-plugins');
 
 /**
  * Expo config plugin to automatically configure Google Services for Android

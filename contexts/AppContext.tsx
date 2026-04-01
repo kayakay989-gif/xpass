@@ -48,7 +48,18 @@ export const [AppProvider, useApp] = createContextHook(() => {
   const refetchGyms = useCallback(async () => {
     setIsGymsLoading(true);
     try {
-      const gymsData = await firestoreGyms.getAll();
+      const timeoutMs = 25000;
+      let timeoutId: ReturnType<typeof setTimeout>;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`Gym list timed out after ${timeoutMs / 1000}s`)),
+          timeoutMs
+        );
+      });
+      const gymsData = await Promise.race([
+        firestoreGyms.getAll().finally(() => clearTimeout(timeoutId)),
+        timeoutPromise,
+      ]);
       setGyms(gymsData);
       setGymsError(null);
       return gymsData;

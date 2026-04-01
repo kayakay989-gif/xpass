@@ -8,6 +8,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
+    name: config.name ?? 'Xpass',
     ios: {
       ...config.ios,
       config: {

@@ -4872,10 +4872,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
   },
-  tierText: {
-    fontSize: 11,
-    fontWeight: 'bold' as const,
-  },
   userCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -5069,12 +5065,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '500' as const,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#111827',
-    marginBottom: 12,
-  },
   allCheckInsTitle: {
     fontSize: 16,
     fontWeight: '700' as const,
@@ -5089,23 +5079,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center' as const,
   },
-  checkInTime: {
-    fontSize: 13,
-    color: '#6B7280',
-    fontWeight: '600' as const,
-  },
-  checkInDate: {
-    fontSize: 13,
-    color: '#6B7280',
-    fontWeight: '600' as const,
-  },
-  checkInTimeRow: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    alignItems: 'center' as const,
-    marginTop: 8,
-  },
-  // (duplicate keys removed above – keep single definition)
   addButton: {
     backgroundColor: '#DC2626',
     padding: 8,
@@ -6053,9 +6026,6 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: '#111827',
   },
-  expiredText: {
-    color: '#DC2626',
-  },
   warningBadge: {
     alignSelf: 'flex-start' as const,
     backgroundColor: '#FEF2F2',
@@ -6115,26 +6085,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#6B7280',
     marginTop: 2,
-  },
-  checkboxRow: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderWidth: 2,
-    borderColor: '#D1D5DB',
-    borderRadius: 4,
-    marginRight: 8,
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-  },
-  checkboxLabel: {
-    fontSize: 16,
-    color: '#374151',
   },
   saveButton: {
     backgroundColor: '#111827',

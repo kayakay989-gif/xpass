@@ -16,6 +16,12 @@ export default function QRScannerScreen() {
   const { checkIn, subscription } = useApp();
   const { isGuest } = useAuth();
 
+  useEffect(() => {
+    return () => {
+      scanLockedRef.current = false;
+    };
+  }, []);
+
   if (isGuest || !subscription) {
     return (
       <View style={styles.container}>
@@ -34,13 +40,6 @@ export default function QRScannerScreen() {
       </View>
     );
   }
-
-  useEffect(() => {
-    return () => {
-      // Unlock scanner on unmount
-      scanLockedRef.current = false;
-    };
-  }, []);
 
   if (!permission) {
     return <View style={styles.container} />;

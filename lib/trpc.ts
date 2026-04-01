@@ -73,9 +73,13 @@ const getBaseUrl = () => {
     return baseUrl;
   }
 
-  throw new Error(
-    "No base url found, please set EXPO_PUBLIC_RORK_API_BASE_URL or configure it in lib/config.ts"
+  // IMPORTANT: Do not throw at module-import time.
+  // App Store review builds often run without local `.env` injection, which can cause a launch-time crash.
+  // We fall back to the backend URL documented in `ENV_EXAMPLE.txt` so the app can boot and fail gracefully later.
+  console.warn(
+    '[tRPC] Missing EXPO_PUBLIC_RORK_API_BASE_URL; falling back to default backend URL for launch safety.'
   );
+  return 'https://xpass-b66g.onrender.com';
 };
 
 export const trpcClient = trpc.createClient({

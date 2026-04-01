@@ -1,0 +1,89 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath('com.android.tools.build:gradle')
+    classpath('com.facebook.react:react-native-gradle-plugin')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
+}
+
+apply plugin: "expo-root-project"
+apply plugin: "com.facebook.react.rootproject"
+
+subprojects {
+  // NOTE: Do not use afterEvaluate here. Newer Gradle versions can throw:
+  // "Cannot run Project.afterEvaluate when the project is already evaluated."
+  // Do not set compileSdk here — AGP errors with "too late to set compileSdk" because
+  // Expo / plugins already read android config during evaluation. ExpoRootProject sets compileSdk.
+  plugins.withId('com.android.application') {
+    // Use `gradleTask` not `task` — Gradle's Project exposes `task()` and Groovy
+    // treats duplicate parameter names as a compile error in this context.
+    tasks.configureEach { gradleTask ->
+      if (gradleTask.name == 'androidSourcesJar') {
+        try {
+          if (gradleTask.hasProperty('classifier')) {
+            gradleTask.classifier = null
+          
+    // NOTE: Do not use afterEvaluate here (see comment above).
+    plugins.withId('com.android.application') {
+        project.android { compileSdk 36 }
+        tasks.configureEach { task ->
+            if (task.name == 'androidSourcesJar') {
+                try {
+                    if (task.hasProperty('classifier')) {
+                        task.classifier = null
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+    }
+    plugins.withId('com.android.library') {
+        project.android { compileSdk 36 }
+        tasks.configureEach { task ->
+            if (task.name == 'androidSourcesJar') {
+                try {
+                    if (task.hasProperty('classifier')) {
+                        task.classifier = null
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+    }
+}
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }
+  plugins.withId('com.android.library') {
+    tasks.configureEach { gradleTask ->
+      if (gradleTask.name == 'androidSourcesJar') {
+        try {
+          if (gradleTask.hasProperty('classifier')) {
+            gradleTask.classifier = null
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }
+}

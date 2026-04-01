@@ -121,7 +121,7 @@ export default function DatePicker({ value, onChange, placeholder = 'Select date
               ) : (
                 <View style={styles.nativeDatePickerContainer}>
                   <Text style={styles.nativeDatePickerText}>
-                    Use your device's date picker
+                    Use your device&apos;s date picker
                   </Text>
                   <input
                     type="date"

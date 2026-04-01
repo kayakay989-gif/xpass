@@ -7,18 +7,17 @@
     "icon": "./assets/images/icon.png",
     "scheme": "xpass",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "image": "./assets/images/splash background.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "15",
+      "buildNumber": "20",
       "config": {},
-      "usesNonExemptEncryption": false,
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
         "applinks:xpass.app"
@@ -38,10 +37,10 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
-      "package": "com.xpass.app",
-      "versionCode": 15,
+      "package": "com.xpass.unique",
+      "versionCode": 26,
       "config": {},
       "intentFilters": [
         {
@@ -109,7 +108,8 @@
           }
         }
       ],
-      "./plugins/withExpoFirebaseCoreFix"
+      "./plugins/withExpoFirebaseCoreFix",
+      "./plugins/withAndroidSplashAaptFix"
     ],
     "experiments": {
       "typedRoutes": true
@@ -124,7 +124,8 @@
     },
     "runtimeVersion": "1.0.14",
     "updates": {
-      "url": "https://u.expo.dev/05cfe6ff-0777-4879-baf1-8d836c51fd2f"
+      "url": "https://u.expo.dev/05cfe6ff-0777-4879-baf1-8d836c51fd2f",
+      "checkAutomatically": "ON_ERROR_RECOVERY"
     }
   }
 }
