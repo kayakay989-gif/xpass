@@ -2,7 +2,7 @@
   "expo": {
     "name": "Xpass",
     "slug": "xpass-subscription-app",
-    "version": "1.0.14",
+    "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "xpass",
@@ -28,6 +28,9 @@
         "NSLocationWhenInUseUsageDescription": "Allow $(PRODUCT_NAME) to access your location to show nearby gyms",
         "NSLocationAlwaysUsageDescription": "Allow $(PRODUCT_NAME) to access your location for map features",
         "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoadsInWebContent": true
+        },
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleLocalizations": [
           "fr"
@@ -40,7 +43,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 27,
+      "versionCode": 29,
       "config": {},
       "intentFilters": [
         {
@@ -122,7 +125,7 @@
         "projectId": "05cfe6ff-0777-4879-baf1-8d836c51fd2f"
       }
     },
-    "runtimeVersion": "1.0.14",
+    "runtimeVersion": "1.0.15",
     "updates": {
       "url": "https://u.expo.dev/05cfe6ff-0777-4879-baf1-8d836c51fd2f",
       "checkAutomatically": "ON_ERROR_RECOVERY"
