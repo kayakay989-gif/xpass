@@ -104,7 +104,6 @@
         "expo-build-properties",
         {
           "android": {
-            "googleServicesFile": "./google-services.json",
             "compileSdkVersion": 36,
             "targetSdkVersion": 36,
             "buildToolsVersion": "36.0.0"
@@ -112,7 +111,8 @@
         }
       ],
       "./plugins/withExpoFirebaseCoreFix",
-      "./plugins/withAndroidSplashAaptFix"
+      "./plugins/withAndroidSplashAaptFix",
+      "./plugins/withCopyGoogleServices"
     ],
     "experiments": {
       "typedRoutes": true

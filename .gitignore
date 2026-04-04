@@ -41,7 +41,6 @@ backend/service-account-key.json
 *-firebase-adminsdk-*.json
 
 # Firebase / Google
-google-services.json
 .firebase/
 
 # typescript
