@@ -6,12 +6,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.GOOGLE_MAPS_API_KEY ||
     '';
 
-  const appVersion = config.version ?? '1.0.15';
-
   return {
     ...config,
-    // Bare workflow: EAS rejects runtimeVersion.policy; keep in sync with expo.version (appVersion policy equivalent).
-    runtimeVersion: appVersion,
     name: config.name ?? 'Xpass',
     ios: {
       ...config.ios,
