@@ -34,7 +34,37 @@ subprojects {
                 try {
                     if (task.hasProperty('classifier')) {
                         task.classifier = null
+                    
+    // NOTE: Do not use afterEvaluate here (see comment above).
+    plugins.withId('com.android.application') {
+        project.android { compileSdk 36 }
+        tasks.configureEach { task ->
+            if (task.name == 'androidSourcesJar') {
+                try {
+                    if (task.hasProperty('classifier')) {
+                        task.classifier = null
                     }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+    }
+    plugins.withId('com.android.library') {
+        project.android { compileSdk 36 }
+        tasks.configureEach { task ->
+            if (task.name == 'androidSourcesJar') {
+                try {
+                    if (task.hasProperty('classifier')) {
+                        task.classifier = null
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+        }
+    }
+}
                 } catch (e) {
                     // ignore
                 }
