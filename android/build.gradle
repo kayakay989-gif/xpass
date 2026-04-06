@@ -29,7 +29,6 @@ subprojects {
     // NOTE: Do not use afterEvaluate here. Newer Gradle versions can throw:
     // "Cannot run Project.afterEvaluate when the project is already evaluated."
     plugins.withId('com.android.application') {
-        project.android { compileSdk 36 }
         tasks.configureEach { t ->
             if (t.name == 'androidSourcesJar') {
                 try {
@@ -43,7 +42,6 @@ subprojects {
         }
     }
     plugins.withId('com.android.library') {
-        project.android { compileSdk 36 }
         tasks.configureEach { t ->
             if (t.name == 'androidSourcesJar') {
                 try {
