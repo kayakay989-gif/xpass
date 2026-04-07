@@ -13,7 +13,6 @@ import { trpc, trpcClient } from "@/lib/trpc";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { validateConfig } from "@/lib/config";
 import { ChevronLeft } from "lucide-react-native";
-import { StripeRoot } from "@/components/StripeRoot";
 
 const queryClient = new QueryClient();
 
@@ -114,13 +113,11 @@ export default function RootLayout() {
           <trpc.Provider client={trpcClient} queryClient={queryClient}>
             <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.background }}>
               <StatusBar style="dark" />
-              <StripeRoot>
-                <AuthProvider>
-                  <AppProvider>
-                    <RootLayoutNav />
-                  </AppProvider>
-                </AuthProvider>
-              </StripeRoot>
+              <AuthProvider>
+                <AppProvider>
+                  <RootLayoutNav />
+                </AppProvider>
+              </AuthProvider>
             </GestureHandlerRootView>
           </trpc.Provider>
         </QueryClientProvider>

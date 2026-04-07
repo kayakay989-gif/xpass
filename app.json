@@ -87,13 +87,6 @@
     },
     "plugins": [
       [
-        "@stripe/stripe-react-native",
-        {
-          "merchantIdentifier": "merchant.com.xpass.app",
-          "enableGooglePay": false
-        }
-      ],
-      [
         "expo-router",
         {
           "origin": "https://rork.com/"

@@ -1,7 +1,6 @@
 /**
- * Web: Mastercard via `payments.checkout` (3DS WebViews for issuer challenges only).
- * Native: Stripe PaymentSheet via `payments.createPaymentSheet` + `finalizeStripeSubscription` when
- * `EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` is set; otherwise native falls back to Mastercard.
+ * Subscription checkout: Mastercard (MPGS) via tRPC `payments.checkout`.
+ * WebViews on native are only for issuer 3-D Secure challenges, not third-party payment pages.
  */
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
@@ -15,7 +14,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
-import { NativeStripeCheckout } from '@/components/NativeStripeCheckout';
 
 export default function PaymentScreen() {
   const { tier, duration, price } = useLocalSearchParams<{ tier: string; duration: string; price: string }>();
@@ -197,46 +195,6 @@ export default function PaymentScreen() {
 
   // Strict backend confirmation (used after 3DS so we don't show success until backend confirms).
   const verifyPaymentMutation = trpc.payments.verify.useMutation();
-
-  const nativeStripeEnabled =
-    Platform.OS !== 'web' && !!(process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim();
-
-  const onSubscriptionConfirmed = useCallback(async () => {
-    setPaymentProcessing(false);
-    setStatusMessage('');
-    try {
-      const result = await subscriptionQuery.refetch();
-      const sub = result.data;
-      const now = new Date();
-      const isActive =
-        !!sub &&
-        sub.isActive &&
-        !!sub.startDate &&
-        !!sub.endDate &&
-        new Date(sub.endDate).getTime() >= now.getTime();
-
-      if (isActive) {
-        setToastType('success');
-        setToastMessage('Subscribed successfully! Your membership is now active.');
-        setToastVisible(true);
-        setTimeout(() => {
-          router.replace('/(tabs)/home');
-        }, 1200);
-      } else {
-        Alert.alert(
-          'Subscription Pending',
-          'Your payment was successful, but we could not confirm your subscription is active yet. Please refresh the app or contact support.',
-          [{ text: 'OK', onPress: () => router.replace('/(tabs)/home') }]
-        );
-      }
-    } catch {
-      Alert.alert(
-        'Subscription Error',
-        'Payment succeeded but we could not verify your subscription. Please refresh the app or contact support.',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)/home') }]
-      );
-    }
-  }, [subscriptionQuery, router]);
 
   const formatCardNumber = (text: string) => {
     const cleaned = text.replace(/\s/g, '');
@@ -754,22 +712,7 @@ export default function PaymentScreen() {
               </View>
             )}
 
-            {appliedCoupon?.isFree && user && nativeStripeEnabled && (
-              <NativeStripeCheckout
-                userId={user.id}
-                tier={tier as string}
-                duration={parseInt(duration, 10)}
-                useWallet={false}
-                couponCode={appliedCoupon.coupon.code}
-                mode="freeCoupon"
-                cardAmount={0}
-                walletUsed={0}
-                disabled={paymentProcessing}
-                onSubscriptionConfirmed={onSubscriptionConfirmed}
-              />
-            )}
-
-            {appliedCoupon?.isFree && user && !nativeStripeEnabled && (
+            {appliedCoupon?.isFree && user && (
               <TouchableOpacity
                 style={[styles.payButton, paymentProcessing && styles.payButtonDisabled]}
                 onPress={() => handleFreeCheckout()}
@@ -828,7 +771,7 @@ export default function PaymentScreen() {
             )}
           </View>
 
-          {!nativeStripeEnabled && !appliedCoupon?.isFree && cardAmount > 0 && (
+          {!appliedCoupon?.isFree && cardAmount > 0 && (
             <>
               {/* VERSION 1: Payment Method Selection - Only Card Payment Enabled */}
               {/* Apple Pay and Google Pay are hidden for Version 1 but code remains for Version 2 */}
@@ -1153,10 +1096,7 @@ export default function PaymentScreen() {
           )}
 
           {/* Card Payment Button - Only show when card method is selected */}
-          {!nativeStripeEnabled &&
-            !appliedCoupon?.isFree &&
-            cardAmount > 0 &&
-            paymentMethod === 'card' && (
+          {!appliedCoupon?.isFree && cardAmount > 0 && paymentMethod === 'card' && (
             <TouchableOpacity
               style={[
                 styles.payButton,
@@ -1204,23 +1144,8 @@ export default function PaymentScreen() {
             </TouchableOpacity>
           )}
 
-          {nativeStripeEnabled && !appliedCoupon?.isFree && cardAmount > 0 && user && (
-            <NativeStripeCheckout
-              userId={user.id}
-              tier={tier as string}
-              duration={parseInt(duration, 10)}
-              useWallet={useWallet}
-              couponCode={appliedCoupon?.coupon?.code || undefined}
-              mode="card"
-              cardAmount={cardAmount}
-              walletUsed={walletUsed}
-              disabled={paymentProcessing}
-              onSubscriptionConfirmed={onSubscriptionConfirmed}
-            />
-          )}
-
           {/* Wallet-only Payment Button */}
-          {!nativeStripeEnabled && !appliedCoupon?.isFree && cardAmount === 0 && walletUsed > 0 && (
+          {!appliedCoupon?.isFree && cardAmount === 0 && walletUsed > 0 && (
             <TouchableOpacity
               style={[
                 styles.payButton,
@@ -1264,21 +1189,6 @@ export default function PaymentScreen() {
                 </>
               )}
             </TouchableOpacity>
-          )}
-
-          {nativeStripeEnabled && !appliedCoupon?.isFree && cardAmount === 0 && walletUsed > 0 && user && (
-            <NativeStripeCheckout
-              userId={user.id}
-              tier={tier as string}
-              duration={parseInt(duration, 10)}
-              useWallet
-              couponCode={appliedCoupon?.coupon?.code || undefined}
-              mode="walletOnly"
-              cardAmount={0}
-              walletUsed={walletUsed}
-              disabled={paymentProcessing}
-              onSubscriptionConfirmed={onSubscriptionConfirmed}
-            />
           )}
 
           {/* Debug info */}
