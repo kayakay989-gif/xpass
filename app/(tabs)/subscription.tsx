@@ -1,10 +1,10 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, Alert, Platform } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { TIER_COLORS } from '@/constants/tier-colors';
@@ -133,25 +133,15 @@ export default function SubscriptionScreen() {
     return router.replace('/(tabs)/home');
   };
 
-  useEffect(() => {
-    if (isGuest || !firebaseUser) {
-      // Prevent guest users from entering the purchase flow.
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.alert('Please log in or create an account to subscribe.');
-      } else {
-        Alert.alert('Create account', 'Please log in or create an account to subscribe.', [
-          { text: 'OK' },
-        ]);
-      }
-      router.replace('/login');
-    }
-  }, [firebaseUser, isGuest, router]);
-
   const getTotalPrice = useMemo(() => {
     return (tier: Package['tier']) => {
       return TOTAL_PRICES[selectedDuration]?.[tier] ?? 0;
     };
   }, [selectedDuration]);
+
+  if (isGuest || !firebaseUser) {
+    return <Redirect href="/login" />;
+  }
 
   const getMonthlyPrice = (tier: Package['tier']): number => {
     const total = getTotalPrice(tier);

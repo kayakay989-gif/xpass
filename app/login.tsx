@@ -2,6 +2,7 @@ import { StyleSheet, Text, View, TouchableOpacity, TextInput, Image, ScrollView,
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useState } from 'react';
+import * as Google from 'expo-auth-session/providers/google';
 import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,7 +12,7 @@ type AuthMode = 'login' | 'signup';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginWithEmail, signUpWithEmail, loginWithGoogle, logout, isAdmin } = useAuth();
+  const { loginWithEmail, signUpWithEmail, loginWithGoogle, signInWithGoogleIdToken, logout, isAdmin } = useAuth();
   const params = useLocalSearchParams<{ mode?: string; ref?: string }>();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('login');
@@ -44,6 +45,20 @@ export default function LoginScreen() {
     message: '',
     type: 'info',
   });
+
+  const googleWebClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
+    process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ||
+    '40764236173-nav2vohhco8l6lt7jdng77caklrm5s1l.apps.googleusercontent.com';
+
+  const [googleAuthRequest, , googlePromptAsync] = Google.useIdTokenAuthRequest(
+    {
+      webClientId: googleWebClientId,
+      androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId,
+      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || googleWebClientId,
+    },
+    { scheme: 'xpass' }
+  );
 
   useEffect(() => {
     const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
@@ -328,24 +343,49 @@ export default function LoginScreen() {
   };
 
   const handleGoogleLogin = async () => {
+    if (Platform.OS === 'web') {
+      setIsLoading(true);
+      try {
+        await loginWithGoogle();
+        router.replace('/(tabs)/home');
+      } catch (error: any) {
+        console.error('Google login error:', error);
+        let errorMessage = 'Google sign-in failed. Please try again.';
+        if (error.message) {
+          errorMessage = error.message;
+        } else if (error.code === 'auth/popup-closed-by-user' || error.message?.includes('cancelled')) {
+          errorMessage = 'Sign-in was cancelled.';
+        }
+        if (typeof window !== 'undefined') {
+          window.alert(errorMessage);
+        } else {
+          Alert.alert('Error', errorMessage);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await loginWithGoogle();
-      // If successful, user will be redirected by onAuthStateChanged
-      router.replace('/(tabs)/home');
-    } catch (error: any) {
-      console.error('Google login error:', error);
-      let errorMessage = 'Google sign-in failed. Please try again.';
-      
-      if (error.message) {
-        errorMessage = error.message;
-      } else if (error.code === 'auth/popup-closed-by-user' || error.message?.includes('cancelled')) {
-        errorMessage = 'Sign-in was cancelled.';
-      } else if (error.message?.includes('Client ID')) {
-        errorMessage = error.message;
+      const result = await googlePromptAsync({ showInRecents: true });
+      if (result.type === 'success' && result.params?.id_token) {
+        await signInWithGoogleIdToken(result.params.id_token as string);
+        router.replace('/(tabs)/home');
+      } else if (result.type === 'error') {
+        const msg =
+          (result as any).params?.error_description ||
+          (result as any).error?.message ||
+          'Google sign-in failed.';
+        Alert.alert('Error', String(msg));
       }
-      
-      Alert.alert('Error', errorMessage);
+    } catch (error: any) {
+      const msg = error?.message || '';
+      if (!msg.toLowerCase().includes('cancel')) {
+        console.error('Google login error:', error);
+        Alert.alert('Error', msg || 'Google sign-in failed. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -624,7 +664,7 @@ export default function LoginScreen() {
             <TouchableOpacity 
               style={styles.googleButton}
               onPress={handleGoogleLogin}
-              disabled={isLoading}
+              disabled={isLoading || (Platform.OS !== 'web' && !googleAuthRequest)}
             >
               <Text style={styles.googleIcon}>G</Text>
               <Text style={styles.googleButtonText}>Continue with Google</Text>

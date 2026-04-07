@@ -1,3 +1,8 @@
+/**
+ * Subscription checkout uses the Mastercard gateway (tRPC `payments.checkout`).
+ * WebViews here are only for issuer 3-D Secure challenges, not the marketing site.
+ * A full Stripe PaymentSheet flow would need new backend Stripe PaymentIntent endpoints.
+ */
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';

@@ -1,72 +1,127 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { TouchableOpacity } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { AppProvider } from "@/contexts/AppContext";
+import Colors from "@/constants/colors";
+import { trpc, trpcClient } from "@/lib/trpc";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import MobileWebApp from "@/components/MobileWebApp";
+import { validateConfig } from "@/lib/config";
+import { ChevronLeft } from "lucide-react-native";
 
-/**
- * Native (iOS/Android): minimal shell.
- *
- * If the JS bundle fails to mount, you will still see this debug overlay.
- * That tells us whether the issue is "RN not mounting" vs "WebView not loading".
- */
-if (Platform.OS !== "web") {
-  SplashScreen.preventAutoHideAsync().catch(() => undefined);
+const queryClient = new QueryClient();
+
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
+function RootLayoutNav() {
+  return (
+    <Stack
+      screenOptions={({ navigation, route }) => ({
+        headerBackTitle: "Back",
+        headerBackTitleVisible: false,
+        headerStyle: {
+          backgroundColor: Colors.background,
+        },
+        headerTintColor: Colors.text,
+        headerTitleStyle: {
+          fontWeight: "700" as const,
+        },
+        headerLeft: () => {
+          if (route.name === "splash" || route.name === "gym-login" || route.name === "gym-dashboard") {
+            return null;
+          }
+          return (
+            <TouchableOpacity
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  navigation.navigate("splash" as never);
+                }
+              }}
+              style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+            >
+              <ChevronLeft size={22} color={Colors.text} />
+            </TouchableOpacity>
+          );
+        },
+      })}
+    >
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="splash" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="qr-scanner"
+        options={{
+          title: "Scan QR Code",
+          presentation: "modal",
+        }}
+      />
+      <Stack.Screen
+        name="subscription"
+        options={{
+          title: "Choose Plan",
+          presentation: "modal",
+        }}
+      />
+      <Stack.Screen
+        name="gym-login"
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+          headerBackVisible: false,
+        }}
+      />
+      <Stack.Screen
+        name="gym-dashboard"
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+          headerBackVisible: false,
+          headerLeft: () => null,
+        }}
+      />
+    </Stack>
+  );
 }
 
 export default function RootLayout() {
   useEffect(() => {
-    // Aggressive splash-hide:
-    // - hide after a short delay to avoid black-window flashes
-    // - also keep a longer fallback in case WebView never finishes
-    const t1 = setTimeout(() => SplashScreen.hideAsync().catch(() => undefined), 2500);
-    const t2 = setTimeout(() => SplashScreen.hideAsync().catch(() => undefined), 7000);
-    const t3 = setTimeout(() => SplashScreen.hideAsync().catch(() => undefined), 12000);
+    validateConfig();
+  }, []);
 
+  useEffect(() => {
+    const hide = () => SplashScreen.hideAsync().catch(() => undefined);
+    const t1 = setTimeout(hide, 300);
+    const t2 = setTimeout(hide, 2500);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
-      clearTimeout(t3);
     };
   }, []);
 
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <GestureHandlerRootView style={styles.root}>
-          <StatusBar style="dark" />
-          <View pointerEvents="none" style={styles.debugOverlay}>
-            <Text style={styles.debugText}>APP IS RUNNING</Text>
-          </View>
-          <MobileWebApp />
-        </GestureHandlerRootView>
+        <QueryClientProvider client={queryClient}>
+          <trpc.Provider client={trpcClient} queryClient={queryClient}>
+            <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.background }}>
+              <StatusBar style="dark" />
+              <AuthProvider>
+                <AppProvider>
+                  <RootLayoutNav />
+                </AppProvider>
+              </AuthProvider>
+            </GestureHandlerRootView>
+          </trpc.Provider>
+        </QueryClientProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );
 }
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-  },
-  debugOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#FFDD55",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    zIndex: 9999,
-  },
-  debugText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#111",
-    textAlign: "center",
-  },
-});

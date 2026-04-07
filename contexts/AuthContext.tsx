@@ -28,9 +28,7 @@ import {
   limit
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
 
 // Complete the auth session properly
@@ -750,131 +748,53 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
-  // Google Login
-  const loginWithGoogle = useCallback(async (): Promise<void> => {
-    try {
-      console.log('[AuthContext] Starting Google login...');
-      
-      // Google OAuth discovery endpoint
-      const discovery = {
-        authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-        tokenEndpoint: 'https://oauth2.googleapis.com/token',
-        revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
-      };
-
-      // Request configuration
-      const redirectUri = AuthSession.makeRedirectUri({
-        scheme: 'myapp', // Match the scheme in app.json
-        useProxy: true, // Use Expo's proxy for native
-      });
-
-      // Google OAuth Client ID - should be set via environment variable
-      // You can get this from Firebase Console > Authentication > Sign-in method > Google
-      // Or from Google Cloud Console > APIs & Services > Credentials
-      // For web, Firebase handles it automatically, but we can still use env var
-      const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || 
-        '40764236173-nav2vohhco8l6lt7jdng77caklrm5s1l.apps.googleusercontent.com'; // Fallback from google-services.json
-      
-      if (!googleClientId && Platform.OS !== 'web') {
-        console.warn('[AuthContext] Google Client ID not found in env, using fallback');
+  /** Native: call after Google.useIdTokenAuthRequest succeeds (opens system browser / Custom Tabs). */
+  const signInWithGoogleIdToken = useCallback(
+    async (idToken: string): Promise<void> => {
+      if (!idToken?.trim()) {
+        throw new Error('Missing Google ID token.');
       }
-
-      // For web, use Firebase's built-in popup method
-      if (Platform.OS === 'web') {
-        const provider = new GoogleAuthProvider();
-        try {
-          const result = await signInWithPopup(auth, provider);
-          const userCredential = result;
-          
-          // User profile will be loaded by onAuthStateChanged
-          console.log('[AuthContext] Google login successful (web):', userCredential.user.uid);
-          
-          // Ensure user profile exists
-          if (userCredential.user) {
-            await loadUserProfile(userCredential.user.uid);
-          }
-          return;
-        } catch (webError: any) {
-          console.error('[AuthContext] Firebase web Google sign-in error:', webError);
-          throw webError; // Re-throw web errors
-        }
-      }
-
-      // For native platforms, use expo-auth-session with implicit flow
-      // Google OAuth returns id_token in the response with openid scope
-      // Generate nonce for security (required for id_token flow)
-      const nonce = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        Math.random().toString()
-      );
-
-      // Important: disable PKCE for the implicit (id_token) flow to avoid
-      // "code_challenge_method not allowed" from Google.
-      const request = new AuthSession.AuthRequest({
-        clientId: googleClientId!,
-        scopes: ['openid', 'profile', 'email'],
-        redirectUri,
-        responseType: AuthSession.ResponseType.IdToken, // Request id_token directly
-        usePKCE: false,
-        additionalParameters: {},
-        extraParams: {
-          nonce: nonce.substring(0, 32), // Google expects nonce in request
-        },
-      });
-
-      console.log('[AuthContext] Starting OAuth flow for native platform...');
-      console.log('[AuthContext] Redirect URI:', redirectUri);
-
-      const result = await request.promptAsync(discovery);
-
-      if (result.type === 'success') {
-        const { id_token } = result.params;
-        
-        if (!id_token) {
-          throw new Error('No ID token received from Google. Make sure Google OAuth is properly configured.');
-        }
-
-        console.log('[AuthContext] Received Google ID token, signing in to Firebase...');
-        
-        // Create Firebase credential with Google ID token
-        const credential = GoogleAuthProvider.credential(id_token);
+      try {
+        const credential = GoogleAuthProvider.credential(idToken);
         const userCredential = await signInWithCredential(auth, credential);
-        
-        // User profile will be loaded by onAuthStateChanged
-        console.log('[AuthContext] Google login successful (native):', userCredential.user.uid);
-        
-        // Ensure user profile exists
+        console.log('[AuthContext] Google login successful (native id_token):', userCredential.user.uid);
         if (userCredential.user) {
           await loadUserProfile(userCredential.user.uid);
         }
-      } else if (result.type === 'error') {
-        const error = result.error;
-        console.error('[AuthContext] Google OAuth error:', error);
-        
-        // Provide helpful error message
-        if (error?.error === 'invalid_client') {
-          throw new Error('Google OAuth client ID is invalid. Please configure EXPO_PUBLIC_GOOGLE_CLIENT_ID.');
+      } catch (error: any) {
+        console.error('[AuthContext] signInWithGoogleIdToken error:', error);
+        if (error.code === 'auth/account-exists-with-different-credential') {
+          throw new Error('An account already exists with this email. Please use email/password login.');
         }
-        throw new Error(`Google sign-in failed: ${error?.message || error?.error_description || 'Unknown error'}`);
-      } else {
-        // User cancelled
-        console.log('[AuthContext] Google sign-in cancelled by user');
-        throw new Error('Google sign-in was cancelled');
+        throw new Error(error?.message || 'Google sign-in failed.');
+      }
+    },
+    [loadUserProfile]
+  );
+
+  /** Web only (Firebase popup). On native use sign-in screen + Google.useIdTokenAuthRequest. */
+  const loginWithGoogle = useCallback(async (): Promise<void> => {
+    if (Platform.OS !== 'web') {
+      throw new Error('Use Continue with Google on this device (opens your browser).');
+    }
+    try {
+      console.log('[AuthContext] Starting Google login (web popup)...');
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      console.log('[AuthContext] Google login successful (web):', result.user.uid);
+      if (result.user) {
+        await loadUserProfile(result.user.uid);
       }
     } catch (error: any) {
-      console.error('[AuthContext] Google login error:', error);
-      
-      // Provide user-friendly error messages
+      console.error('[AuthContext] Firebase web Google sign-in error:', error);
       let errorMessage = 'Google sign-in failed. Please try again.';
-      
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        errorMessage = 'An account already exists with this email. Please use email/password login.';
-      } else if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-in was cancelled.';
+      } else if (error.code === 'auth/account-exists-with-different-credential') {
+        errorMessage = 'An account already exists with this email. Please use email/password login.';
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
       throw new Error(errorMessage);
     }
   }, [loadUserProfile]);
@@ -993,6 +913,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       loginWithEmail,
       signUpWithEmail,
       loginWithGoogle,
+      signInWithGoogleIdToken,
       logout,
       resetPassword,
       confirmPasswordReset: confirmPasswordResetWithCode,
@@ -1014,6 +935,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     loginWithEmail,
     signUpWithEmail,
     loginWithGoogle,
+    signInWithGoogleIdToken,
     logout,
     resetPassword,
     confirmPasswordResetWithCode,

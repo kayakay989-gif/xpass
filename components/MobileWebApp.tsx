@@ -1,3 +1,7 @@
+/**
+ * @deprecated The native app uses Expo Router screens, not a full-app WebView.
+ * Kept only for reference or temporary debugging — not mounted from `app/_layout.tsx`.
+ */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
