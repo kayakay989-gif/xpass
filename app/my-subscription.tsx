@@ -48,7 +48,10 @@ export default function MySubscriptionScreen() {
             <Text style={styles.emptyText}>No active subscription</Text>
             <TouchableOpacity 
               style={styles.subscribeButton}
-              onPress={() => router.navigate('/(tabs)/subscription')}
+              onPress={() => {
+                // Avoid router.navigate to a tab route from a stack screen (can crash on some Expo Router builds).
+                router.push('/subscription');
+              }}
             >
               <Text style={styles.subscribeButtonText}>Subscribe Now</Text>
             </TouchableOpacity>

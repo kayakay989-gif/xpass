@@ -5,12 +5,16 @@
     "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "xpass",
+    "scheme": [
+      "xpass",
+      "com.xpass.unique",
+      "com.xpass.app"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/main logo white.png",
-      "resizeMode": "contain",
+      "image": "./assets/images/splash background.png",
+      "resizeMode": "cover",
       "backgroundColor": "#000000"
     },
     "ios": {
@@ -65,6 +69,11 @@
               "pathPrefix": "/join"
             }
           ]
+        },
+        {
+          "action": "VIEW",
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [{ "scheme": "com.xpass.unique" }]
         }
       ],
       "permissions": [

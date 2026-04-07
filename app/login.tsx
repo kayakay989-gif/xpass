@@ -1,7 +1,8 @@
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Constants from 'expo-constants';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
@@ -56,14 +57,33 @@ export default function LoginScreen() {
 
   const googleIdTokenHandledRef = useRef<string | null>(null);
 
-  const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest(
-    {
+  /**
+   * Redirect: com.xpass.unique:/oauthredirect (Android) / com.xpass.app:/oauthredirect (iOS).
+   * Avoids xpass:// which triggers "Custom URI scheme is not enabled for your Android client" unless
+   * that scheme is toggled in Google Cloud. Add the same URI under the Web client "Authorized redirect URIs"
+   * if the token step fails. app.json registers URL schemes com.xpass.unique and com.xpass.app.
+   */
+  const googleAuthConfig = useMemo(() => {
+    const androidPkg = Constants.expoConfig?.android?.package;
+    const iosBundle = Constants.expoConfig?.ios?.bundleIdentifier;
+    const redirectUri =
+      Platform.OS === 'android' && androidPkg
+        ? `${androidPkg}:/oauthredirect`
+        : Platform.OS === 'ios' && iosBundle
+          ? `${iosBundle}:/oauthredirect`
+          : undefined;
+    return {
       androidClientId: GOOGLE_ANDROID_CLIENT_ID,
       iosClientId: GOOGLE_IOS_CLIENT_ID,
       webClientId: GOOGLE_WEB_CLIENT_ID,
-      scopes: ['profile', 'email'],
-    },
-    { scheme: 'xpass' }
+      scopes: ['profile', 'email'] as const,
+      ...(redirectUri ? { redirectUri } : {}),
+    };
+  }, []);
+
+  const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest(
+    googleAuthConfig,
+    {}
   );
 
   useEffect(() => {

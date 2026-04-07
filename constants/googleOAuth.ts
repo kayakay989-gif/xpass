@@ -1,6 +1,11 @@
 /**
  * Google OAuth client IDs for Expo / Firebase.
  * Web client is used as server-side token audience only — never as androidClientId/iosClientId.
+ *
+ * Native sign-in uses redirect URIs:
+ *   com.xpass.unique:/oauthredirect  (Android)
+ *   com.xpass.app:/oauthredirect      (iOS)
+ * If token exchange fails, add these exact strings to Google Cloud → Web client → Authorized redirect URIs.
  */
 export const GOOGLE_WEB_CLIENT_ID =
   process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||

@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Image, ImageBackground } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
+const splashBackground = require('../assets/images/splash background.png');
 const mainLogoWhite = require('../assets/images/main logo white.png');
 
 export default function SplashScreen() {
@@ -11,39 +12,45 @@ export default function SplashScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.container}>
-        <View style={styles.center}>
-          <Image source={mainLogoWhite} style={styles.logo} resizeMode="contain" />
-        </View>
+      <ImageBackground source={splashBackground} style={styles.background} resizeMode="cover">
+        <View style={styles.inner}>
+          <View style={styles.center}>
+            <Image source={mainLogoWhite} style={styles.logo} resizeMode="contain" />
+          </View>
 
-        <View style={styles.buttonsContainer}>
-          <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/login')}>
-            <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-              Login/Register
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.buttonsContainer}>
+            <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/login')}>
+              <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Login/Register
+              </Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.discoverButton}
-            onPress={() => {
-              continueAsGuest();
-              router.replace('/(tabs)/home');
-            }}
-          >
-            <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-              Discover
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.discoverButton}
+              onPress={() => {
+                continueAsGuest();
+                router.replace('/(tabs)/home');
+              }}
+            >
+              <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                Discover
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </ImageBackground>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  background: {
     flex: 1,
-    backgroundColor: '#000000',
+    width: '100%',
+    height: '100%',
+  },
+  inner: {
+    flex: 1,
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingTop: 56,
