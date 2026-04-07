@@ -1,9 +1,15 @@
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
+import {
+  GOOGLE_ANDROID_CLIENT_ID,
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_WEB_CLIENT_ID,
+} from '@/constants/googleOAuth';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import Toast from '@/components/Toast';
@@ -46,19 +52,41 @@ export default function LoginScreen() {
     type: 'info',
   });
 
-  const googleWebClientId =
-    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
-    process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ||
-    '40764236173-nav2vohhco8l6lt7jdng77caklrm5s1l.apps.googleusercontent.com';
+  WebBrowser.maybeCompleteAuthSession();
 
-  const [googleAuthRequest, , googlePromptAsync] = Google.useIdTokenAuthRequest(
+  const googleIdTokenHandledRef = useRef<string | null>(null);
+
+  const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest(
     {
-      webClientId: googleWebClientId,
-      androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId,
-      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || googleWebClientId,
+      androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+      iosClientId: GOOGLE_IOS_CLIENT_ID,
+      webClientId: GOOGLE_WEB_CLIENT_ID,
+      scopes: ['profile', 'email'],
     },
     { scheme: 'xpass' }
   );
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (googleResponse?.type !== 'success') return;
+    const idToken =
+      (googleResponse.params?.id_token as string | undefined) ||
+      (googleResponse.params as any)?.id_token;
+    if (!idToken || googleIdTokenHandledRef.current === idToken) return;
+    googleIdTokenHandledRef.current = idToken;
+    (async () => {
+      try {
+        setIsLoading(true);
+        await signInWithGoogleIdToken(idToken);
+        router.replace('/(tabs)/home');
+      } catch (e: any) {
+        googleIdTokenHandledRef.current = null;
+        Alert.alert('Error', e?.message || 'Google sign-in failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, [googleResponse, signInWithGoogleIdToken, router]);
 
   useEffect(() => {
     const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
@@ -370,9 +398,14 @@ export default function LoginScreen() {
     setIsLoading(true);
     try {
       const result = await googlePromptAsync({ showInRecents: true });
-      if (result.type === 'success' && result.params?.id_token) {
-        await signInWithGoogleIdToken(result.params.id_token as string);
-        router.replace('/(tabs)/home');
+      if (result.type === 'success') {
+        const idToken =
+          (result.params?.id_token as string | undefined) || (result.params as any)?.id_token;
+        if (idToken && googleIdTokenHandledRef.current !== idToken) {
+          googleIdTokenHandledRef.current = idToken;
+          await signInWithGoogleIdToken(idToken);
+          router.replace('/(tabs)/home');
+        }
       } else if (result.type === 'error') {
         const msg =
           (result as any).params?.error_description ||

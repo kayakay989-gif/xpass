@@ -9,8 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash background.png",
-      "resizeMode": "cover",
+      "image": "./assets/images/main logo white.png",
+      "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "ios": {
@@ -86,6 +86,13 @@
       "bundler": "metro"
     },
     "plugins": [
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.xpass.app",
+          "enableGooglePay": false
+        }
+      ],
       [
         "expo-router",
         {

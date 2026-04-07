@@ -1,11 +1,8 @@
-import { StyleSheet, Text, View, TouchableOpacity, Image, ImageBackground } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Stack } from 'expo-router';
+import { StyleSheet, Text, View, TouchableOpacity, Image } from 'react-native';
+import { useRouter, Stack } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 
-// Use a true full-screen splash image to match the web look.
-const splashBackground = require('../assets/images/splash background.png');
-const mainLogo = require('../assets/images/main logo.png');
+const mainLogoWhite = require('../assets/images/main logo white.png');
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -15,40 +12,29 @@ export default function SplashScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
-        <ImageBackground
-          source={splashBackground}
-          resizeMode="cover"
-          style={styles.backgroundImage}
-        >
-          <View style={styles.content}>
-            <View style={styles.logoWrap}>
-              <Image source={mainLogo} style={styles.logo} resizeMode="contain" />
-            </View>
+        <View style={styles.center}>
+          <Image source={mainLogoWhite} style={styles.logo} resizeMode="contain" />
+        </View>
 
-            <View style={styles.buttonsContainer}>
-              <TouchableOpacity 
-                style={styles.loginButton}
-                onPress={() => router.push('/login')}
-              >
-                <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                  Login/Register
-                </Text>
-              </TouchableOpacity>
+        <View style={styles.buttonsContainer}>
+          <TouchableOpacity style={styles.loginButton} onPress={() => router.push('/login')}>
+            <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              Login/Register
+            </Text>
+          </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={styles.discoverButton}
-                onPress={() => {
-                  continueAsGuest();
-                  router.replace('/(tabs)/home');
-                }}
-              >
-                <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                  Discover
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ImageBackground>
+          <TouchableOpacity
+            style={styles.discoverButton}
+            onPress={() => {
+              continueAsGuest();
+              router.replace('/(tabs)/home');
+            }}
+          >
+            <Text style={styles.buttonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              Discover
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </>
   );
@@ -57,28 +43,22 @@ export default function SplashScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  backgroundImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  content: {
-    flex: 1,
+    backgroundColor: '#000000',
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingTop: 100,
+    paddingTop: 56,
     paddingBottom: 48,
   },
-  logoWrap: {
-    alignItems: 'center',
+  center: {
+    flex: 1,
     justifyContent: 'center',
-    marginTop: 24,
+    alignItems: 'center',
   },
   logo: {
-    width: '92%',
-    maxWidth: 340,
-    height: 84,
+    width: '60%',
+    maxWidth: 320,
+    minHeight: 240,
+    maxHeight: 280,
   },
   buttonsContainer: {
     flexDirection: 'row',
