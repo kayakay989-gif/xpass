@@ -1,22 +1,9 @@
-import { useEffect } from 'react';
-import { View, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect } from 'expo-router';
 
 /**
- * Canonical purchase flow lives in `app/(tabs)/subscription.tsx` (packages -> /payment).
- * Keep `/subscription` as a compatibility route, but redirect so the flow/UI stay consistent.
+ * Compatibility route for links to `/subscription`.
+ * Packages UI lives in `app/(tabs)/subscription.tsx` — avoid stacking a modal + replace (Android native crashes).
  */
 export default function SubscriptionRedirect() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace('/(tabs)/subscription' as any);
-  }, [router]);
-
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' }}>
-      <ActivityIndicator />
-    </View>
-  );
+  return <Redirect href="/(tabs)/subscription" />;
 }
-

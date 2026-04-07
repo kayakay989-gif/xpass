@@ -66,8 +66,7 @@ function RootLayoutNav() {
       <Stack.Screen
         name="subscription"
         options={{
-          title: "Choose Plan",
-          presentation: "modal",
+          headerShown: false,
         }}
       />
       <Stack.Screen

@@ -210,7 +210,7 @@ export default function HomeScreen() {
         'Please subscribe to access gym details and check-in features.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Subscribe', onPress: () => router.push('/subscription') },
+          { text: 'Subscribe', onPress: () => router.push('/(tabs)/subscription') },
         ]
       );
       return;
