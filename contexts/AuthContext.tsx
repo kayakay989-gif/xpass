@@ -748,7 +748,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
-  /** Native: call after Google.useIdTokenAuthRequest succeeds (opens system browser / Custom Tabs). */
+  /** Native: call after Google.useAuthRequest succeeds (opens system browser / Custom Tabs). */
   const signInWithGoogleIdToken = useCallback(
     async (idToken: string): Promise<void> => {
       if (!idToken?.trim()) {
@@ -772,7 +772,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     [loadUserProfile]
   );
 
-  /** Web only (Firebase popup). On native use sign-in screen + Google.useIdTokenAuthRequest. */
+  /** Web only (Firebase popup). On native use sign-in screen + Google.useAuthRequest. */
   const loginWithGoogle = useCallback(async (): Promise<void> => {
     if (Platform.OS !== 'web') {
       throw new Error('Use Continue with Google on this device (opens your browser).');
