@@ -4,14 +4,13 @@
   },
   "build": {
     "production": {
-      "channel": "production",
       "android": {
         "buildType": "app-bundle"
       },
-      "distribution": "store"
+      "distribution": "store",
+      "environment": "production"
     },
     "production-apk": {
-      "channel": "production",
       "android": {
         "buildType": "apk"
       },
@@ -19,7 +18,6 @@
       "environment": "production"
     },
     "preview": {
-      "channel": "preview",
       "distribution": "internal"
     }
   },
@@ -27,11 +25,9 @@
     "production": {
       "ios": {
         "ascAppId": "6760907449",
-        "ascApiKeyPath": "C:\\Users\\essab\\Downloads\\AuthKey_H8RZAFB987.p8",
         "ascApiKeyId": "H8RZAFB987",
         "ascApiKeyIssuerId": "f508c5d0-a1b3-4aac-b661-3abb4886744d"
       }
     }
   }
 }
-  
