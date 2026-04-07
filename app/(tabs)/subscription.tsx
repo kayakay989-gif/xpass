@@ -5,7 +5,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { Redirect, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { TIER_COLORS } from '@/constants/tier-colors';
 
@@ -261,22 +260,18 @@ export default function SubscriptionScreen() {
           ))}
         </View>
 
-        {PACKAGES.map((pkg, index) => {
+        {PACKAGES.map((pkg) => {
           const theme = PACKAGE_THEMES[pkg.tier];
+          const headerBg = pkg.headerColors[0];
           return (
           <View
-            key={index}
+            key={pkg.tier}
             style={[
               styles.packageCard,
               { backgroundColor: theme.cardBg, borderColor: theme.border },
             ]}
           >
-            <LinearGradient
-              colors={pkg.headerColors}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.packageHeader}
-            />
+            <View style={[styles.packageHeader, { backgroundColor: headerBg }]} />
             
             <View style={styles.packageContent}>
               <Text style={[styles.packageName, { color: theme.title }]}>{pkg.name}</Text>
@@ -304,11 +299,14 @@ export default function SubscriptionScreen() {
                     activeOpacity={buttonInfo.disabled ? 1 : 0.9}
                     disabled={buttonInfo.disabled}
                   >
-                    <LinearGradient
-                      colors={buttonInfo.disabled ? ['#E5E7EB', '#E5E7EB'] : pkg.buttonColors}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={[styles.selectButton, buttonInfo.disabled && styles.selectButtonDisabled]}
+                    <View
+                      style={[
+                        styles.selectButton,
+                        buttonInfo.disabled && styles.selectButtonDisabled,
+                        {
+                          backgroundColor: buttonInfo.disabled ? '#E5E7EB' : pkg.buttonColors[0],
+                        },
+                      ]}
                     >
                       <Text style={[
                         styles.selectButtonText, 
@@ -316,7 +314,7 @@ export default function SubscriptionScreen() {
                       ]}>
                         {buttonInfo.label}
                       </Text>
-                    </LinearGradient>
+                    </View>
                   </TouchableOpacity>
                 );
               })()}

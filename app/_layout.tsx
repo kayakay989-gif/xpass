@@ -64,12 +64,6 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
-        name="subscription"
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
         name="gym-login"
         options={{
           headerShown: false,
