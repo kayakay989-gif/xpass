@@ -65,6 +65,11 @@
               "pathPrefix": "/join"
             }
           ]
+        },
+        {
+          "action": "VIEW",
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [{ "scheme": "com.xpass.unique" }]
         }
       ],
       "permissions": [

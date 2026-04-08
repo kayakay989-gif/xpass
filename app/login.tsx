@@ -2,8 +2,8 @@ import { StyleSheet, Text, View, TouchableOpacity, TextInput, Image, ScrollView,
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useRef, useState } from 'react';
-import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
+import { ResponseType } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
 import {
@@ -57,23 +57,14 @@ export default function LoginScreen() {
 
   const googleIdTokenHandledRef = useRef<string | null>(null);
 
-  // Standalone Android: expo-auth-session's Google provider defaults to
-  // `applicationId:/oauthredirect` (e.g. com.xpass.unique:/oauthredirect). That scheme is NOT
-  // declared in AndroidManifest (only `xpass` is), and Google returns 400 invalid_request unless
-  // the Android OAuth client allows that custom redirect. Use the app scheme from app.json instead.
-  const nativeGoogleRedirectUri =
-    Platform.OS !== 'web' ? AuthSession.makeRedirectUri({ scheme: 'xpass', path: 'oauthredirect' }) : undefined;
-
-  const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest(
-    {
-      androidClientId: GOOGLE_ANDROID_CLIENT_ID,
-      iosClientId: GOOGLE_IOS_CLIENT_ID,
-      webClientId: GOOGLE_WEB_CLIENT_ID,
-      scopes: ['profile', 'email'],
-      ...(nativeGoogleRedirectUri ? { redirectUri: nativeGoogleRedirectUri } : {}),
-    },
-    { scheme: 'xpass' }
-  );
+  // Native: authorization code + PKCE; library exchanges for tokens and surfaces id_token for Firebase.
+  const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+    iosClientId: GOOGLE_IOS_CLIENT_ID,
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    scopes: ['profile', 'email'],
+    ...(Platform.OS !== 'web' ? { responseType: ResponseType.Code } : {}),
+  });
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -96,15 +87,6 @@ export default function LoginScreen() {
       }
     })();
   }, [googleResponse, signInWithGoogleIdToken, router]);
-
-  useEffect(() => {
-    if (__DEV__ && nativeGoogleRedirectUri) {
-      console.log(
-        '[Google OAuth] Native redirectUri — use this exact value in Google Cloud → Android OAuth client (custom URI / redirect allowlist):',
-        nativeGoogleRedirectUri
-      );
-    }
-  }, [nativeGoogleRedirectUri]);
 
   useEffect(() => {
     const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
