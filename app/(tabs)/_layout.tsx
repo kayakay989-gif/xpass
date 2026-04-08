@@ -15,6 +15,9 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={({ route, navigation }) => ({
+        // Only mount the focused tab's screen. Prevents Fabric crashes when MapView (home)
+        // would otherwise stay mounted under another tab (e.g. subscription).
+        lazy: true,
         tabBarShowLabel: false,
         headerShown: true,
         tabBarHideOnKeyboard: true,
