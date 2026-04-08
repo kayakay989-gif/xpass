@@ -25,9 +25,8 @@
     "production": {
       "ios": {
         "ascAppId": "6760907449",
-        "ascApiKeyPath": "./credentials/AuthKey_H8RZAFB987.p8",
-        "ascApiKeyId": "H8RZAFB987",
-        "ascApiKeyIssuerId": "f508c5d0-a1b3-4aac-b661-3abb4886744d"
+        "bundleIdentifier": "com.xpass.app",
+        "appleTeamId": "PA266475ZW"
       }
     }
   }
