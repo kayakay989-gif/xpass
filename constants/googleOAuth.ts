@@ -5,6 +5,15 @@
  * Web client → Authorized redirect URIs must include:
  *   https://auth.expo.io/@essa989/xpass-subscription-app
  *
+ * Android (installed APK) — if Google shows "Custom URI scheme is not enabled" / Error 400:
+ * 1. Google Cloud Console → APIs & Services → Credentials → your *Android* OAuth client
+ *    (same numeric client as GOOGLE_ANDROID_CLIENT_ID).
+ * 2. Package name: com.xpass.unique. SHA-1: signing cert for this build (EAS: credentials;
+ *    Play: App signing certificate).
+ * 3. Enable custom URI scheme / add authorized redirect for the URI the app uses
+ *    (login uses app scheme `xpass`, path `oauthredirect` — typically `xpass:/oauthredirect`
+ *    or `xpass:///oauthredirect`; copy the exact value from a dev log of redirectUri if needed).
+ *
  * Overrides: EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID, EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
  * EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
  */
