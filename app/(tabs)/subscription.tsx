@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -7,6 +7,8 @@ import Colors from '@/constants/colors';
 import { Redirect, useRouter } from 'expo-router';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { TIER_COLORS } from '@/constants/tier-colors';
+import { normalizeSubscriptionTier } from '@/lib/subscription-tier';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 type Package = {
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
@@ -120,7 +122,7 @@ const DURATIONS = [
 
 export default function SubscriptionScreen() {
   const { user, firebaseUser, isGuest } = useAuth();
-  const { subscription } = useApp();
+  const { subscription, subscriptionQuery } = useApp();
   const router = useRouter();
   const [selectedDuration, setSelectedDuration] = useState<number>(1);
   const insets = useSafeAreaInsets();
@@ -142,6 +144,16 @@ export default function SubscriptionScreen() {
     return <Redirect href="/login" />;
   }
 
+  const trpcUserId = user?.id || firebaseUser.uid;
+  if (trpcUserId && subscriptionQuery.isPending) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ marginTop: 14, fontSize: 15, color: Colors.textSecondary }}>Loading membership…</Text>
+      </View>
+    );
+  }
+
   const getMonthlyPrice = (tier: Package['tier']): number => {
     const total = getTotalPrice(tier);
     return selectedDuration > 0 ? Math.round(total / selectedDuration) : 0;
@@ -149,13 +161,9 @@ export default function SubscriptionScreen() {
 
   // Get button label and action based on subscription status
   const getPackageButtonInfo = (tier: Package['tier']) => {
-    const currentTier = subscription?.tier;
-    const endDate = subscription?.endDate ? new Date(subscription.endDate) : null;
-    const now = new Date();
-    
-    // Check if subscription is active: isActive AND endDate > now
-    const isActive = subscription?.isActive && endDate && endDate.getTime() > now.getTime();
-    
+    const currentTier = normalizeSubscriptionTier(subscription?.tier);
+    const isActive = isSubscriptionActiveForMember(subscription);
+
     // If user has this tier active
     if (isActive && currentTier === tier) {
       return {
@@ -181,14 +189,18 @@ export default function SubscriptionScreen() {
       action: () => {
         const totalPrice = getTotalPrice(tier);
         console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
-        router.push({
-          pathname: '/payment',
-          params: {
-            tier,
-            duration: selectedDuration.toString(),
-            price: totalPrice.toString(),
-          },
+        const qs = new URLSearchParams({
+          tier,
+          duration: String(selectedDuration),
+          price: String(totalPrice),
         });
+        const href = `/payment?${qs.toString()}`;
+        try {
+          router.push(href as any);
+        } catch (e) {
+          console.error('[Subscription] router.push failed, retrying:', e);
+          router.replace(href as any);
+        }
       },
     };
   };

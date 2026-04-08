@@ -27,7 +27,22 @@ try {
   console.log('react-native-maps not available, using fallback');
 }
 
+function isValidCoordinate(lat: unknown, lng: unknown): lat is number {
+  return (
+    typeof lat === 'number' &&
+    typeof lng === 'number' &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180
+  );
+}
+
 export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }: MapViewComponentProps) {
+  const mappableGyms = Array.isArray(gyms)
+    ? gyms.filter((g) => isValidCoordinate(g?.latitude, g?.longitude))
+    : [];
+
   // If maps are not available (Expo Go), show fallback
   if (!MapView || !Marker) {
     return (
@@ -35,17 +50,20 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
         <View style={styles.fallbackContainer}>
           <Text style={styles.fallbackTitle}>Map View</Text>
           <Text style={styles.fallbackText}>
-            {gyms.length} {gyms.length === 1 ? 'gym' : 'gyms'} nearby
+            {mappableGyms.length || gyms.length}{' '}
+            {(mappableGyms.length || gyms.length) === 1 ? 'gym' : 'gyms'} nearby
           </Text>
           <View style={styles.gymList}>
-            {gyms.slice(0, 3).map((gym) => (
+            {(mappableGyms.length > 0 ? mappableGyms : gyms).slice(0, 3).map((gym) => (
               <View key={gym.id} style={styles.gymItem}>
                 <Text style={styles.gymName}>{gym.name}</Text>
                 <Text style={styles.gymAddress}>{gym.address}</Text>
               </View>
             ))}
-            {gyms.length > 3 && (
-              <Text style={styles.moreText}>+{gyms.length - 3} more gyms</Text>
+            {(mappableGyms.length > 0 ? mappableGyms : gyms).length > 3 && (
+              <Text style={styles.moreText}>
+                +{(mappableGyms.length > 0 ? mappableGyms : gyms).length - 3} more gyms
+              </Text>
             )}
           </View>
           <Text style={styles.noteText}>
@@ -68,7 +86,7 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
         mapType="standard"
         loadingEnabled
       >
-        {gyms.map((gym) => (
+        {mappableGyms.map((gym) => (
           <Marker
             key={gym.id}
             coordinate={{

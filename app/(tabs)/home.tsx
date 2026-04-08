@@ -280,7 +280,10 @@ export default function HomeScreen() {
           <View style={styles.cardRow}>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>Passes Remaining</Text>
-              <Text style={styles.statValue}>{subscription.maxVisitsPerMonth - subscription.visitsUsed} / {subscription.maxVisitsPerMonth}</Text>
+              <Text style={styles.statValue}>
+                {Math.max(0, (subscription.maxVisitsPerMonth ?? 0) - (subscription.visitsUsed ?? 0))} /{' '}
+                {subscription.maxVisitsPerMonth ?? 0}
+              </Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>Tier</Text>

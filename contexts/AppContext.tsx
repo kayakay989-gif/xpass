@@ -1,4 +1,5 @@
 import createContextHook from '@nkzw/create-context-hook';
+import { keepPreviousData } from '@tanstack/react-query';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Subscription, Gym, CheckIn, SubscriptionTier, SubscriptionDuration } from '@/types';
 import { trpc } from '@/lib/trpc';
@@ -25,18 +26,29 @@ export function calculateSubscriptionPrice(tier: SubscriptionTier, duration: Sub
 }
 
 export const [AppProvider, useApp] = createContextHook(() => {
-  const { user } = useAuth();
-  const userId = user?.id || null;
+  const { user, firebaseUser } = useAuth();
+  // Use Firebase uid as soon as the session exists so tRPC (Bearer token) matches getCurrent's
+  // ctx.user.uid even while Firestore profile `user` is still loading — fixes missing subscription on mobile.
+  const userId = user?.id || firebaseUser?.uid || null;
 
   const subscriptionQuery = trpc.subscriptions.getCurrent.useQuery(
-    // safely omit when no user
     { userId: userId as any },
-    { enabled: !!userId }
+    {
+      enabled: !!userId,
+      staleTime: 60_000,
+      gcTime: 5 * 60_000,
+      retry: 2,
+      placeholderData: keepPreviousData,
+    }
   );
   
   const checkInsQuery = trpc.checkIns.list.useQuery(
     { userId: userId as any },
-    { enabled: !!userId }
+    {
+      enabled: !!userId,
+      staleTime: 30_000,
+      retry: 1,
+    }
   );
 
   const subscription = subscriptionQuery.data || null;
@@ -163,7 +175,9 @@ export const [AppProvider, useApp] = createContextHook(() => {
       createSubscription,
       refetchGyms,
       subscriptionQuery,
-      isLoading: subscriptionQuery.isLoading || isGymsLoading || checkInsQuery.isLoading,
+      // Do not block the whole app on check-ins; home/subscription only need subscription + gyms.
+      isLoading: subscriptionQuery.isLoading || isGymsLoading,
+      isCheckInsLoading: checkInsQuery.isLoading,
       isCheckingIn: checkInMutation.isPending,
     };
   }, [

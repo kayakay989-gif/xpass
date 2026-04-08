@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
@@ -10,13 +10,25 @@ export default function MySubscriptionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { subscription } = useApp();
+  const { subscription, subscriptionQuery } = useApp();
 
   const goBackOrHome = () => {
     const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
     if (canGoBack) return router.back();
     return router.replace('/(tabs)/home');
   };
+
+  if (subscriptionQuery.isPending && subscription == null) {
+    return (
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={{ marginTop: 14, fontSize: 15, color: Colors.textSecondary }}>Loading membership…</Text>
+        </View>
+      </>
+    );
+  }
 
   if (!subscription) {
     return (
@@ -49,8 +61,12 @@ export default function MySubscriptionScreen() {
             <TouchableOpacity 
               style={styles.subscribeButton}
               onPress={() => {
-                // Go straight to the subscription tab; do not open stack `/subscription` (modal + replace was unstable on Android).
-                router.replace('/(tabs)/subscription');
+                try {
+                  router.replace('/(tabs)/subscription');
+                } catch (e) {
+                  console.error('[MySubscription] Navigate to subscription failed:', e);
+                  router.push('/(tabs)/subscription' as any);
+                }
               }}
             >
               <Text style={styles.subscribeButtonText}>Subscribe Now</Text>
@@ -74,7 +90,9 @@ export default function MySubscriptionScreen() {
   };
 
   const getRemainingPasses = () => {
-    return subscription.maxVisitsPerMonth - subscription.visitsUsed;
+    const max = subscription.maxVisitsPerMonth ?? 0;
+    const used = subscription.visitsUsed ?? 0;
+    return Math.max(0, max - used);
   };
 
   return (

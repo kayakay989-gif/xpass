@@ -14,13 +14,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 export default function PaymentScreen() {
   const { tier, duration, price } = useLocalSearchParams<{ tier: string; duration: string; price: string }>();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, firebaseUser } = useAuth();
+  const effectiveUserId = user?.id ?? firebaseUser?.uid ?? null;
   const { subscriptionQuery } = useApp();
   const insets = useSafeAreaInsets();
+
+  const tierOk = typeof tier === 'string' && tier.trim().length > 0;
+  const durationOk = typeof duration === 'string' && duration.trim().length > 0;
 
   const [paymentProcessing, setPaymentProcessing] = useState<boolean>(false);
   const [cardNumber, setCardNumber] = useState<string>('');
@@ -110,7 +115,7 @@ export default function PaymentScreen() {
     },
     onSuccess: async (data: any) => {
       console.log('[Payment] Checkout mutation success:', data);
-      
+
       // Check if 3DS authentication is required
       if (data.requires3DS && data.redirectHtml) {
         console.log('[Payment] 3DS challenge required, showing authentication page');
@@ -126,7 +131,32 @@ export default function PaymentScreen() {
       setPaymentProcessing(false);
       setStatusMessage('');
 
-      // After backend reports success, verify the subscription is active before redirecting.
+      const subFromCheckout = data.subscription;
+
+      const finishActiveMembership = async () => {
+        try {
+          await subscriptionQuery.refetch();
+        } catch (e) {
+          console.warn('[Payment] Post-success subscription refetch (non-fatal):', e);
+        }
+        setToastType('success');
+        setToastMessage('Subscribed successfully! Your membership is now active.');
+        setToastVisible(true);
+        setTimeout(() => {
+          router.replace('/(tabs)/home');
+        }, 1200);
+      };
+
+      // Same contract as web: successful checkout returns the created subscription immediately.
+      // Trust it first to avoid races where verify/refetch lag behind Firestore writes.
+      if (data.success && isSubscriptionActiveForMember(subFromCheckout)) {
+        if (__DEV__) {
+          console.log('[Payment] Active membership from checkout payload (aligned with web/API)');
+        }
+        await finishActiveMembership();
+        return;
+      }
+
       try {
         const paymentOrderId = data.orderId ?? orderId;
         if (!paymentOrderId) {
@@ -134,12 +164,19 @@ export default function PaymentScreen() {
         }
 
         const verification = await verifyPaymentMutation.mutateAsync({
-          userId: user!.id,
+          userId: effectiveUserId!,
           orderId: paymentOrderId,
           paymentTransactionId: data.paymentTransactionId ?? '2',
         });
 
         if (!verification?.confirmed) {
+          if (isSubscriptionActiveForMember(subFromCheckout)) {
+            console.warn(
+              '[Payment] payments.verify not confirmed but checkout included active subscription; proceeding'
+            );
+            await finishActiveMembership();
+            return;
+          }
           throw new Error(
             `Payment not confirmed by backend (status=${String(verification?.status || 'unknown')})`
           );
@@ -147,37 +184,32 @@ export default function PaymentScreen() {
 
         const result = await subscriptionQuery.refetch();
         const sub = result.data;
-        const now = new Date();
-        const isActive =
-          !!sub &&
-          sub.isActive &&
-          !!sub.startDate &&
-          !!sub.endDate &&
-          new Date(sub.endDate).getTime() >= now.getTime();
 
-        if (isActive) {
-          setToastType('success');
-          setToastMessage('Subscribed successfully! Your membership is now active.');
-          setToastVisible(true);
-
-          // Give the toast a brief moment to show before redirecting.
-          setTimeout(() => {
-            router.replace('/(tabs)/home');
-          }, 1200);
-        } else {
-          console.warn('[Payment] Subscription not confirmed active after payment:', sub);
-          Alert.alert(
-            'Subscription Pending',
-            'Your payment was successful, but we could not confirm your subscription is active yet. Please refresh the app or contact support.',
-            [
-              {
-                text: 'OK',
-                onPress: () => router.replace('/(tabs)/home'),
-              },
-            ]
-          );
+        if (isSubscriptionActiveForMember(sub) || isSubscriptionActiveForMember(subFromCheckout)) {
+          await finishActiveMembership();
+          return;
         }
+
+        console.warn('[Payment] Subscription not active after verify + refetch:', { sub, subFromCheckout });
+        Alert.alert(
+          'Subscription Pending',
+          'Your payment was successful, but we could not confirm your subscription is active yet. Please refresh the app or contact support.',
+          [
+            {
+              text: 'OK',
+              onPress: () => router.replace('/(tabs)/home'),
+            },
+          ]
+        );
       } catch (verifyError: any) {
+        if (isSubscriptionActiveForMember(subFromCheckout)) {
+          console.warn(
+            '[Payment] verify/refetch error but checkout subscription looks active; proceeding:',
+            verifyError
+          );
+          await finishActiveMembership();
+          return;
+        }
         console.error('[Payment] Failed to verify subscription after payment:', verifyError);
         Alert.alert(
           'Subscription Error',
@@ -263,7 +295,7 @@ export default function PaymentScreen() {
       const orderId = `order-${Date.now()}`;
       
       await checkoutMutation.mutateAsync({
-        userId: user!.id,
+        userId: effectiveUserId!,
         tier: tier as any,
         duration: parseInt(duration) as any,
         useWallet: true,
@@ -304,7 +336,7 @@ export default function PaymentScreen() {
       try {
         const orderId = `order-${Date.now()}`;
         await checkoutMutation.mutateAsync({
-          userId: user!.id,
+          userId: effectiveUserId!,
           tier: tier as any,
           duration: parseInt(duration) as any,
           useWallet: true,
@@ -337,14 +369,14 @@ export default function PaymentScreen() {
       return;
     }
 
-    if (!user) {
-      console.warn('[Payment] No user found');
+    if (!effectiveUserId) {
+      console.warn('[Payment] No authenticated user id (Firestore profile may still be loading)');
       Alert.alert('Error', 'Please log in to make a payment');
       return;
     }
 
     console.log('[Payment] Starting payment process...', {
-      userId: user.id,
+      userId: effectiveUserId,
       tier,
       duration,
       cardNumberLength: cardNumber.replace(/\s/g, '').length,
@@ -412,7 +444,7 @@ export default function PaymentScreen() {
       }
 
       await checkoutMutation.mutateAsync({
-        userId: user.id,
+        userId: effectiveUserId!,
         tier: tier as any,
         duration: parseInt(duration) as any,
         useWallet: useWallet,
@@ -448,7 +480,7 @@ export default function PaymentScreen() {
       authStatus,
     });
 
-    if (!user) {
+    if (!effectiveUserId) {
       Alert.alert('Error', 'Please log in to complete payment');
       return;
     }
@@ -463,7 +495,7 @@ export default function PaymentScreen() {
 
       // Call checkout again with authentication details
       await checkoutMutation.mutateAsync({
-        userId: user.id,
+        userId: effectiveUserId,
         orderId: finalOrderId,
         tier: tier as any,
         duration: parseInt(duration) as any,
@@ -490,6 +522,7 @@ export default function PaymentScreen() {
     }
     },
     [
+      effectiveUserId,
       user,
       cardNumber,
       parsedExpiry,
@@ -604,8 +637,43 @@ export default function PaymentScreen() {
       diamond: 'Diamond Package',
       elite: 'Elite Package',
     };
-    return tierNames[tier] || tier;
+    return tierNames[String(tier).toLowerCase()] || tier;
   };
+
+  if (!tierOk || !durationOk) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F9FAFB', paddingTop: insets.top, padding: 24, justifyContent: 'center' }}>
+        <Text style={{ fontSize: 17, fontWeight: '600', color: Colors.text, marginBottom: 8 }}>
+          Missing package details
+        </Text>
+        <Text style={{ fontSize: 15, color: Colors.textSecondary, marginBottom: 20 }}>
+          Go back and choose a subscription plan again.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: Colors.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}
+          onPress={() => router.back()}
+        >
+          <Text style={{ color: Colors.white, fontWeight: '600' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (!effectiveUserId) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F9FAFB', paddingTop: insets.top, padding: 24, justifyContent: 'center' }}>
+        <Text style={{ fontSize: 16, color: Colors.textSecondary, marginBottom: 16 }}>
+          Signing you in… If this persists, return to login.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: Colors.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}
+          onPress={() => router.replace('/login')}
+        >
+          <Text style={{ color: Colors.white, fontWeight: '600' }}>Go to login</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -1157,7 +1225,7 @@ export default function PaymentScreen() {
                 setStatusMessage('Processing wallet payment...');
                 try {
                   await checkoutMutation.mutateAsync({
-                    userId: user!.id,
+                    userId: effectiveUserId!,
                     tier: tier as any,
                     duration: parseInt(duration) as any,
                     currency: 'JOD',

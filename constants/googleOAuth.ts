@@ -1,5 +1,9 @@
 /**
  * Google OAuth client IDs for Expo AuthSession + Firebase (same GCP project as Firebase).
+ *
+ * Branding (Android account picker / consent): set the OAuth consent screen **App name** to "Xpass"
+ * (and logo, support email) in Google Cloud Console → APIs & Services → OAuth consent screen.
+ * If left as the default, users may see "project-…" instead of the product name.
  * - androidClientId → OAuth client type **Android** (package + SHA-1 in Cloud Console).
  * - webClientId → OAuth client type **Web** (Firebase often lists this as "Web client").
  * Never use webClientId as androidClientId.

@@ -11,6 +11,7 @@ import {
   GOOGLE_IOS_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
 } from '@/constants/googleOAuth';
+import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import Toast from '@/components/Toast';
@@ -78,7 +79,7 @@ export default function LoginScreen() {
       try {
         setIsLoading(true);
         await signInWithGoogleIdToken(idToken);
-        router.replace('/(tabs)/home');
+        scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
       } catch (e: any) {
         googleIdTokenHandledRef.current = null;
         Alert.alert('Error', e?.message || 'Google sign-in failed.');
@@ -332,12 +333,8 @@ export default function LoginScreen() {
     try {
       await loginWithEmail(email.trim(), password);
       console.log('[Login] Email/password login successful, navigating to home');
-      // Route based on role: admins go to admin dashboard, users to main app
-      if (isAdmin) {
-        router.replace('/admin-dashboard');
-      } else {
-        router.replace('/(tabs)/home');
-      }
+      const target = isAdmin ? '/admin-dashboard' : '/(tabs)/home';
+      scheduleAuthNavigation((href) => router.replace(href as any), target);
     } catch (error: any) {
       console.error('Login error:', error);
       let errorMessage = 'Invalid credentials. Please try again.';
@@ -375,7 +372,7 @@ export default function LoginScreen() {
       setIsLoading(true);
       try {
         await loginWithGoogle();
-        router.replace('/(tabs)/home');
+        scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
       } catch (error: any) {
         console.error('Google login error:', error);
         let errorMessage = 'Google sign-in failed. Please try again.';
@@ -399,13 +396,8 @@ export default function LoginScreen() {
     try {
       const result = await googlePromptAsync({ showInRecents: true });
       if (result.type === 'success') {
-        const idToken =
-          (result.params?.id_token as string | undefined) || (result.params as any)?.id_token;
-        if (idToken && googleIdTokenHandledRef.current !== idToken) {
-          googleIdTokenHandledRef.current = idToken;
-          await signInWithGoogleIdToken(idToken);
-          router.replace('/(tabs)/home');
-        }
+        // Token exchange + Firebase sign-in + navigation run in the `googleResponse` useEffect
+        // to avoid double sign-in and a race that briefly hits an unmatched route (404).
       } else if (result.type === 'error') {
         const msg =
           (result as any).params?.error_description ||

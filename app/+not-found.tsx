@@ -16,7 +16,7 @@ export default function NotFoundScreen() {
       
       <TouchableOpacity 
         style={styles.button}
-        onPress={() => router.replace('/')}
+        onPress={() => router.replace('/(tabs)/home')}
       >
         <Home size={20} color={Colors.text} />
         <Text style={styles.buttonText}>Go Home</Text>
