@@ -352,26 +352,33 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           
           setFirebaseUser(firebaseUser);
           setIsGuest(false);
-          
-          // Repair account if needed (ensures profile exists even if signup setup failed)
-          await repairUserAccountIfNeeded(firebaseUser.uid, firebaseUser);
-          
-          // Always load profile from Firestore first (source of truth) - pass firebaseUser to ensure consistency
-          const profile = await loadUserProfile(firebaseUser.uid, firebaseUser);
-          // If profile loaded successfully, ensure Firebase Auth displayName matches
-          if (profile && profile.name && firebaseUser.displayName !== profile.name) {
+          // Unblock UI immediately so membership (tRPC) and home can load in parallel with Firestore profile.
+          // Previously we awaited repair + profile + admin here, which serialized ~2–4s+ before the app showed anything.
+          setIsLoadingAuth(false);
+
+          void (async () => {
             try {
-              await updateProfile(firebaseUser, { displayName: profile.name });
-            } catch (error) {
-              console.warn('[AuthContext] Failed to sync displayName after profile load:', error);
+              await repairUserAccountIfNeeded(firebaseUser.uid, firebaseUser);
+              const profile = await loadUserProfile(firebaseUser.uid, firebaseUser);
+              if (profile && profile.name && firebaseUser.displayName !== profile.name) {
+                try {
+                  await updateProfile(firebaseUser, { displayName: profile.name });
+                } catch (error) {
+                  console.warn('[AuthContext] Failed to sync displayName after profile load:', error);
+                }
+              }
+              await evaluateAdminClaim(firebaseUser);
+            } catch (err) {
+              console.error('[AuthContext] Background profile / admin load failed:', err);
             }
-          }
-          await evaluateAdminClaim(firebaseUser);
+          })();
         } else {
           setFirebaseUser(null);
           setUser(null);
           setIsGuest(false);
-          await evaluateAdminClaim(null);
+          void evaluateAdminClaim(null).catch((e) =>
+            console.warn('[AuthContext] evaluateAdminClaim after sign-out:', e)
+          );
         }
       } catch (error) {
         console.error('[AuthContext] Error in auth state change:', error);

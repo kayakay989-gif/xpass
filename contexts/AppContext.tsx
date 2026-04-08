@@ -37,7 +37,8 @@ export const [AppProvider, useApp] = createContextHook(() => {
       enabled: !!userId,
       staleTime: 60_000,
       gcTime: 5 * 60_000,
-      retry: 2,
+      retry: 1,
+      retryDelay: (attempt) => Math.min(800 * (attempt + 1), 4000),
       placeholderData: keepPreviousData,
     }
   );
