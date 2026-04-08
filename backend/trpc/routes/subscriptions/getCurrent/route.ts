@@ -8,6 +8,6 @@ export default protectedProcedure
     if (ctx.user?.uid !== input.userId) {
       throw new Error('Unauthorized');
     }
-    const subscription = await firestoreSubscriptions.getByUserId(input.userId);
+    const subscription = await firestoreSubscriptions.getMemberViewSubscription(input.userId);
     return subscription;
   });

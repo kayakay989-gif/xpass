@@ -15,12 +15,16 @@ import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { paramFirst } from '@/lib/expo-router-params';
 
 export default function PaymentScreen() {
-  const { tier, duration, price } = useLocalSearchParams<{ tier: string; duration: string; price: string }>();
+  const rawParams = useLocalSearchParams<{ tier?: string | string[]; duration?: string | string[]; price?: string | string[] }>();
+  const tier = paramFirst(rawParams.tier);
+  const duration = paramFirst(rawParams.duration);
+  const price = paramFirst(rawParams.price);
   const router = useRouter();
   const { user, firebaseUser } = useAuth();
-  const effectiveUserId = user?.id ?? firebaseUser?.uid ?? null;
+  const effectiveUserId = firebaseUser?.uid ?? user?.id ?? null;
   const { subscriptionQuery } = useApp();
   const insets = useSafeAreaInsets();
 

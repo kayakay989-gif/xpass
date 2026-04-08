@@ -95,7 +95,11 @@ export const trpcClient = trpc.createClient({
           };
 
           // Firebase user auth (mobile/user/admin)
-          const token = await auth.currentUser?.getIdToken?.().catch(() => null);
+          let token = await auth.currentUser?.getIdToken?.().catch(() => null);
+          if (auth.currentUser && !token) {
+            await new Promise((r) => setTimeout(r, 120));
+            token = await auth.currentUser.getIdToken(true).catch(() => null);
+          }
           if (token) {
             headers["Authorization"] = `Bearer ${token}`;
           }

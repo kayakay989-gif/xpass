@@ -144,8 +144,7 @@ export default function SubscriptionScreen() {
     return <Redirect href="/login" />;
   }
 
-  const trpcUserId = user?.id || firebaseUser.uid;
-  if (trpcUserId && subscriptionQuery.isPending) {
+  if (firebaseUser?.uid && subscriptionQuery.isPending) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -189,17 +188,21 @@ export default function SubscriptionScreen() {
       action: () => {
         const totalPrice = getTotalPrice(tier);
         console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
-        const qs = new URLSearchParams({
+        const params = {
           tier,
           duration: String(selectedDuration),
           price: String(totalPrice),
-        });
-        const href = `/payment?${qs.toString()}`;
+        };
         try {
-          router.push(href as any);
+          router.push({ pathname: '/payment', params } as any);
         } catch (e) {
-          console.error('[Subscription] router.push failed, retrying:', e);
-          router.replace(href as any);
+          console.error('[Subscription] navigate to payment failed, retrying with href:', e);
+          const href = `/payment?${new URLSearchParams(params).toString()}`;
+          try {
+            router.replace(href as any);
+          } catch (e2) {
+            console.error('[Subscription] replace also failed:', e2);
+          }
         }
       },
     };

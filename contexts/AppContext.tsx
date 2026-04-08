@@ -27,9 +27,9 @@ export function calculateSubscriptionPrice(tier: SubscriptionTier, duration: Sub
 
 export const [AppProvider, useApp] = createContextHook(() => {
   const { user, firebaseUser } = useAuth();
-  // Use Firebase uid as soon as the session exists so tRPC (Bearer token) matches getCurrent's
-  // ctx.user.uid even while Firestore profile `user` is still loading — fixes missing subscription on mobile.
-  const userId = user?.id || firebaseUser?.uid || null;
+  // MUST match Firebase ID token uid. Never prefer `user.id` first — Firestore profile id can differ
+  // (e.g. legacy/email edge cases) and would cause getCurrent Unauthorized + empty subscription on mobile.
+  const userId = firebaseUser?.uid ?? null;
 
   const subscriptionQuery = trpc.subscriptions.getCurrent.useQuery(
     { userId: userId as any },

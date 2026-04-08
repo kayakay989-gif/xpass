@@ -154,6 +154,57 @@ export const firestoreSubscriptions = {
     };
   },
 
+  /**
+   * Member-facing subscription: active row first, else latest unexpired doc (handles stale `isActive` in DB).
+   */
+  async getMemberViewSubscription(userId: string): Promise<Subscription | null> {
+    const active = await this.getByUserId(userId);
+    if (active) return active;
+
+    const snapshot = await adminDb
+      .collection('subscriptions')
+      .where('userId', '==', userId)
+      .get();
+
+    if (snapshot.empty) return null;
+
+    const now = Date.now();
+    const toSub = (doc: { id: string; data: () => any }): Subscription => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        userId: data.userId,
+        tier: data.tier,
+        duration: data.duration,
+        startDate: timestampToDate(data.startDate),
+        endDate: timestampToDate(data.endDate),
+        monthlyPrice: data.monthlyPrice,
+        totalPrice: data.totalPrice,
+        visitsUsed: data.visitsUsed || 0,
+        maxVisitsPerMonth: data.maxVisitsPerMonth,
+        isActive: data.isActive,
+        status: data.status ?? null,
+        paymentStatus: data.paymentStatus ?? null,
+        autoRenew: data.autoRenew ?? null,
+        createdAt: data.createdAt ? timestampToDate(data.createdAt) : undefined,
+      };
+    };
+
+    const candidates = snapshot.docs
+      .map(toSub)
+      .filter((s) => {
+        const end = s.endDate ? new Date(s.endDate).getTime() : 0;
+        return Number.isFinite(end) && end > now && s.isActive !== false;
+      })
+      .sort((a, b) => {
+        const aT = a.endDate ? new Date(a.endDate).getTime() : 0;
+        const bT = b.endDate ? new Date(b.endDate).getTime() : 0;
+        return bT - aT;
+      });
+
+    return candidates[0] ?? null;
+  },
+
   async create(subscription: Subscription): Promise<void> {
     // Deactivate existing subscriptions
     const existingSnapshot = await adminDb

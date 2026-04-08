@@ -56,6 +56,11 @@ function RootLayoutNav() {
       <Stack.Screen name="splash" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="payment" options={{ headerShown: false, title: 'Payment' }} />
+      <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+      <Stack.Screen name="my-subscription" options={{ headerShown: false }} />
+      <Stack.Screen name="gym-details" options={{ title: 'Gym' }} />
+      <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
       <Stack.Screen
         name="qr-scanner"
         options={{

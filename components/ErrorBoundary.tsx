@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { router } from 'expo-router';
 import Colors from '@/constants/colors';
 
 interface Props {
@@ -30,10 +31,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReset = () => {
-    // Reset error state without navigating
     this.setState({ hasError: false, error: null });
-    // Force a re-render by updating the component
-    this.forceUpdate();
+    try {
+      router.replace('/(tabs)/home');
+    } catch (e) {
+      console.error('[ErrorBoundary] router.replace failed:', e);
+      this.forceUpdate();
+    }
   };
 
   render() {

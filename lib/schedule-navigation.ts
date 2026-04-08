@@ -26,6 +26,11 @@ export function scheduleAuthNavigation(replace: (href: string) => void, href: st
   }
 
   InteractionManager.runAfterInteractions(() => {
-    requestAnimationFrame(() => requestAnimationFrame(run));
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // Extra delay so the root stack + tabs finish mounting before replace (reduces 404 flashes).
+        setTimeout(run, 100);
+      });
+    });
   });
 }

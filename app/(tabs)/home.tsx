@@ -18,7 +18,7 @@ type ViewMode = 'map' | 'list';
 export default function HomeScreen() {
   const router = useRouter();
   const { user, firebaseUser, isGuest, isLoading: isLoadingAuth } = useAuth();
-  const { subscription, gyms, isLoading } = useApp();
+  const { subscription, gyms, isLoading, subscriptionQuery } = useApp();
   const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
   const [isLoadingBanners, setIsLoadingBanners] = useState(true);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
@@ -275,7 +275,12 @@ export default function HomeScreen() {
         <Text style={styles.dashboardText}>Home Dashboard</Text>
       </View>
 
-      {subscription ? (
+      {membershipPending ? (
+        <View style={[styles.noSubscriptionCard, { alignItems: 'center', paddingVertical: 28 }]}>
+          <ActivityIndicator size="small" color={Colors.primary} />
+          <Text style={[styles.noSubText, { marginTop: 10 }]}>Loading membership…</Text>
+        </View>
+      ) : subscription ? (
         <View style={styles.subscriptionCard}>
           <View style={styles.cardRow}>
             <View style={styles.statBox}>
