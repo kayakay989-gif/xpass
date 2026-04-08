@@ -225,19 +225,17 @@ export default function HomeScreen() {
     longitudeDelta: 0.1,
   };
 
-  // While auth or core app data (subscription, gyms, check-ins) is loading,
-  // show a unified loading state so we don't briefly render incorrect
-  // subscription UI (e.g., "No Active Subscription" before data arrives).
-  // Guests must not block on gym/subscription fetches — Firestore can hang and would
-  // strand the app on this screen indefinitely.
-  if (isLoadingAuth || (!isGuest && isLoading)) {
+  if (isLoadingAuth) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.loadingText}>Loading your membership...</Text>
+        <Text style={styles.loadingText}>Loading…</Text>
       </View>
     );
   }
+
+  const membershipPending =
+    !isGuest && !!firebaseUser && subscriptionQuery.isPending && subscription == null;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
