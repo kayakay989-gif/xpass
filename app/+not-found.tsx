@@ -1,10 +1,47 @@
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import { usePathname, useRouter } from 'expo-router';
 import { Home } from 'lucide-react-native';
 import Colors from '@/constants/colors';
+import { agentLog } from '@/lib/agent-debug-log';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function NotFoundScreen() {
   const router = useRouter();
+  const pathname = usePathname();
+  const { isAuthenticated, isGuest, isLoading } = useAuth();
+
+  useEffect(() => {
+    // #region agent log
+    agentLog('H1', '+not-found.tsx:mount', 'not_found_screen_visible', {});
+    fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'dba73f' },
+      body: JSON.stringify({
+        sessionId: 'dba73f',
+        runId: 'pre-fix',
+        hypothesisId: 'H2',
+        location: 'app/+not-found.tsx:mount',
+        message: 'Not found screen mounted',
+        data: { pathname },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [pathname]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    // During auth/browser callback handoff we can briefly land here.
+    // Redirect silently for signed-in or guest users instead of flashing a 404 screen.
+    if (isAuthenticated || isGuest) {
+      router.replace('/(tabs)/home');
+    }
+  }, [isAuthenticated, isGuest, isLoading, router]);
+
+  if ((isAuthenticated || isGuest) && !isLoading) {
+    return <View style={styles.container} />;
+  }
 
   return (
     <View style={styles.container}>
