@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { useEffect } from 'react';
-import { usePathname, useRouter } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import { Home } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { agentLog } from '@/lib/agent-debug-log';
@@ -10,6 +10,16 @@ export default function NotFoundScreen() {
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, isGuest, isLoading } = useAuth();
+  const [canRender404, setCanRender404] = useState(false);
+  const isOAuthCallbackPath = useMemo(() => {
+    const p = (pathname || '').toLowerCase();
+    return (
+      p.includes('expo-auth-session') ||
+      p.includes('oauth') ||
+      p.includes('auth-session') ||
+      p.includes('callback')
+    );
+  }, [pathname]);
 
   useEffect(() => {
     // #region agent log
@@ -36,15 +46,36 @@ export default function NotFoundScreen() {
     // Redirect silently for signed-in or guest users instead of flashing a 404 screen.
     if (isAuthenticated || isGuest) {
       router.replace('/(tabs)/home');
+      return;
     }
-  }, [isAuthenticated, isGuest, isLoading, router]);
+    // OAuth callback deep links can transiently resolve to +not-found before login handles tokens.
+    // Send users to /login silently instead of showing a false 404.
+    if (isOAuthCallbackPath) {
+      router.replace('/login');
+    }
+  }, [isAuthenticated, isGuest, isLoading, isOAuthCallbackPath, router]);
+
+  useEffect(() => {
+    // Delay real 404 UI slightly; this absorbs transient router handoffs.
+    setCanRender404(false);
+    const timer = setTimeout(() => setCanRender404(true), 800);
+    return () => clearTimeout(timer);
+  }, [pathname]);
 
   if ((isAuthenticated || isGuest) && !isLoading) {
     return <View style={styles.container} />;
   }
+  if (!isLoading && isOAuthCallbackPath) {
+    return <View style={styles.container} />;
+  }
+  if (!canRender404) {
+    return <View style={styles.container} />;
+  }
 
   return (
-    <View style={styles.container}>
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={styles.container}>
       <Text style={styles.title}>404</Text>
       <Text style={styles.subtitle}>Page Not Found</Text>
       <Text style={styles.description}>
@@ -58,7 +89,8 @@ export default function NotFoundScreen() {
         <Home size={20} color={Colors.text} />
         <Text style={styles.buttonText}>Go Home</Text>
       </TouchableOpacity>
-    </View>
+      </View>
+    </>
   );
 }
 

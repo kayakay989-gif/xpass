@@ -4,41 +4,48 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useRef, useState } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
 import { ResponseType } from 'expo-auth-session';
+import { makeRedirectUri } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Phone, User } from 'lucide-react-native';
+import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, User } from 'lucide-react-native';
 import {
   GOOGLE_ANDROID_CLIENT_ID,
   GOOGLE_IOS_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
 } from '@/constants/googleOAuth';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
+import { agentLog } from '@/lib/agent-debug-log';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import Toast from '@/components/Toast';
+import {
+  AppleAuthenticationButton,
+  AppleAuthenticationButtonStyle,
+  AppleAuthenticationButtonType,
+  isAvailableAsync as isAppleAuthAvailableAsync,
+} from 'expo-apple-authentication';
 
 type AuthMode = 'login' | 'signup';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginWithEmail, signUpWithEmail, loginWithGoogle, signInWithGoogleIdToken, logout, isAdmin } = useAuth();
+  const { loginWithEmail, signUpWithEmail, loginWithGoogle, signInWithGoogleIdToken, signInWithApple, logout, isAdmin } = useAuth();
   const params = useLocalSearchParams<{ mode?: string; ref?: string }>();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('login');
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
   const [age, setAge] = useState('');
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
   
   // Validation error states
   const [errors, setErrors] = useState<{
     name?: string;
     email?: string;
-    phone?: string;
     age?: string;
     password?: string;
   }>({});
@@ -63,6 +70,11 @@ export default function LoginScreen() {
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     webClientId: GOOGLE_WEB_CLIENT_ID,
+    // Force callback to a valid app route to avoid transient expo-router +not-found flashes.
+    redirectUri:
+      Platform.OS === 'web'
+        ? makeRedirectUri({ path: 'login' })
+        : makeRedirectUri({ scheme: 'xpass', path: 'login' }),
     scopes: ['profile', 'email'],
     ...(Platform.OS !== 'web' ? { responseType: ResponseType.Code } : {}),
   });
@@ -79,15 +91,23 @@ export default function LoginScreen() {
       try {
         setIsLoading(true);
         await signInWithGoogleIdToken(idToken);
+        // #region agent log
+        agentLog('H1', 'login.tsx:googleNative', 'schedule_auth_nav', { target: '/home' });
+        // #endregion
         scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
       } catch (e: any) {
         googleIdTokenHandledRef.current = null;
         Alert.alert('Error', e?.message || 'Google sign-in failed.');
-      } finally {
         setIsLoading(false);
       }
+      /* Keep spinner until login unmounts on successful nav — avoids blank/404 flash */
     })();
   }, [googleResponse, signInWithGoogleIdToken, router]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    void isAppleAuthAvailableAsync().then(setAppleAuthAvailable);
+  }, []);
 
   useEffect(() => {
     const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
@@ -95,11 +115,6 @@ export default function LoginScreen() {
     if (m === 'signup') setMode('signup');
     if (r) setReferral(r);
   }, [params.mode, params.ref]);
-
-  const validatePhone = (phoneNum: string): boolean => {
-    const jordanPhoneRegex = /^[0-9]{9}$/;
-    return jordanPhoneRegex.test(phoneNum);
-  };
 
   const validateEmailFormat = (value: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -119,14 +134,6 @@ export default function LoginScreen() {
       newErrors.email = 'Email is required';
     } else if (!validateEmailFormat(email)) {
       newErrors.email = 'Please enter a valid email address';
-    }
-
-    // Validate phone - normalize by removing all non-digit characters
-    const phoneDigitsOnly = phone.replace(/\D/g, '');
-    if (!phoneDigitsOnly) {
-      newErrors.phone = 'Phone number is required';
-    } else if (phoneDigitsOnly.length !== 9) {
-      newErrors.phone = 'Please enter a valid 9-digit Jordan phone number (without +962)';
     }
 
     // Validate age
@@ -167,7 +174,6 @@ export default function LoginScreen() {
     // Additional validation before calling signup
     const trimmedName = name.trim();
     const trimmedEmail = email.trim();
-    const trimmedPhone = phone.trim();
     const trimmedAge = age.trim();
     const ageNum = parseInt(trimmedAge, 10);
 
@@ -186,18 +192,6 @@ export default function LoginScreen() {
       setToast({
         visible: true,
         message: 'Please enter your email address',
-        type: 'error',
-      });
-      return;
-    }
-
-    // Normalize phone: remove all non-digit characters, then check length
-    const phoneDigits = trimmedPhone.replace(/\D/g, '');
-    if (!phoneDigits || phoneDigits.length !== 9) {
-      setErrors({ phone: 'Phone number is required' });
-      setToast({
-        visible: true,
-        message: 'Please enter a valid 9-digit phone number (without +962)',
         type: 'error',
       });
       return;
@@ -232,7 +226,7 @@ export default function LoginScreen() {
         trimmedEmail, 
         password, 
         trimmedName, 
-        `+962${phoneDigits}`, 
+        undefined,
         referral.trim() || undefined, 
         ageNum
       );
@@ -249,7 +243,6 @@ export default function LoginScreen() {
       // Clear form
       setName('');
       setEmail('');
-      setPhone('');
       setAge('');
       setPassword('');
       setReferral('');
@@ -287,12 +280,10 @@ export default function LoginScreen() {
       const lowerMessage = errorMessage.toLowerCase();
       const newErrors: Record<string, string> = {};
       
-      if (lowerMessage.includes('email') && !lowerMessage.includes('phone')) {
+      if (lowerMessage.includes('email')) {
         newErrors.email = errorMessage;
       } else if (lowerMessage.includes('password')) {
         newErrors.password = errorMessage;
-      } else if (lowerMessage.includes('phone')) {
-        newErrors.phone = errorMessage;
       } else if (lowerMessage.includes('name')) {
         newErrors.name = errorMessage;
       } else if (lowerMessage.includes('age')) {
@@ -330,11 +321,16 @@ export default function LoginScreen() {
     }
 
     setIsLoading(true);
+    let willNavigate = false;
     try {
       await loginWithEmail(email.trim(), password);
       console.log('[Login] Email/password login successful, navigating to home');
       const target = isAdmin ? '/admin-dashboard' : '/(tabs)/home';
+      // #region agent log
+      agentLog('H1', 'login.tsx:emailLogin', 'schedule_auth_nav', { target });
+      // #endregion
       scheduleAuthNavigation((href) => router.replace(href as any), target);
+      willNavigate = true;
     } catch (error: any) {
       console.error('Login error:', error);
       let errorMessage = 'Invalid credentials. Please try again.';
@@ -363,16 +359,21 @@ export default function LoginScreen() {
         Alert.alert('Error', errorMessage);
       }
     } finally {
-      setIsLoading(false);
+      if (!willNavigate) setIsLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
     if (Platform.OS === 'web') {
       setIsLoading(true);
+      let willNavigate = false;
       try {
         await loginWithGoogle();
+        // #region agent log
+        agentLog('H1', 'login.tsx:googleWeb', 'schedule_auth_nav', { target: '/home' });
+        // #endregion
         scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
+        willNavigate = true;
       } catch (error: any) {
         console.error('Google login error:', error);
         let errorMessage = 'Google sign-in failed. Please try again.';
@@ -387,17 +388,19 @@ export default function LoginScreen() {
           Alert.alert('Error', errorMessage);
         }
       } finally {
-        setIsLoading(false);
+        if (!willNavigate) setIsLoading(false);
       }
       return;
     }
 
     setIsLoading(true);
+    let keepLoadingForNativeCallback = false;
     try {
       const result = await googlePromptAsync({ showInRecents: true });
       if (result.type === 'success') {
         // Token exchange + Firebase sign-in + navigation run in the `googleResponse` useEffect
         // to avoid double sign-in and a race that briefly hits an unmatched route (404).
+        keepLoadingForNativeCallback = true;
       } else if (result.type === 'error') {
         const msg =
           (result as any).params?.error_description ||
@@ -411,6 +414,26 @@ export default function LoginScreen() {
         console.error('Google login error:', error);
         Alert.alert('Error', msg || 'Google sign-in failed. Please try again.');
       }
+    } finally {
+      // On success, keep spinner visible until googleResponse effect navigates.
+      if (!keepLoadingForNativeCallback) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    if (Platform.OS !== 'ios' || isLoading) return;
+    setIsLoading(true);
+    try {
+      await signInWithApple();
+        scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
+    } catch (error: any) {
+      if (error?.message === 'SIGN_IN_CANCELLED') {
+        return;
+      }
+      const msg = error?.message || 'Apple sign-in failed.';
+      Alert.alert('Error', msg);
     } finally {
       setIsLoading(false);
     }
@@ -509,33 +532,6 @@ export default function LoginScreen() {
               </View>
               {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
             </View>
-
-
-            {mode === 'signup' && (
-              <View style={styles.inputContainer}>
-                <View style={[styles.inputWrapper, errors.phone && styles.inputWrapperError]}>
-                  <Phone size={20} color={errors.phone ? Colors.error : Colors.textMuted} style={styles.inputIcon} />
-                  <View style={styles.countryCodeContainer}>
-                    <Text style={styles.countryCode}>+962</Text>
-                  </View>
-                  <TextInput
-                    style={styles.phoneInput}
-                    placeholder="Phone (9 digits)"
-                    placeholderTextColor={Colors.textMuted}
-                    value={phone}
-                    onChangeText={(text) => {
-                      setPhone(text);
-                      if (errors.phone) {
-                        setErrors({ ...errors, phone: undefined });
-                      }
-                    }}
-                    keyboardType="phone-pad"
-                    maxLength={9}
-                  />
-                </View>
-                {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
-              </View>
-            )}
 
             {mode === 'signup' && (
               <View style={styles.inputContainer}>
@@ -686,6 +682,27 @@ export default function LoginScreen() {
               <View style={styles.dividerLine} />
             </View>
 
+            {Platform.OS === 'ios' && appleAuthAvailable && (
+              <View
+                style={[styles.appleButtonWrap, isLoading && styles.appleButtonWrapDisabled]}
+                pointerEvents={isLoading ? 'none' : 'auto'}
+              >
+                <AppleAuthenticationButton
+                  buttonType={
+                    mode === 'signup'
+                      ? AppleAuthenticationButtonType.SIGN_UP
+                      : AppleAuthenticationButtonType.SIGN_IN
+                  }
+                  buttonStyle={AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={12}
+                  style={styles.appleButton}
+                  onPress={() => {
+                    void handleAppleLogin();
+                  }}
+                />
+              </View>
+            )}
+
             <TouchableOpacity 
               style={styles.googleButton}
               onPress={handleGoogleLogin}
@@ -802,27 +819,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
   },
-  countryCodeContainer: {
-    position: 'absolute',
-    left: 46,
-    zIndex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingRight: 8,
-  },
-  countryCode: {
-    fontSize: 16,
-    fontWeight: '600' as const,
-    color: Colors.text,
-  },
-  phoneInput: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingLeft: 90,
-    fontSize: 16,
-    color: Colors.text,
-  },
   helperText: {
     marginTop: 6,
     fontSize: 12,
@@ -868,6 +864,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMuted,
     fontWeight: '600' as const,
+  },
+  appleButtonWrap: {
+    marginBottom: 16,
+  },
+  appleButtonWrapDisabled: {
+    opacity: 0.55,
+  },
+  appleButton: {
+    width: '100%',
+    height: 48,
   },
   googleButton: {
     backgroundColor: Colors.surface,
