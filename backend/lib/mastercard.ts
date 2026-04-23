@@ -199,6 +199,10 @@ async function putToGateway(
     });
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6c801d'},body:JSON.stringify({sessionId:'6c801d',runId:'pre-fix',hypothesisId:'H5',location:'backend/lib/mastercard.ts:putToGateway-response',message:'gateway HTTP response',data:{orderId,transactionId,status:response.status,ok:response.ok,apiOperation:payload?.apiOperation,result:json?.result,gatewayCode:json?.response?.gatewayCode,gatewayRecommendation:json?.response?.gatewayRecommendation,errorCause:json?.error?.cause,errorExplanation:json?.error?.explanation},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
   if (!response.ok) {
     // Non-2xx from gateway – surface a structured error so callers can
     // decide whether this is an issuer decline vs. transient error.

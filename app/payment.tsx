@@ -16,6 +16,7 @@ import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { paramFirst } from '@/lib/expo-router-params';
+import { agentLog } from '@/lib/agent-debug-log';
 
 export default function PaymentScreen() {
   const rawParams = useLocalSearchParams<{ tier?: string | string[]; duration?: string | string[]; price?: string | string[] }>();
@@ -30,6 +31,18 @@ export default function PaymentScreen() {
 
   const tierOk = typeof tier === 'string' && tier.trim().length > 0;
   const durationOk = typeof duration === 'string' && duration.trim().length > 0;
+
+  useEffect(() => {
+    // #region agent log
+    agentLog('H5', 'payment.tsx:mount', 'payment_screen_params', {
+      tierOk,
+      durationOk,
+      tierPresent: !!tier,
+      durationPresent: !!duration,
+      effectiveUserIdPresent: !!effectiveUserId,
+    });
+    // #endregion
+  }, [tierOk, durationOk, tier, duration, effectiveUserId]);
 
   const [paymentProcessing, setPaymentProcessing] = useState<boolean>(false);
   const [cardNumber, setCardNumber] = useState<string>('');
@@ -76,8 +89,47 @@ export default function PaymentScreen() {
       setPaymentProcessing(false);
       setStatusMessage('');
 
-      const message = error.message || 'Failed to process payment. Please try again.';
       const anyErr = error as any;
+      const nestedJsonText = anyErr?.data?.httpStatus === 500
+        ? (anyErr?.message || '').match(/"json":"(\{.*\})"/)?.[1]
+        : undefined;
+      let nestedMessage: string | undefined;
+      let nestedCode: string | undefined;
+      let nestedPath: string | undefined;
+      if (nestedJsonText) {
+        try {
+          const parsed = JSON.parse(nestedJsonText);
+          nestedMessage = parsed?.message;
+          nestedCode = parsed?.data?.code;
+          nestedPath = parsed?.data?.path;
+        } catch {
+          nestedMessage = undefined;
+        }
+      }
+      const shapeMessage = anyErr?.shape?.message;
+      const dataCode = anyErr?.data?.code;
+      const dataPath = anyErr?.data?.path;
+      const message =
+        nestedMessage ||
+        anyErr?.data?.zodError?.message ||
+        shapeMessage ||
+        error.message ||
+        'Failed to process payment. Please try again.';
+      const diagnosticSuffix = [nestedCode || dataCode, nestedPath || dataPath]
+        .filter(Boolean)
+        .join(' @ ');
+      const userMessage = diagnosticSuffix ? `${message}\n\n(${diagnosticSuffix})` : message;
+      console.log('[Payment][Debug] Parsed checkout error summary:', {
+        httpStatus: anyErr?.data?.httpStatus,
+        nestedJsonDetected: !!nestedJsonText,
+        nestedMessage,
+        nestedCode,
+        nestedPath,
+        shapeMessage,
+        dataCode,
+        dataPath,
+        finalUserMessage: userMessage,
+      });
       const structured =
         anyErr?.cause?.error ||
         anyErr?.data?.error ||
@@ -111,9 +163,9 @@ export default function PaymentScreen() {
       // Network / gateway / unknown failure
       Alert.alert(
         'Payment Error',
-        message.includes('temporarily unavailable') || message.includes('gateway')
+        userMessage.includes('temporarily unavailable') || userMessage.includes('gateway')
           ? 'We could not reach the payment service. Please check your connection and try again.'
-          : message,
+          : userMessage,
         [{ text: 'OK' }]
       );
     },
@@ -402,37 +454,6 @@ export default function PaymentScreen() {
       return;
     }
 
-    // Try to ping the API server to see if it's running
-    try {
-      const healthCheckUrl = `${config.api.baseUrl}/`;
-      console.log('[Payment] Checking API server connectivity...', healthCheckUrl);
-      
-      // Create timeout manually for compatibility
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
-      
-      const healthResponse = await fetch(healthCheckUrl, { 
-        method: 'GET',
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
-      console.log('[Payment] API server health check:', healthResponse.status);
-    } catch (healthError: any) {
-      console.error('[Payment] API server health check failed:', healthError);
-      const errorMsg = healthError.name === 'AbortError' 
-        ? 'Server did not respond in time'
-        : healthError.message || 'Unknown error';
-      
-      Alert.alert(
-        'Server Not Running',
-        `Cannot connect to API server at ${config.api.baseUrl}.\n\nError: ${errorMsg}\n\nPlease make sure the backend server is running:\n\nnpm run start-server\n\nOr check if the server URL is correct.`,
-        [{ text: 'OK' }]
-      );
-      setPaymentProcessing(false);
-      return;
-    }
-
     setPaymentProcessing(true);
     setStatusMessage('Processing payment...');
 
@@ -461,6 +482,7 @@ export default function PaymentScreen() {
         savedCardId: selectedSavedCardId || undefined, // Send saved card ID if using saved card
         saveCard: saveCard && !selectedSavedCardId, // Only save if it's a new card
         couponCode: appliedCoupon?.coupon?.code || undefined,
+        redirectUrl: redirectUrl || undefined,
         currency: 'JOD',
       });
     } catch (error: any) {
@@ -515,6 +537,7 @@ export default function PaymentScreen() {
         authenticationTransactionId: finalAuthTransactionId,
         authenticationStatus: authStatus,
         couponCode: appliedCoupon?.coupon?.code || undefined,
+        redirectUrl: redirectUrl || undefined,
         currency: 'JOD',
       });
     } catch (error: any) {
@@ -538,17 +561,20 @@ export default function PaymentScreen() {
       useWallet,
       saveCard,
       appliedCoupon,
+      redirectUrl,
       checkoutMutation,
     ]
   );
 
-  // Web: Mastercard 3DS callback posts a `message` event to the parent window.
+  // Web only: Mastercard 3DS callback posts a `message` event to the parent window.
+  // On React Native, `window` may exist but `window.addEventListener` is undefined — calling it throws
+  // "undefined is not a function" and crashes the payment screen on Android/iOS.
   useEffect(() => {
-    const handler = (event: any) => {
-      try {
-        // Only available in web builds (iframe + postMessage).
-        if (typeof window === 'undefined') return;
+    if (Platform.OS !== 'web') return;
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
 
+    const handler = (event: MessageEvent) => {
+      try {
         const data =
           typeof event?.data === 'string' ? JSON.parse(event.data) : event.data;
 
@@ -572,18 +598,13 @@ export default function PaymentScreen() {
           setChallengeHtml(null);
           handleFinalizePayment(finalOrderId, finalAuthTransactionId, data.result || 'Y');
         }
-      } catch (e) {
+      } catch {
         // Ignore non-JSON or unrelated messages
       }
     };
 
-    const finalizeSentRefLocal = finalizeSentRef.current;
-    if (finalizeSentRefLocal) {
-      // no-op; reference already set
-    }
-
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    window.addEventListener('message', handler as EventListener);
+    return () => window.removeEventListener('message', handler as EventListener);
   }, [orderId, authTransactionId, handleFinalizePayment]);
 
   const handleApplyCoupon = async () => {
@@ -596,7 +617,12 @@ export default function PaymentScreen() {
     setCouponError('');
 
     try {
-      const result = await validateCouponQuery.refetch();
+      const refetchFn = validateCouponQuery.refetch;
+      if (typeof refetchFn !== 'function') {
+        setCouponError('Coupon validation is unavailable. Please try again.');
+        return;
+      }
+      const result = await refetchFn();
       const data = result.data;
 
       if (data?.valid) {
@@ -745,10 +771,11 @@ export default function PaymentScreen() {
               {couponError ? (
                 <Text style={styles.couponError}>{couponError}</Text>
               ) : null}
-              {appliedCoupon && (
+              {appliedCoupon?.coupon && (
                 <View style={styles.couponApplied}>
                   <Text style={styles.couponAppliedText}>
-                    ✓ {appliedCoupon.coupon.code} applied ({appliedCoupon.coupon.discountPercent}% off)
+                    ✓ {String(appliedCoupon.coupon.code ?? '')} applied (
+                    {Number(appliedCoupon.coupon.discountPercent ?? 0)}% off)
                   </Text>
                   <TouchableOpacity onPress={handleRemoveCoupon}>
                     <Text style={styles.removeCouponText}>Remove</Text>
@@ -758,22 +785,24 @@ export default function PaymentScreen() {
             </View>
 
             {/* Price Breakdown */}
-            {appliedCoupon && (
+            {appliedCoupon?.coupon && (
               <View style={styles.priceBreakdown}>
                 <View style={styles.priceRow}>
                   <Text style={styles.priceBreakdownLabel}>Original Price:</Text>
                   <Text style={styles.priceBreakdownValue}>{price} JOD</Text>
                 </View>
                 <View style={styles.priceRow}>
-                  <Text style={styles.priceBreakdownLabel}>Discount ({appliedCoupon.coupon.discountPercent}%):</Text>
+                  <Text style={styles.priceBreakdownLabel}>
+                    Discount ({Number(appliedCoupon.coupon.discountPercent ?? 0)}%):
+                  </Text>
                   <Text style={[styles.priceBreakdownValue, styles.discountValue]}>
-                    -{appliedCoupon.discountAmount.toFixed(2)} JOD
+                    -{Number(appliedCoupon.discountAmount ?? 0).toFixed(2)} JOD
                   </Text>
                 </View>
                 <View style={[styles.priceRow, styles.finalPriceRow]}>
                   <Text style={styles.finalPriceLabel}>Final Price:</Text>
                   <Text style={styles.finalPriceValue}>
-                    {appliedCoupon.finalPrice.toFixed(2)} JOD
+                    {Number(appliedCoupon.finalPrice ?? 0).toFixed(2)} JOD
                   </Text>
                 </View>
                 {appliedCoupon.isFree && (

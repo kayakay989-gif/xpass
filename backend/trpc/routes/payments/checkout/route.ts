@@ -10,6 +10,7 @@ import {
   firestoreUsers, 
   firestoreWalletTransactions 
 } from '@/backend/lib/firestore-admin';
+import { awardReferralRewardAfterPaidSubscription } from '@/backend/lib/referrals';
 import { payWithToken, payWithCard, payWithAuthentication, initiateAuthentication, authenticatePayer } from '@/backend/lib/mastercard';
 
 /**
@@ -45,6 +46,9 @@ export default protectedProcedure
     })
   )
   .mutation(async ({ input, ctx }) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6c801d'},body:JSON.stringify({sessionId:'6c801d',runId:'pre-fix',hypothesisId:'H1',location:'backend/trpc/routes/payments/checkout/route.ts:mutation-entry',message:'checkout mutation entry',data:{userId:input.userId,tier:input.tier,duration:input.duration,paymentMethod:input.paymentMethod,useWallet:input.useWallet,hasAuthTxn:!!input.authenticationTransactionId,currency:input.currency || 'JOD'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (ctx.user?.uid !== input.userId) {
       throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
@@ -164,6 +168,9 @@ export default protectedProcedure
     if (walletUsed < 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Wallet amount cannot be negative' });
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6c801d'},body:JSON.stringify({sessionId:'6c801d',runId:'pre-fix',hypothesisId:'H2',location:'backend/trpc/routes/payments/checkout/route.ts:amounts',message:'computed charge amounts',data:{originalAmount,finalAmount,walletUsed,remainingAmount,currency:String(currency || 'JOD').toUpperCase()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     // 5. Resolve order ID:
     // - Initial card checkout creates a new order ID
@@ -278,13 +285,15 @@ export default protectedProcedure
         }
 
         const cvvValue = input.cvv.trim();
+        // #region agent log
+        fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6c801d'},body:JSON.stringify({sessionId:'6c801d',runId:'pre-fix',hypothesisId:'H3',location:'backend/trpc/routes/payments/checkout/route.ts:before-gateway',message:'about to call gateway',data:{orderId,paymentTransactionId,isProd:process.env['NODE_ENV']==='production',hasSavedCardId:!!input.savedCardId,hasAuthTxn:!!input.authenticationTransactionId,remainingAmount,currency,cvvLength:cvvValue.length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
 
         // Handle saved card or new card
         const isProd = process.env['NODE_ENV'] === 'production';
         const ua = ctx.req.headers.get('user-agent') || '';
-        const authenticationChannel: 'PAYER_BROWSER' | 'PAYER_APP' = /expo|reactnative|okhttp|dart|android|iphone|ipad|mobile/i.test(ua)
-          ? 'PAYER_APP'
-          : 'PAYER_BROWSER';
+        // This implementation uses browser/webview redirect for 3DS, so PAYER_BROWSER is required.
+        const authenticationChannel: 'PAYER_BROWSER' = 'PAYER_BROWSER';
 
         const savedCard =
           input.savedCardId && user.savedCards
@@ -323,15 +332,43 @@ export default protectedProcedure
         // - If 3DS is not completed yet, initiate authentication and return challenge HTML (when needed).
         // - If frictionless auth is possible, complete PAY server-side and continue normally.
         if (isProd) {
-          const redirectResponseUrlEnv = process.env['EXPO_PUBLIC_RORK_API_BASE_URL'];
-          const redirectResponseUrl = redirectResponseUrlEnv
-            ? `${redirectResponseUrlEnv.replace(/\/+$/, '')}/api/3ds/callback`
-            : undefined;
+          const clientRedirectUrl = input.redirectUrl?.trim();
+          const envBaseUrlRaw =
+            process.env['RORK_API_BASE_URL'] ||
+            process.env['EXPO_PUBLIC_RORK_API_BASE_URL'];
+          const envBaseUrl = envBaseUrlRaw ? envBaseUrlRaw.replace(/\/+$/, '') : undefined;
+          const forwardedProto = ctx.req.headers.get('x-forwarded-proto');
+          const forwardedHost = ctx.req.headers.get('x-forwarded-host');
+          const inferredBaseUrl =
+            forwardedProto && forwardedHost
+              ? `${forwardedProto}://${forwardedHost}`
+              : (() => {
+                  try {
+                    const reqUrl = new URL(ctx.req.url);
+                    return `${reqUrl.protocol}//${reqUrl.host}`;
+                  } catch {
+                    return undefined;
+                  }
+                })();
+          const resolvedBaseUrl = envBaseUrl || inferredBaseUrl;
+          const redirectResponseUrl = clientRedirectUrl
+            ? clientRedirectUrl
+            : resolvedBaseUrl
+              ? `${resolvedBaseUrl.replace(/\/+$/, '')}/api/3ds/callback`
+              : undefined;
 
           if (!redirectResponseUrl) {
             throw new TRPCError({
               code: 'INTERNAL_SERVER_ERROR',
               message: 'Payment authentication callback URL is not configured.',
+            });
+          }
+
+          // Production 3DS redirect callback must be HTTPS and publicly reachable.
+          if (!/^https:\/\//i.test(redirectResponseUrl)) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'Payment authentication callback must use HTTPS.',
             });
           }
 
@@ -478,9 +515,13 @@ export default protectedProcedure
           if (err instanceof MastercardGatewayError) {
             console.error('[Checkout] Mastercard gateway error caught:', {
               message: err.message,
+              status: err.status,
               raw: err.raw,
               isNetworkError: (err as any).isNetworkError,
             });
+            // #region agent log
+            fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6c801d'},body:JSON.stringify({sessionId:'6c801d',runId:'pre-fix',hypothesisId:'H4',location:'backend/trpc/routes/payments/checkout/route.ts:gateway-error-catch',message:'gateway error captured in checkout',data:{status:err.status,message:err.message,isNetworkError:(err as any).isNetworkError,result:err.raw?.result,gatewayCode:err.raw?.response?.gatewayCode,gatewayRecommendation:err.raw?.response?.gatewayRecommendation,errorCause:err.raw?.error?.cause,errorExplanation:err.raw?.error?.explanation},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
 
             const msgText = String(err?.message ?? '').toUpperCase();
             if (isIssuerDeclinedFromRaw(err.raw) || msgText.includes('PAYMENT BLOCKED BY ISSUER') || msgText.includes('BLOCKED BY ISSUER')) {
@@ -491,13 +532,30 @@ export default protectedProcedure
               });
             }
 
+            if (err.status >= 400 && err.status < 500) {
+              const gatewayCode =
+                String(err.raw?.response?.gatewayCode || '').toUpperCase() ||
+                String(err.raw?.error?.cause || '').toUpperCase() ||
+                'UNKNOWN';
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: `Payment was rejected by gateway (${gatewayCode}). Please verify card details and try again.`,
+              });
+            }
+
+            const gatewayCode =
+              String(err.raw?.response?.gatewayCode || '').toUpperCase() ||
+              String(err.raw?.error?.cause || '').toUpperCase() ||
+              'UNKNOWN';
             throw new TRPCError({
               code: 'INTERNAL_SERVER_ERROR',
-              message:
-                'We could not complete the payment due to a gateway error. Please try again later.',
+              message: `Gateway error (${gatewayCode}). Please try again later.`,
             });
           }
 
+          // #region agent log
+          fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6c801d'},body:JSON.stringify({sessionId:'6c801d',runId:'pre-fix',hypothesisId:'H6',location:'backend/trpc/routes/payments/checkout/route.ts:unknown-error-catch',message:'non-mastercard error in checkout',data:{name:err?.name,message:err?.message,stackTop:String(err?.stack||'').split('\n').slice(0,2).join(' | ')},timestamp:Date.now()})}).catch(()=>{});
+          // #endregion
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Payment processing failed',
@@ -601,6 +659,15 @@ export default protectedProcedure
       };
 
       await firestoreSubscriptions.create(subscription);
+
+      // Referral reward is only valid after a successful PAID subscription.
+      if (finalAmount > 0) {
+        await awardReferralRewardAfterPaidSubscription({
+          referredUserId: input.userId,
+          subscriptionId: subscription.id,
+          referredUserName: user.name,
+        });
+      }
 
       // Deduct wallet balance (only after subscription is created)
       if (walletUsed > 0) {
