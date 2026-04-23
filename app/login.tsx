@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useRef, useState } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
 import { ResponseType } from 'expo-auth-session';
-import { makeRedirectUri } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, User } from 'lucide-react-native';
 import {
@@ -70,11 +69,6 @@ export default function LoginScreen() {
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
     iosClientId: GOOGLE_IOS_CLIENT_ID,
     webClientId: GOOGLE_WEB_CLIENT_ID,
-    // Force callback to a valid app route to avoid transient expo-router +not-found flashes.
-    redirectUri:
-      Platform.OS === 'web'
-        ? makeRedirectUri({ path: 'login' })
-        : makeRedirectUri({ scheme: 'xpass', path: 'login' }),
     scopes: ['profile', 'email'],
     ...(Platform.OS !== 'web' ? { responseType: ResponseType.Code } : {}),
   });
