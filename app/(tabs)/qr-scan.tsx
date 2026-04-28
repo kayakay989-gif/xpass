@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
+import { agentLog } from '@/lib/agent-debug-log';
 
 export default function QRScanScreen() {
   const router = useRouter();
@@ -31,9 +32,18 @@ export default function QRScanScreen() {
           <Text style={styles.permissionText}>
             You need an active subscription to use the QR scanner and check in to gyms.
           </Text>
-          <TouchableOpacity 
-            style={styles.permissionButton} 
-            onPress={() => router.push('/(tabs)/subscription')}
+          <TouchableOpacity
+            style={styles.permissionButton}
+            onPress={() => {
+              if (isGuest) {
+                agentLog('H5', 'qr-scan.tsx:subscribeNow', 'push_login', {});
+                router.push('/login');
+                return;
+              }
+
+              agentLog('H5', 'qr-scan.tsx:subscribeNow', 'push_subscription_tab', {});
+              router.push('/(tabs)/subscription');
+            }}
           >
             <Text style={styles.permissionButtonText}>Subscribe Now</Text>
           </TouchableOpacity>
@@ -55,7 +65,7 @@ export default function QRScanScreen() {
             We need access to your camera to scan QR codes at the gym
           </Text>
           <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+            <Text style={styles.permissionButtonText}>Continue</Text>
           </TouchableOpacity>
         </View>
       </View>

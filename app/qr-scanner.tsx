@@ -32,7 +32,13 @@ export default function QRScannerScreen() {
           </Text>
           <TouchableOpacity
             style={styles.permissionButton}
-            onPress={() => router.push('/(tabs)/subscription')}
+            onPress={() => {
+              if (isGuest) {
+                router.push('/login');
+                return;
+              }
+              router.push('/(tabs)/subscription');
+            }}
           >
             <Text style={styles.permissionButtonText}>Subscribe Now</Text>
           </TouchableOpacity>
@@ -54,7 +60,7 @@ export default function QRScannerScreen() {
             We need access to your camera to scan QR codes at the gym
           </Text>
           <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+            <Text style={styles.permissionButtonText}>Continue</Text>
           </TouchableOpacity>
         </View>
       </View>
