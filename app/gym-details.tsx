@@ -18,6 +18,7 @@ import { MapPin, Clock, ChevronLeft, QrCode, X, Navigation } from 'lucide-react-
 import { firestoreGyms } from '@/lib/firestore';
 import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 import Colors from '@/constants/colors';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
@@ -447,9 +448,9 @@ export default function GymDetailsScreen() {
             <Text style={styles.sectionTitle}>Timings & Access</Text>
 
             {openDays.length > 0 && (
-              <View style={styles.timingRow}>
+              <View style={styles.timingBlock}>
                 <Text style={styles.timingLabel}>Open Days</Text>
-                <Text style={styles.timingValue}>{openDays.join(', ')}</Text>
+                <Text style={styles.timingValueWrap}>{openDays.join(', ')}</Text>
               </View>
             )}
 
@@ -490,7 +491,7 @@ export default function GymDetailsScreen() {
               return;
             }
 
-            if (!subscription) {
+            if (!subscription || !isSubscriptionActiveForMember(subscription)) {
               router.push('/(tabs)/subscription' as any);
               return;
             }
@@ -643,20 +644,35 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontWeight: '500',
   },
+  timingBlock: {
+    marginBottom: 14,
+  },
   timingRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    gap: 10,
   },
   timingLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: Colors.textSecondary,
+    minWidth: 88,
+    flexShrink: 0,
   },
   timingValue: {
+    flex: 1,
+    flexShrink: 1,
     fontSize: 14,
     color: Colors.text,
+    textAlign: 'right',
+  },
+  timingValueWrap: {
+    marginTop: 4,
+    fontSize: 14,
+    color: Colors.text,
+    lineHeight: 20,
+    flexWrap: 'wrap',
   },
   accessPillsRow: {
     flexDirection: 'row',

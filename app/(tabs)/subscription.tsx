@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
@@ -9,6 +9,7 @@ import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { TIER_COLORS } from '@/constants/tier-colors';
 import { normalizeSubscriptionTier } from '@/lib/subscription-tier';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { agentLog } from '@/lib/agent-debug-log';
 
 type Package = {
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
@@ -127,6 +128,19 @@ export default function SubscriptionScreen() {
   const [selectedDuration, setSelectedDuration] = useState<number>(1);
   const insets = useSafeAreaInsets();
 
+  useEffect(() => {
+    // #region agent log
+    const currentTier = normalizeSubscriptionTier(subscription?.tier);
+    const active = isSubscriptionActiveForMember(subscription);
+    agentLog('H4', 'subscription.tsx:state', 'packages_ui_inputs', {
+      queryPending: subscriptionQuery.isPending,
+      hasSubscriptionObj: !!subscription,
+      normalizedTier: currentTier ?? '',
+      isActiveForMember: active,
+    });
+    // #endregion
+  }, [subscription, subscriptionQuery.isPending]);
+
   const goBackOrFallback = () => {
     const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
     if (canGoBack) return router.back();
@@ -144,7 +158,8 @@ export default function SubscriptionScreen() {
     return <Redirect href="/login" />;
   }
 
-  if (firebaseUser?.uid && subscriptionQuery.isPending) {
+  // First load only: keepPreviousData can supply subscription while refetching — don't block the whole screen.
+  if (firebaseUser?.uid && subscriptionQuery.isPending && subscription == null) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -188,16 +203,23 @@ export default function SubscriptionScreen() {
       action: () => {
         const totalPrice = getTotalPrice(tier);
         console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
-        const params = {
+        // #region agent log
+        agentLog('H5', 'subscription.tsx:selectPackage', 'navigate_payment', {
           tier,
+          duration: selectedDuration,
+          totalPrice,
+        });
+        // #endregion
+        const q = new URLSearchParams({
+          tier: String(tier),
           duration: String(selectedDuration),
           price: String(totalPrice),
-        };
+        });
+        const href = `/payment?${q.toString()}`;
         try {
-          router.push({ pathname: '/payment', params } as any);
+          router.push(href as any);
         } catch (e) {
-          console.error('[Subscription] navigate to payment failed, retrying with href:', e);
-          const href = `/payment?${new URLSearchParams(params).toString()}`;
+          console.error('[Subscription] navigate to payment failed:', e);
           try {
             router.replace(href as any);
           } catch (e2) {
@@ -310,7 +332,10 @@ export default function SubscriptionScreen() {
                 const buttonInfo = getPackageButtonInfo(pkg.tier);
                 return (
                   <TouchableOpacity 
-                    onPress={buttonInfo.action || undefined} 
+                    onPress={() => {
+                      if (buttonInfo.disabled || typeof buttonInfo.action !== 'function') return;
+                      buttonInfo.action();
+                    }}
                     activeOpacity={buttonInfo.disabled ? 1 : 0.9}
                     disabled={buttonInfo.disabled}
                   >

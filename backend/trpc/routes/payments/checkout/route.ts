@@ -12,6 +12,7 @@ import {
 } from '@/backend/lib/firestore-admin';
 import { awardReferralRewardAfterPaidSubscription } from '@/backend/lib/referrals';
 import { payWithToken, payWithCard, payWithAuthentication, initiateAuthentication, authenticatePayer } from '@/backend/lib/mastercard';
+import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 
 /**
  * Unified checkout endpoint for all payment methods
@@ -766,6 +767,20 @@ export default protectedProcedure
       // Increment coupon usage if coupon was used
       if (couponId) {
         await firestoreCoupons.incrementUsage(couponId);
+      }
+
+      try {
+        await sendSubscriptionSuccessEmail({
+          toEmail: user.email,
+          userName: user.name,
+          subscription,
+          orderId,
+          paymentId: `${orderId}-${paymentTransactionId}`,
+          paidAmount: finalAmount,
+          currency,
+        });
+      } catch (emailError) {
+        console.error('[Checkout] Failed to send subscription success email:', emailError);
       }
 
       return {

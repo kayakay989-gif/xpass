@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, Modal, Platform } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { ChevronDown, User as UserIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,6 +11,7 @@ import { getGymTier, getTierLabel } from '@/lib/gym-tier';
 import { firestoreSpotlightImages } from '@/lib/firestore';
 import * as Location from 'expo-location';
 import { calculateDistance, formatDistance } from '@/lib/distance';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { CITY_FILTER_OPTIONS } from '@/constants/cities';
 import SpotlightImageViewer from '@/components/SpotlightImageViewer';
 
@@ -204,13 +206,23 @@ export default function HomeScreen() {
   const tierOptions = useMemo(() => ['all', 'silver', 'gold', 'diamond', 'elite'], []);
 
   const openFromMarker = (gym: any) => {
-    if (isGuest || !subscription) {
+    const hasMemberAccess =
+      !isGuest && !!firebaseUser && subscription && isSubscriptionActiveForMember(subscription);
+    if (!hasMemberAccess) {
       Alert.alert(
         'Subscription Required',
-        'Please subscribe to access gym details and check-in features.',
+        isGuest || !firebaseUser
+          ? 'Create an account and subscribe to access gym details and check-in features.'
+          : 'Please subscribe to access gym details and check-in features.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Subscribe', onPress: () => router.push('/(tabs)/subscription') },
+          {
+            text: isGuest || !firebaseUser ? 'Log in' : 'Subscribe',
+            onPress: () =>
+              isGuest || !firebaseUser
+                ? router.push('/login')
+                : router.push('/(tabs)/subscription'),
+          },
         ]
       );
       return;
@@ -238,7 +250,14 @@ export default function HomeScreen() {
     !isGuest && !!firebaseUser && subscriptionQuery.isPending && subscription == null;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      // Fabric/Android: clipping + MapView inside ScrollView can crash with
+      // "The specified child already has a parent" (ReactClippingViewManager).
+      removeClippedSubviews={false}
+      nestedScrollEnabled
+    >
       <View style={styles.header}>
         <View style={styles.logoContainer}>
           <Image 
@@ -278,7 +297,7 @@ export default function HomeScreen() {
           <ActivityIndicator size="small" color={Colors.primary} />
           <Text style={[styles.noSubText, { marginTop: 10 }]}>Loading membership…</Text>
         </View>
-      ) : subscription ? (
+      ) : subscription && isSubscriptionActiveForMember(subscription) ? (
         <View style={styles.subscriptionCard}>
           <View style={styles.cardRow}>
             <View style={styles.statBox}>
@@ -316,11 +335,13 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Spotlight</Text>
           </View>
           
-          <ScrollView 
-            horizontal 
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.spotlightContainer}
             contentContainerStyle={styles.spotlightContent}
+            removeClippedSubviews={false}
+            nestedScrollEnabled
           >
             {spotlightBanners.map((banner, index) => (
               <TouchableOpacity 
@@ -332,11 +353,17 @@ export default function HomeScreen() {
                   setImageViewerVisible(true);
                 }}
               >
-                <Image 
-                  source={{ uri: banner.imageUrl }} 
-                  style={styles.spotlightImage}
-                  resizeMode="cover"
-                />
+                {typeof banner.imageUrl === 'string' && banner.imageUrl.trim().length > 0 ? (
+                  <ExpoImage
+                    source={{ uri: banner.imageUrl.trim() }}
+                    style={styles.spotlightImage}
+                    contentFit="cover"
+                    transition={200}
+                    cachePolicy="memory-disk"
+                  />
+                ) : (
+                  <View style={[styles.spotlightImage, { backgroundColor: Colors.border }]} />
+                )}
                 {banner.title && (
                   <View style={styles.spotlightOverlay}>
                     <View style={styles.spotlightBadge}>
@@ -446,7 +473,11 @@ export default function HomeScreen() {
               {activeFilter === 'city' ? 'City' : activeFilter === 'tier' ? 'Tier' : 'Facilities'}
             </Text>
 
-            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={{ maxHeight: 320 }}
+              showsVerticalScrollIndicator={false}
+              removeClippedSubviews={false}
+            >
               {(activeFilter === 'city'
                 ? cityOptions
                 : activeFilter === 'tier'

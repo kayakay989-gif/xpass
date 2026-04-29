@@ -1,5 +1,4 @@
 import createContextHook from '@nkzw/create-context-hook';
-import { keepPreviousData } from '@tanstack/react-query';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Subscription, Gym, CheckIn, SubscriptionTier, SubscriptionDuration } from '@/types';
 import { trpc } from '@/lib/trpc';
@@ -7,6 +6,7 @@ import { useAuth } from './AuthContext';
 import { firestoreGyms } from '@/lib/firestore';
 import { config } from '@/lib/config';
 import { getGymTier } from '@/lib/gym-tier';
+import { agentLog } from '@/lib/agent-debug-log';
 
 // Pricing table (TOTAL price for duration) based on provided spec
 const TOTAL_PRICES: Record<SubscriptionDuration, Record<SubscriptionTier, number>> = {
@@ -35,11 +35,12 @@ export const [AppProvider, useApp] = createContextHook(() => {
     { userId: userId as any },
     {
       enabled: !!userId,
-      staleTime: 60_000,
-      gcTime: 5 * 60_000,
+      staleTime: 30_000,
+      gcTime: 10 * 60_000,
       retry: 1,
       retryDelay: (attempt) => Math.min(800 * (attempt + 1), 4000),
-      placeholderData: keepPreviousData,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
     }
   );
   
@@ -52,8 +53,8 @@ export const [AppProvider, useApp] = createContextHook(() => {
     }
   );
 
-  const subscription = subscriptionQuery.data || null;
-  const checkIns = checkInsQuery.data || [];
+  const subscription = userId ? subscriptionQuery.data || null : null;
+  const checkIns = userId ? checkInsQuery.data || [] : [];
   const [gyms, setGyms] = useState<Gym[]>([]);
   const [isGymsLoading, setIsGymsLoading] = useState<boolean>(true);
   const [gymsError, setGymsError] = useState<string | null>(null);
@@ -107,7 +108,30 @@ export const [AppProvider, useApp] = createContextHook(() => {
       isLoading: subscriptionQuery.isLoading,
       hasData: !!subscriptionQuery.data,
     });
-  }, [userId, subscriptionQuery.isLoading, subscriptionQuery.data]);
+    // #region agent log
+    const err = subscriptionQuery.error as Error | undefined;
+    agentLog('H3', 'AppContext.tsx:subscriptionQuery', 'subscription_query_state', {
+      userIdPresent: !!userId,
+      isPending: subscriptionQuery.isPending,
+      isFetching: subscriptionQuery.isFetching,
+      hasData: !!subscriptionQuery.data,
+      rawTier: subscriptionQuery.data ? String((subscriptionQuery.data as { tier?: unknown }).tier ?? '') : '',
+      fetchStatus: subscriptionQuery.fetchStatus,
+      errorMessage: err?.message?.slice(0, 120) ?? '',
+    });
+    agentLog('H4', 'AppContext.tsx:subscriptionQuery', 'subscription_tier_for_ui', {
+      hasSubscription: !!subscriptionQuery.data,
+      tier: subscriptionQuery.data ? String((subscriptionQuery.data as { tier?: unknown }).tier ?? '') : '',
+    });
+    // #endregion
+  }, [
+    userId,
+    subscriptionQuery.isPending,
+    subscriptionQuery.isFetching,
+    subscriptionQuery.data,
+    subscriptionQuery.fetchStatus,
+    subscriptionQuery.error,
+  ]);
 
   const checkInMutation = trpc.checkIns.create.useMutation({
     onSuccess: () => {
@@ -130,6 +154,11 @@ export const [AppProvider, useApp] = createContextHook(() => {
       return { success: false, message: errorMessage };
     }
   }, [userId, checkInMutation]);
+
+  const refreshSubscription = useCallback(async (): Promise<void> => {
+    if (!userId) return;
+    await subscriptionQuery.refetch();
+  }, [userId, subscriptionQuery]);
 
   const createSubscriptionMutation = trpc.subscriptions.create.useMutation({
     onSuccess: () => {
@@ -175,9 +204,11 @@ export const [AppProvider, useApp] = createContextHook(() => {
       checkIn,
       createSubscription,
       refetchGyms,
+      refreshSubscription,
       subscriptionQuery,
       // Do not block the whole app on check-ins; home/subscription only need subscription + gyms.
       isLoading: subscriptionQuery.isLoading || isGymsLoading,
+      isSubscriptionLoading: !!userId && (subscriptionQuery.isPending || subscriptionQuery.isFetching),
       isCheckInsLoading: checkInsQuery.isLoading,
       isCheckingIn: checkInMutation.isPending,
     };
@@ -191,6 +222,7 @@ export const [AppProvider, useApp] = createContextHook(() => {
     checkIn,
     createSubscription,
     refetchGyms,
+    refreshSubscription,
     subscriptionQuery,
     subscriptionQuery.isLoading,
     isGymsLoading,

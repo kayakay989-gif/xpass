@@ -1,11 +1,10 @@
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
 import { Home, Dumbbell, QrCode, CreditCard, ChevronLeft } from "lucide-react-native";
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "expo-router";
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
@@ -21,18 +20,22 @@ export default function TabLayout() {
         tabBarShowLabel: false,
         headerShown: true,
         tabBarHideOnKeyboard: true,
+        tabBarScrollEnabled: true,
         tabBarStyle: {
           backgroundColor: Colors.white,
           borderTopColor: Colors.border,
           borderTopWidth: 1,
-          height: 72 + insets.bottom,
+          minHeight: 72 + insets.bottom,
           paddingBottom: Math.max(10, insets.bottom),
-          paddingTop: 10,
-          paddingHorizontal: 14,
+          paddingTop: 8,
+          paddingHorizontal: 6,
         },
         tabBarItemStyle: {
-          flex: 1,
-          marginHorizontal: 6,
+          minWidth: 72,
+          maxWidth: 128,
+          paddingHorizontal: 4,
+          marginHorizontal: 2,
+          justifyContent: "center",
         },
         headerStyle: {
           backgroundColor: Colors.background,
@@ -82,7 +85,7 @@ export default function TabLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Home" focused={focused} icon={<Home size={22} />} />
+            <TabIcon label="Home" focused={focused} icon={<Home size={20} />} />
           ),
         }}
       />
@@ -91,7 +94,7 @@ export default function TabLayout() {
         options={{
           title: "Gyms",
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Gyms" focused={focused} icon={<Dumbbell size={22} />} />
+            <TabIcon label="Gyms" focused={focused} icon={<Dumbbell size={20} />} />
           ),
         }}
       />
@@ -100,20 +103,26 @@ export default function TabLayout() {
         options={{
           title: "QR Scan",
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="QR Scan" focused={focused} icon={<QrCode size={22} />} />
+            <TabIcon label="Scan" focused={focused} icon={<QrCode size={20} />} />
           ),
         }}
       />
       <Tabs.Screen
         name="subscription"
+        listeners={
+          isGuest
+            ? {
+                tabPress: (e) => {
+                  e.preventDefault();
+                  router.push("/login");
+                },
+              }
+            : undefined
+        }
         options={{
           title: "Subscription",
           tabBarIcon: ({ focused }) => (
-            <TabIcon
-              label="Subscription"
-              focused={focused}
-              icon={<CreditCard size={22} />}
-            />
+            <TabIcon label="Plans" focused={focused} icon={<CreditCard size={20} />} />
           ),
           headerShown: false,
         }}
@@ -140,6 +149,8 @@ function TabIcon({
       <Text
         style={[styles.label, focused && styles.labelActive]}
         numberOfLines={1}
+        ellipsizeMode="tail"
+        allowFontScaling
       >
         {label}
       </Text>
@@ -149,20 +160,26 @@ function TabIcon({
 
 const styles = StyleSheet.create({
   item: {
-    height: 52,
+    minWidth: 64,
+    minHeight: 48,
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
     paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   itemActive: {
     backgroundColor: Colors.black,
+    paddingHorizontal: 14,
   },
   label: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "600" as const,
     color: Colors.textMuted,
+    textAlign: "center",
+    maxWidth: 104,
+    ...(Platform.OS === "android" ? { includeFontPadding: false } : {}),
   },
   labelActive: {
     color: Colors.white,

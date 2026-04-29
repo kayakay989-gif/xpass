@@ -58,11 +58,11 @@ export default protectedProcedure
       throw new Error('Monthly visit limit reached. Your limit resets next month.');
     }
 
-    // Check if already checked in to this gym today (but allow other gyms)
-    const todayCheckIn = await firestoreCheckIns.getTodayCheckIn(input.userId, input.gymId);
+    // Daily policy: only one gym check-in per calendar day (regardless of gym).
+    const todayCheckIn = await firestoreCheckIns.getTodayCheckIn(input.userId);
     if (todayCheckIn) {
-      console.error('[CheckIn] Already checked in to this gym today');
-      throw new Error('You have already checked in to this gym today. You can check in to other gyms.');
+      console.error('[CheckIn] Daily check-in limit reached');
+      throw new Error('Check In Daily Limit Reached, Limit Resets On the Next Calendar Day');
     }
 
     // Validate gym exists
@@ -105,7 +105,9 @@ export default protectedProcedure
 
     await firestoreCheckIns.create(checkIn);
     await firestoreSubscriptions.update(subscription.id, { 
-      visitsUsed: subscription.visitsUsed + 1 
+      visitsUsed: subscription.visitsUsed + 1,
+      // Used by backend credit logic and for auditing daily check-ins.
+      lastCheckInDate: new Date(),
     });
 
     return { success: true, checkIn };

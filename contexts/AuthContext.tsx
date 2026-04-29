@@ -1,5 +1,5 @@
 import createContextHook from '@nkzw/create-context-hook';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { User } from '@/types';
 import { auth, db } from '@/lib/firebase';
 import { 
@@ -9,12 +9,16 @@ import {
   signOut,
   User as FirebaseUser,
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithCredential,
   signInWithPopup,
   updateProfile,
   sendPasswordResetEmail,
   confirmPasswordReset,
 } from 'firebase/auth';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import type { AppleAuthenticationCredential } from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { 
   doc, 
   getDoc, 
@@ -30,6 +34,8 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
 
 // Complete the auth session properly
 WebBrowser.maybeCompleteAuthSession();
@@ -78,6 +84,49 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [isCheckingAdmin, setIsCheckingAdmin] = useState<boolean>(true);
   const [isGymOwner, setIsGymOwner] = useState<boolean>(false);
   const [gymOwnerGymId, setGymOwnerGymId] = useState<string | null>(null);
+  const [stayLoggedInEnabled, setStayLoggedInEnabledState] = useState<boolean>(false);
+  const biometricUnlockPassedRef = useRef<boolean>(false);
+  useEffect(() => {
+    const loadStayPreference = async () => {
+      const raw = await AsyncStorage.getItem('stayLoggedInEnabled');
+      setStayLoggedInEnabledState(raw === 'true');
+    };
+    void loadStayPreference();
+  }, []);
+
+  const setStayLoggedInEnabled = useCallback(async (enabled: boolean): Promise<void> => {
+    setStayLoggedInEnabledState(enabled);
+    await AsyncStorage.setItem('stayLoggedInEnabled', enabled ? 'true' : 'false');
+    await AsyncStorage.setItem('biometricLoginEnabled', enabled ? 'true' : 'false');
+    if (!enabled) {
+      await SecureStore.deleteItemAsync('xpass_biometric_session');
+      biometricUnlockPassedRef.current = false;
+    }
+  }, []);
+
+  const enforceBiometricUnlock = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS === 'web') return true;
+    if (!stayLoggedInEnabled) return true;
+    if (biometricUnlockPassedRef.current) return true;
+
+    const hasHardware = await LocalAuthentication.hasHardwareAsync();
+    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+    if (!hasHardware || !isEnrolled) {
+      return true;
+    }
+
+    const authResult = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Unlock Xpass',
+      cancelLabel: 'Use password',
+      disableDeviceFallback: false,
+    });
+    if (!authResult.success) return false;
+
+    biometricUnlockPassedRef.current = true;
+    await SecureStore.setItemAsync('xpass_biometric_session', 'ok');
+    return true;
+  }, [stayLoggedInEnabled]);
+
 
   const evaluateAdminClaim = useCallback(async (fbUser: FirebaseUser | null) => {
     if (!fbUser) {
@@ -337,6 +386,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
+          const biometricAllowed = await enforceBiometricUnlock();
+          if (!biometricAllowed) {
+            await signOut(auth);
+            setFirebaseUser(null);
+            setUser(null);
+            setIsGuest(false);
+            setIsLoadingAuth(false);
+            return;
+          }
+
           // CRITICAL: Verify auth.currentUser matches to prevent race conditions
           const currentUser = auth.currentUser;
           if (currentUser && currentUser.uid !== firebaseUser.uid) {
@@ -432,7 +491,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         uid: userCredential.user.uid,
         email: userCredential.user.email,
       });
-      // onAuthStateChanged listener (set up below) will load the profile and update UI.
+      // Prime profile load immediately to reduce auth race conditions on navigation.
+      await loadUserProfile(userCredential.user.uid, userCredential.user);
     } catch (error: any) {
       console.error('[AuthContext] Login error:', error);
       // Provide more specific error messages
@@ -455,7 +515,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Login failed. Please check your email and password and try again.');
       }
     }
-  }, []);
+  }, [loadUserProfile]);
 
   // Email/Password Sign Up
   const signUpWithEmail = useCallback(async (
@@ -564,42 +624,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             referredBy = normalizedReferral;
             const referrerDoc = referralSnap.docs[0];
             const referrerId = referrerDoc.id;
-            const referrerData = referrerDoc.data();
             
             // Prevent self-referral
             if (referrerId === userCredential.user.uid) {
               console.warn('[AuthContext] ⚠️ User cannot refer themselves, skipping referral reward');
             } else {
-              // Give 10 JOD to the referrer
-              const currentBalance = referrerData.walletBalance || 0;
-              const newBalance = currentBalance + 10;
-              
-              await updateDoc(doc(db, 'users', referrerId), {
-                walletBalance: newBalance,
-              });
-              
-              // Record wallet transaction for referrer
-              const walletTransactionRef = doc(collection(db, 'walletTransactions'));
-              await setDoc(walletTransactionRef, {
-                userId: referrerId,
-                type: 'referral_reward',
-                amount: 10,
-                description: `Referral Reward from ${name}`,
-                relatedUserId: userCredential.user.uid,
-                createdAt: serverTimestamp(),
-              });
-              
-              // Record referral transaction for admin tracking
-              const referralTransactionRef = doc(collection(db, 'referralTransactions'));
-              await setDoc(referralTransactionRef, {
-                referrerId: referrerId,
-                referredUserId: userCredential.user.uid,
-                rewardAmount: 10,
-                referrerCode: normalizedReferral,
-                createdAt: serverTimestamp(),
-              });
-              
-              console.log('[AuthContext] ✅ Referral reward processed successfully');
+              // Save referral linkage only. Reward is granted later after successful paid subscription.
+              console.log('[AuthContext] ✅ Referral code accepted; reward will be processed after paid subscription');
             }
           } else {
             console.warn('[AuthContext] ⚠️ Invalid referral code provided, continuing without referral benefits');
@@ -756,6 +787,92 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   /** Native: call after Google.useAuthRequest succeeds (opens system browser / Custom Tabs). */
+  const signInWithApple = useCallback(async (): Promise<void> => {
+    if (Platform.OS !== 'ios') {
+      throw new Error('Sign in with Apple is only available on iOS.');
+    }
+    const appleSupported = await AppleAuthentication.isAvailableAsync();
+    if (!appleSupported) {
+      throw new Error('Sign in with Apple is not available on this device.');
+    }
+
+    const rawNonce = await (async () => {
+      const bytes = await Crypto.getRandomBytesAsync(32);
+      const charset =
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+      let s = '';
+      for (let i = 0; i < 32; i++) {
+        s += charset[bytes[i] % charset.length];
+      }
+      return s;
+    })();
+
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+      { encoding: Crypto.CryptoEncoding.HEX }
+    );
+
+    let appleResult: AppleAuthenticationCredential;
+    try {
+      appleResult = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashedNonce,
+      });
+    } catch (err: any) {
+      if (err?.code === 'ERR_REQUEST_CANCELED') {
+        throw new Error('SIGN_IN_CANCELLED');
+      }
+      throw err;
+    }
+
+    const idToken = appleResult.identityToken;
+    if (!idToken) {
+      throw new Error('Apple did not return an identity token. Please try again.');
+    }
+
+    try {
+      const provider = new OAuthProvider('apple.com');
+      const credential = provider.credential({
+        idToken,
+        rawNonce: rawNonce,
+      });
+      const userCredential = await signInWithCredential(auth, credential);
+
+      const nameFromApple = appleResult.fullName
+        ? AppleAuthentication.formatFullName(appleResult.fullName)
+        : '';
+      if (nameFromApple && userCredential.user && !userCredential.user.displayName?.trim()) {
+        try {
+          await updateProfile(userCredential.user, { displayName: nameFromApple });
+        } catch (e) {
+          console.warn('[AuthContext] Apple displayName update skipped:', e);
+        }
+      }
+
+      console.log('[AuthContext] Apple login successful:', userCredential.user.uid);
+      if (userCredential.user) {
+        await loadUserProfile(userCredential.user.uid, userCredential.user);
+      }
+    } catch (error: any) {
+      console.error('[AuthContext] signInWithApple error:', error);
+      if (error.code === 'auth/account-exists-with-different-credential') {
+        throw new Error(
+          'An account already exists with this email. Please sign in with email/password or Google.'
+        );
+      }
+      if (error.code === 'auth/operation-not-allowed') {
+        throw new Error(
+          'Apple sign-in is not enabled for this app. Please contact support.'
+        );
+      }
+      throw new Error(error?.message || 'Apple sign-in failed.');
+    }
+  }, [loadUserProfile]);
+
   const signInWithGoogleIdToken = useCallback(
     async (idToken: string): Promise<void> => {
       if (!idToken?.trim()) {
@@ -820,7 +937,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setUser(null);
       setFirebaseUser(null);
       setIsGuest(false);
-      await AsyncStorage.removeItem('isGuest');
+      setIsAdmin(false);
+      setIsGymOwner(false);
+      setGymOwnerGymId(null);
+      await AsyncStorage.multiRemove(['isGuest', 'stayLoggedInEnabled', 'biometricLoginEnabled']);
+      await SecureStore.deleteItemAsync('xpass_biometric_session');
+      biometricUnlockPassedRef.current = false;
     } catch (error) {
       console.error('[AuthContext] Logout error:', error);
       throw error;
@@ -921,6 +1043,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       signUpWithEmail,
       loginWithGoogle,
       signInWithGoogleIdToken,
+      signInWithApple,
       logout,
       resetPassword,
       confirmPasswordReset: confirmPasswordResetWithCode,
@@ -932,6 +1055,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       isCheckingAdmin,
       isGymOwner,
       gymOwnerGymId,
+      stayLoggedInEnabled,
+      setStayLoggedInEnabled,
     };
   }, [
     user,
@@ -943,6 +1068,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     signUpWithEmail,
     loginWithGoogle,
     signInWithGoogleIdToken,
+    signInWithApple,
     logout,
     resetPassword,
     confirmPasswordResetWithCode,
@@ -953,5 +1079,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     isCheckingAdmin,
     isGymOwner,
     gymOwnerGymId,
+    stayLoggedInEnabled,
+    setStayLoggedInEnabled,
   ]);
 });

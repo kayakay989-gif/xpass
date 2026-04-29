@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View, TouchableOpacity, Image, ImageBackground } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { agentLog } from '@/lib/agent-debug-log';
 
 const splashBackground = require('../assets/images/splash background.png');
 const mainLogoWhite = require('../assets/images/main logo white.png');
@@ -28,6 +29,9 @@ export default function SplashScreen() {
             <TouchableOpacity
               style={styles.discoverButton}
               onPress={() => {
+                // #region agent log
+                agentLog('H5', 'splash.tsx:discover', 'guest_replace_home', {});
+                // #endregion
                 continueAsGuest();
                 router.replace('/(tabs)/home');
               }}

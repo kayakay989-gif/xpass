@@ -11,6 +11,11 @@ web-build/
 expo-env.d.ts
 
 # Native
+android/local.properties
+android/.gradle/
+android/app/build/
+android/build/
+android/**/build/
 *.orig.*
 *.jks
 *.p8
@@ -46,3 +51,8 @@ backend/service-account-key.json
 # typescript
 *.tsbuildinfo
 .vercel
+
+# EAS downloaded build artifacts (large; do not commit)
+artifacts/
+build-view-finished.json
+build-view-failed.json

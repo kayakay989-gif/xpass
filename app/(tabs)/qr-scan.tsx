@@ -11,11 +11,12 @@ import { agentLog } from '@/lib/agent-debug-log';
 export default function QRScanScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState<boolean>(false);
+  const [scanMessage, setScanMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [isResolvingSubscription, setIsResolvingSubscription] = useState<boolean>(true);
   const scanLockedRef = useRef(false);
-  const { checkIn } = useApp();
+  const lastScanAtRef = useRef(0);
+  const { checkIn, subscription, refreshSubscription, isSubscriptionLoading } = useApp();
   const { isGuest } = useAuth();
-  const { subscription } = useApp();
 
   useEffect(() => {
     // Unlock scanner when screen unmounts
@@ -23,6 +24,44 @@ export default function QRScanScreen() {
       scanLockedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const resolveSubscription = async () => {
+      if (isGuest) {
+        if (isMounted) setIsResolvingSubscription(false);
+        return;
+      }
+      setIsResolvingSubscription(true);
+      try {
+        await refreshSubscription();
+      } catch (error) {
+        console.warn('[QRScan] Failed to refresh subscription, retrying once...', error);
+        try {
+          await refreshSubscription();
+        } catch (retryError) {
+          console.error('[QRScan] Subscription refresh retry failed:', retryError);
+        }
+      } finally {
+        if (isMounted) setIsResolvingSubscription(false);
+      }
+    };
+    void resolveSubscription();
+    return () => {
+      isMounted = false;
+    };
+  }, [isGuest, refreshSubscription]);
+
+  if (isResolvingSubscription || (!isGuest && isSubscriptionLoading && !subscription)) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.permissionContainer}>
+          <Text style={styles.permissionTitle}>Checking subscription...</Text>
+          <Text style={styles.permissionText}>Please wait while we validate your access.</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (isGuest || !subscription) {
     return (
@@ -73,49 +112,45 @@ export default function QRScanScreen() {
   }
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
-    // Hard lock to prevent multiple executions from rapid duplicate events
-    if (scanLockedRef.current || scanned) return;
-
+    const now = Date.now();
+    if (scanLockedRef.current || now - lastScanAtRef.current < 2500) return;
+    lastScanAtRef.current = now;
     scanLockedRef.current = true;
-    setScanned(true);
 
     console.log('[QRScan] QR code scanned (tabs):', data);
 
     // Parse QR code - expected format: "xpass-gym-{gymId}" or just "{gymId}"
-    let gymId = data;
-    if (data.startsWith('xpass-gym-')) {
-      gymId = data.replace('xpass-gym-', '');
-    } else if (data.startsWith('gym-')) {
-      gymId = data.replace('gym-', '');
+    let gymId = data.trim();
+    const gymTagMatch = gymId.match(/(?:xpass-gym-|gym-)([a-zA-Z0-9_-]+)/);
+    if (gymTagMatch?.[1]) {
+      gymId = gymTagMatch[1];
+    } else {
+      try {
+        if (gymId.startsWith('http://') || gymId.startsWith('https://')) {
+          const url = new URL(gymId);
+          gymId = url.searchParams.get('gymId') || url.pathname.split('/').filter(Boolean).pop() || gymId;
+        }
+      } catch {
+        // Keep raw value as fallback.
+      }
     }
 
     if (!gymId || gymId.trim() === '') {
       console.error('[QRScan] Invalid QR format:', data);
-      router.push({
-        pathname: '/qr-error',
-        params: { message: 'Invalid QR code. Please scan a valid gym QR code.' },
-      } as any);
-      setScanned(false);
+      setScanMessage({ success: false, text: 'Invalid QR code. Please scan a valid gym QR code.' });
+      setTimeout(() => setScanMessage(null), 2500);
+      scanLockedRef.current = false;
       return;
     }
 
     const checkInResult = await checkIn(gymId);
     console.log('[QRScan] Check-in result:', checkInResult);
-
-    if (checkInResult.success) {
-      router.push({
-        pathname: '/qr-success',
-        params: { message: checkInResult.message || 'Check-in successful!' },
-      } as any);
-    } else {
-      // Allow retry only when the operation failed
-      scanLockedRef.current = false;
-      setScanned(false);
-      router.push({
-        pathname: '/qr-error',
-        params: { message: checkInResult.message || 'Check-in unsuccessful' },
-      } as any);
-    }
+    setScanMessage({
+      success: checkInResult.success,
+      text: checkInResult.message || (checkInResult.success ? 'Check-in successful!' : 'Check-in unsuccessful'),
+    });
+    setTimeout(() => setScanMessage(null), 2500);
+    scanLockedRef.current = false;
   };
 
   return (
@@ -123,7 +158,7 @@ export default function QRScanScreen() {
       <CameraView
         style={styles.camera}
         facing={'back' as CameraType}
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        onBarcodeScanned={handleBarCodeScanned}
         barcodeScannerSettings={{
           barcodeTypes: ['qr'],
         }}
@@ -146,6 +181,13 @@ export default function QRScanScreen() {
             </Text>
           </View>
         </View>
+        {scanMessage && (
+          <View style={styles.resultBanner}>
+            <Text style={[styles.resultBannerText, scanMessage.success ? styles.successText : styles.errorText]}>
+              {scanMessage.text}
+            </Text>
+          </View>
+        )}
 
 
       </CameraView>
@@ -222,6 +264,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.white,
     textAlign: 'center',
+  },
+  resultBanner: {
+    position: 'absolute',
+    bottom: 120,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  resultBannerText: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  successText: {
+    color: '#4ADE80',
+  },
+  errorText: {
+    color: '#FCA5A5',
   },
   permissionContainer: {
     flex: 1,

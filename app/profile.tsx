@@ -6,6 +6,7 @@ import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Ed
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -150,7 +151,7 @@ export default function ProfileScreen() {
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Profile</Text>
-            {subscription && (
+            {subscription && isSubscriptionActiveForMember(subscription) && (
               <View style={styles.memberBadge}>
                 <Text style={styles.memberText}>Member</Text>
               </View>
@@ -158,31 +159,43 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.profileCard}>
-            <View style={styles.profileInfo}>
-              {photoUrl ? (
-                <Image source={{ uri: photoUrl }} style={styles.avatar} />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <UserIcon size={22} color={Colors.textMuted} />
+            <View style={styles.profileCardRow}>
+              <View style={styles.profileInfo}>
+                {photoUrl ? (
+                  <Image source={{ uri: photoUrl }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <UserIcon size={22} color={Colors.textMuted} />
+                  </View>
+                )}
+                <View style={styles.userInfo}>
+                  <Text style={styles.userName} numberOfLines={2}>
+                    {displayName}
+                  </Text>
+                  <View style={styles.phoneRow}>
+                    <Text style={styles.userPhone} selectable>
+                      {primaryPhone}
+                    </Text>
+                    {user?.phoneVerified ? (
+                      <View style={styles.verifiedBadge}>
+                        <Text style={styles.verifiedBadgeText}>✓ Verified</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.userEmail} selectable>
+                    {primaryEmail}
+                  </Text>
                 </View>
-              )}
-              <View style={styles.userInfo}>
-                <Text style={styles.userName}>{displayName}</Text>
-                <View style={styles.phoneRow}>
-                  <Text style={styles.userPhone}>{primaryPhone}</Text>
-                  {user?.phoneVerified && (
-                    <View style={styles.verifiedBadge}>
-                      <Text style={styles.verifiedBadgeText}>✓ Verified</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.userEmail}>{primaryEmail}</Text>
               </View>
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() => router.push('/profile-edit')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Edit size={16} color={Colors.text} />
+                <Text style={styles.editText}>Edit</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.editButton} onPress={() => router.push('/profile-edit')}>
-              <Edit size={16} color={Colors.text} />
-              <Text style={styles.editText}>Edit</Text>
-            </TouchableOpacity>
           </View>
 
           <Text style={styles.sectionTitle}>Account</Text>
@@ -232,7 +245,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.menuContent}>
                 <Text style={styles.menuTitle}>My Subscriptions</Text>
-                {subscription ? (
+                {subscription && isSubscriptionActiveForMember(subscription) ? (
                   <Text style={styles.menuSubtitle}>
                     Active: expires in {getRemainingDays()} days
                   </Text>
@@ -248,13 +261,8 @@ export default function ProfileScreen() {
             <TouchableOpacity 
               style={styles.menuItem}
               activeOpacity={0.7}
-              onPressIn={() => {
-                console.log('[Profile] Terms & Conditions - Touch detected');
-              }}
               onPress={() => {
-                console.log('[Profile] Terms & Conditions - onPress fired');
-                Alert.alert('Test', 'Button works! Opening URL...');
-                openURL('https://xpassjo.com/terms-and-conditions');
+                void openURL('https://xpassjo.com/terms-and-conditions');
               }}
             >
               <FileText size={20} color={Colors.text} />
@@ -269,13 +277,8 @@ export default function ProfileScreen() {
             <TouchableOpacity 
               style={styles.menuItem}
               activeOpacity={0.7}
-              onPressIn={() => {
-                console.log('[Profile] Privacy Policy - Touch detected');
-              }}
               onPress={() => {
-                console.log('[Profile] Privacy Policy - onPress fired');
-                Alert.alert('Test', 'Button works! Opening URL...');
-                openURL('https://xpassjo.com/privacy-policy');
+                void openURL('https://xpassjo.com/privacy-policy');
               }}
             >
               <Shield size={20} color={Colors.text} />
@@ -384,18 +387,22 @@ const styles = StyleSheet.create({
   profileCard: {
     backgroundColor: Colors.white,
     borderRadius: 16,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    padding: 16,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  profileCardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   profileInfo: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flex: 1,
+    minWidth: 0,
   },
   avatar: {
     width: 60,
@@ -416,6 +423,8 @@ const styles = StyleSheet.create({
   },
   userInfo: {
     flex: 1,
+    minWidth: 0,
+    paddingRight: 4,
   },
   userName: {
     fontSize: 16,
@@ -426,12 +435,15 @@ const styles = StyleSheet.create({
   userPhone: {
     fontSize: 14,
     color: Colors.textSecondary,
+    flexShrink: 1,
   },
   phoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 2,
+    marginBottom: 6,
+    rowGap: 6,
   },
   verifiedBadge: {
     backgroundColor: '#D1FAE5',
@@ -447,13 +459,15 @@ const styles = StyleSheet.create({
   userEmail: {
     fontSize: 14,
     color: Colors.textSecondary,
+    flexShrink: 1,
   },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexShrink: 0,
   },
   editText: {
     fontSize: 14,

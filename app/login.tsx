@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
 import { ResponseType } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import { ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, User } from 'lucide-react-native';
+import { CheckSquare, ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Square, User } from 'lucide-react-native';
 import {
   GOOGLE_ANDROID_CLIENT_ID,
   GOOGLE_IOS_CLIENT_ID,
@@ -27,7 +27,7 @@ type AuthMode = 'login' | 'signup';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginWithEmail, signUpWithEmail, loginWithGoogle, signInWithGoogleIdToken, signInWithApple, logout, isAdmin } = useAuth();
+  const { loginWithEmail, signUpWithEmail, loginWithGoogle, signInWithGoogleIdToken, signInWithApple, logout, isAdmin, stayLoggedInEnabled, setStayLoggedInEnabled } = useAuth();
   const params = useLocalSearchParams<{ mode?: string; ref?: string }>();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('login');
@@ -628,6 +628,23 @@ export default function LoginScreen() {
             )}
 
             {mode === 'login' && (
+              <TouchableOpacity
+                style={styles.stayLoggedInRow}
+                onPress={() => {
+                  void setStayLoggedInEnabled(!stayLoggedInEnabled);
+                }}
+                disabled={isLoading}
+              >
+                {stayLoggedInEnabled ? (
+                  <CheckSquare size={18} color={Colors.primary} />
+                ) : (
+                  <Square size={18} color={Colors.textMuted} />
+                )}
+                <Text style={styles.stayLoggedInText}>Stay Logged In (Face ID / Touch ID)</Text>
+              </TouchableOpacity>
+            )}
+
+            {mode === 'login' && (
               <>
                 <TouchableOpacity 
                   style={[styles.continueButton, isLoading && styles.continueButtonDisabled]}
@@ -818,6 +835,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textSecondary,
     marginLeft: 2,
+  },
+  stayLoggedInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  stayLoggedInText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontWeight: '500' as const,
   },
   eyeButton: {
     position: 'absolute',

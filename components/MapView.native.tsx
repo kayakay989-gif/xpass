@@ -1,4 +1,4 @@
-import { View, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet, Text, Platform } from 'react-native';
 import Colors from '@/constants/colors';
 
 interface MapViewComponentProps {
@@ -38,9 +38,26 @@ function isValidCoordinate(lat: unknown, lng: unknown): lat is number {
   );
 }
 
+/** Firestore often stores lat/lng as strings; Google Maps on Android needs numbers for markers. */
+function parseCoord(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const n = parseFloat(value.trim());
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function normalizeGymForMap(gym: any): (any & { latitude: number; longitude: number }) | null {
+  const lat = parseCoord(gym?.latitude);
+  const lng = parseCoord(gym?.longitude);
+  if (lat == null || lng == null || !isValidCoordinate(lat, lng)) return null;
+  return { ...gym, latitude: lat, longitude: lng };
+}
+
 export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }: MapViewComponentProps) {
   const mappableGyms = Array.isArray(gyms)
-    ? gyms.filter((g) => isValidCoordinate(g?.latitude, g?.longitude))
+    ? (gyms.map(normalizeGymForMap).filter(Boolean) as (any & { latitude: number; longitude: number })[])
     : [];
 
   // If maps are not available (Expo Go), show fallback
@@ -74,17 +91,24 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
     );
   }
 
+  // iOS: use Apple Maps (default). Google Maps on iOS requires a native GMS API key or tiles stay blank.
+  // Android: prefer Google maps when the native module exposes PROVIDER_GOOGLE.
+  const mapProvider =
+    Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE ?? undefined;
+
   // Use native maps if available
   return (
-    <View style={styles.mapContainer}>
+    <View style={styles.mapContainer} collapsable={false}>
       <MapView
-        provider={PROVIDER_GOOGLE}
+        provider={mapProvider}
         style={styles.map}
         initialRegion={initialRegion}
         showsUserLocation
         showsMyLocationButton
         mapType="standard"
         loadingEnabled
+        // Avoid Fabric reparenting glitches when the map sits inside a ScrollView.
+        removeClippedSubviews={false}
       >
         {mappableGyms.map((gym) => (
           <Marker

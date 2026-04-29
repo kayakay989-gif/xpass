@@ -7,8 +7,34 @@ const dev =
     ? (globalThis as any).__DEV__
     : env.NODE_ENV !== 'production';
 
+const trimTrailingSlashes = (url: string) => url.replace(/\/+$/, '');
+
+const getApiBaseUrlFromExpoExtra = (): string => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Constants = require('expo-constants').default;
+    const extra =
+      Constants?.expoConfig?.extra ?? Constants?.manifest?.extra ?? Constants?.manifest2?.extra;
+    const raw = extra?.rorkApiBaseUrl ?? extra?.EXPO_PUBLIC_RORK_API_BASE_URL;
+    if (typeof raw === 'string' && raw.trim()) {
+      return trimTrailingSlashes(raw.trim());
+    }
+  } catch {
+    // non-Expo or early init
+  }
+  return '';
+};
+
 const resolveApiBaseUrl = (): string => {
-  return env.EXPO_PUBLIC_RORK_API_BASE_URL || '';
+  const fromEnv = env.EXPO_PUBLIC_RORK_API_BASE_URL;
+  if (typeof fromEnv === 'string' && fromEnv.trim()) {
+    return trimTrailingSlashes(fromEnv.trim());
+  }
+  const fromExtra = getApiBaseUrlFromExpoExtra();
+  if (fromExtra) {
+    return fromExtra;
+  }
+  return '';
 };
 
 export const config = {
@@ -60,7 +86,9 @@ export const validateConfig = () => {
   }
 
   if (!config.api.baseUrl && !dev) {
-    errors.push('API base URL is missing (set EXPO_PUBLIC_RORK_API_BASE_URL)');
+    errors.push(
+      'API base URL is missing (set EXPO_PUBLIC_RORK_API_BASE_URL or app extra rorkApiBaseUrl via app.config)'
+    );
   }
 
   if (errors.length > 0) {

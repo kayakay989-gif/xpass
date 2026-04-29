@@ -4,7 +4,7 @@ import { Stack } from 'expo-router';
 import { Gift, Copy, Share2, Users } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import * as Clipboard from 'expo-clipboard';
 
@@ -25,15 +25,19 @@ export default function ReferFriendScreen() {
     
     try {
       setIsLoading(true);
-      // Count users who signed up with this referral code
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('referredBy', '==', user.referralCode));
+      // Count only validated rewards (created after paid subscription succeeds).
+      const referralTxRef = collection(db, 'referralTransactions');
+      const q = query(referralTxRef, where('referrerId', '==', firebaseUser.uid));
       const snapshot = await getDocs(q);
-      
+
       const count = snapshot.size;
+      const totalReward = snapshot.docs.reduce((sum, tx) => {
+        const reward = Number((tx.data() as any)?.rewardAmount || 0);
+        return sum + (Number.isFinite(reward) ? reward : 0);
+      }, 0);
+
       setReferralCount(count);
-      // Each referral earns 10 JDS
-      setEarnedCredit(count * 10);
+      setEarnedCredit(totalReward);
     } catch (error) {
       console.error('Error loading referral stats:', error);
     } finally {
@@ -80,7 +84,7 @@ export default function ReferFriendScreen() {
             <Text style={styles.title}>Refer a Friend</Text>
           </View>
           <Text style={styles.subtitle}>
-            Share your referral code and earn 10 JDS credit for each friend who joins!
+            Share your referral code and earn 10 JDS credit for each friend who subscribes with a successful payment.
           </Text>
 
           <View style={styles.statsContainer}>
@@ -144,7 +148,7 @@ export default function ReferFriendScreen() {
             <View style={styles.infoItem}>
               <View style={styles.infoBullet} />
               <Text style={styles.infoText}>
-                When they sign up using your code, you get 10 JDS credit
+                Reward is added only after they subscribe and complete payment
               </Text>
             </View>
             <View style={styles.infoItem}>

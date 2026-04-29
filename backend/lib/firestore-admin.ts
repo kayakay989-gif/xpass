@@ -264,6 +264,33 @@ export const firestoreSubscriptions = {
       };
     });
   },
+
+  async getAllActive(): Promise<Subscription[]> {
+    const snapshot = await adminDb
+      .collection('subscriptions')
+      .where('isActive', '==', true)
+      .get();
+    return snapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        userId: data.userId,
+        tier: data.tier,
+        duration: data.duration,
+        startDate: timestampToDate(data.startDate),
+        endDate: timestampToDate(data.endDate),
+        monthlyPrice: data.monthlyPrice,
+        totalPrice: data.totalPrice,
+        visitsUsed: data.visitsUsed || 0,
+        maxVisitsPerMonth: data.maxVisitsPerMonth,
+        isActive: data.isActive,
+        status: data.status ?? null,
+        paymentStatus: data.paymentStatus ?? null,
+        autoRenew: data.autoRenew ?? null,
+        createdAt: data.createdAt ? timestampToDate(data.createdAt) : undefined,
+      };
+    });
+  },
 };
 
 // Gyms collection
@@ -409,6 +436,24 @@ export const firestoreCheckIns = {
       timestamp: timestampToDate(data.timestamp),
       subscriptionId: data.subscriptionId,
     };
+  },
+
+  async hasCheckInOnDate(userId: string, targetDate: Date): Promise<boolean> {
+    const start = new Date(targetDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+
+    const snapshot = await adminDb
+      .collection('checkIns')
+      .where('userId', '==', userId)
+      .get();
+
+    return snapshot.docs.some((doc) => {
+      const data: any = doc.data();
+      const ts = timestampToDate(data.timestamp);
+      return ts >= start && ts < end;
+    });
   },
 };
 

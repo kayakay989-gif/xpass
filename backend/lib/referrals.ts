@@ -17,6 +17,7 @@ export async function awardReferralRewardAfterPaidSubscription(
   input: ReferralRewardInput
 ): Promise<{ awarded: boolean; reason?: string }> {
   const { referredUserId, subscriptionId, referredUserName } = input;
+  console.log('[ReferralReward] evaluating', { referredUserId, subscriptionId });
   const referredUserRef = adminDb.collection('users').doc(referredUserId);
 
   return adminDb.runTransaction(async (tx) => {
@@ -32,8 +33,10 @@ export async function awardReferralRewardAfterPaidSubscription(
         : '';
 
     if (!referredByCode) {
+      console.log('[ReferralReward] no referral code used', { referredUserId });
       return { awarded: false, reason: 'no_referral_code_used' };
     }
+    console.log('[ReferralReward] referral code detected', { referredUserId, referralCode: referredByCode });
 
     const existingRewardQuery = adminDb
       .collection('referralTransactions')
@@ -41,6 +44,7 @@ export async function awardReferralRewardAfterPaidSubscription(
       .limit(1);
     const existingRewardSnap = await tx.get(existingRewardQuery);
     if (!existingRewardSnap.empty) {
+      console.log('[ReferralReward] already rewarded', { referredUserId });
       return { awarded: false, reason: 'already_rewarded' };
     }
 
@@ -50,11 +54,13 @@ export async function awardReferralRewardAfterPaidSubscription(
       .limit(1);
     const referrerSnap = await tx.get(referrerQuery);
     if (referrerSnap.empty) {
+      console.log('[ReferralReward] referrer not found', { referredByCode });
       return { awarded: false, reason: 'referrer_not_found' };
     }
 
     const referrerDoc = referrerSnap.docs[0];
     if (referrerDoc.id === referredUserId) {
+      console.log('[ReferralReward] blocked self referral', { referredUserId });
       return { awarded: false, reason: 'self_referral_blocked' };
     }
 
@@ -89,6 +95,13 @@ export async function awardReferralRewardAfterPaidSubscription(
       referrerCode: referredByCode,
       subscriptionId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    console.log('[ReferralReward] reward transaction queued', {
+      referredUserId,
+      referrerId: referrerDoc.id,
+      rewardAmount: REFERRAL_REWARD_JOD,
+      referralCode: referredByCode,
     });
 
     return { awarded: true };

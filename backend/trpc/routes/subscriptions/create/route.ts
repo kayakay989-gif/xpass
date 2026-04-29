@@ -4,6 +4,8 @@ import { firestoreSubscriptions } from '@/backend/lib/firestore-admin';
 import { Subscription, SubscriptionTier, SubscriptionDuration } from '@/types';
 import { calculateSubscriptionPrice } from '@/backend/lib/pricing';
 import { randomUUID } from 'crypto';
+import { firestoreUsers } from '@/backend/lib/firestore-admin';
+import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 
 export default protectedProcedure
   .input(z.object({
@@ -47,6 +49,22 @@ export default protectedProcedure
     };
 
     await firestoreSubscriptions.create(subscription);
+
+    const user = await firestoreUsers.getById(input.userId);
+    if (user?.email) {
+      try {
+        await sendSubscriptionSuccessEmail({
+          toEmail: user.email,
+          userName: user.name,
+          subscription,
+          paymentId: subscription.id,
+          paidAmount: subscription.totalPrice,
+          currency: 'JOD',
+        });
+      } catch (emailError) {
+        console.error('[SubscriptionsCreate] Failed to send subscription success email:', emailError);
+      }
+    }
     
     return subscription;
   });

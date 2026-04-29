@@ -3,6 +3,8 @@ import { protectedProcedure } from '@/backend/trpc/create-context';
 import { payWithAuthentication, computeAmount } from '@/backend/lib/mastercard';
 import { Subscription } from '@/types';
 import { firestorePayments, firestoreSubscriptions, firestoreCoupons, firestoreUsers, firestoreWalletTransactions } from '@/backend/lib/firestore-admin';
+import { awardReferralRewardAfterPaidSubscription } from '@/backend/lib/referrals';
+import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 
 export default protectedProcedure
   .input(
@@ -25,6 +27,11 @@ export default protectedProcedure
   .mutation(async ({ input, ctx }) => {
     if (ctx.user?.uid !== input.userId) {
       throw new Error('Unauthorized');
+    }
+
+    const currentUser = await firestoreUsers.getById(input.userId);
+    if (!currentUser) {
+      throw new Error('User not found');
     }
 
     // Check if user already has an active subscription
@@ -81,12 +88,8 @@ export default protectedProcedure
     let walletUsed = 0;
     let cardAmount = finalAmount;
     
-    if (input.useWallet) {
-      const user = await firestoreUsers.getById(input.userId);
-      if (!user) {
-        throw new Error('User not found');
-      }
-      walletBalance = user.walletBalance || 0;
+      if (input.useWallet) {
+        walletBalance = currentUser.walletBalance || 0;
       
       // Calculate wallet usage
       walletUsed = Math.min(walletBalance, finalAmount);
@@ -174,6 +177,29 @@ export default protectedProcedure
       // Increment coupon usage
       if (couponId) {
         await firestoreCoupons.incrementUsage(couponId);
+      }
+
+      // Referral reward is only valid after a successful PAID subscription.
+      if (finalAmount > 0) {
+        await awardReferralRewardAfterPaidSubscription({
+          referredUserId: input.userId,
+          subscriptionId: subscription.id,
+          referredUserName: currentUser?.name,
+        });
+      }
+
+      try {
+        await sendSubscriptionSuccessEmail({
+          toEmail: currentUser.email,
+          userName: currentUser.name,
+          subscription,
+          orderId: input.orderId,
+          paymentId: `${input.orderId}-${isFree ? 'coupon' : 'wallet'}`,
+          paidAmount: finalAmount,
+          currency,
+        });
+      } catch (emailError) {
+        console.error('[PayWith3DS] Failed to send subscription success email:', emailError);
       }
 
       return {
@@ -320,6 +346,29 @@ export default protectedProcedure
     // Increment coupon usage if coupon was used
     if (couponId) {
       await firestoreCoupons.incrementUsage(couponId);
+    }
+
+    // Referral reward is only valid after a successful PAID subscription.
+    if (finalAmount > 0) {
+      await awardReferralRewardAfterPaidSubscription({
+        referredUserId: input.userId,
+        subscriptionId: subscription.id,
+        referredUserName: currentUser?.name,
+      });
+    }
+
+    try {
+      await sendSubscriptionSuccessEmail({
+        toEmail: currentUser.email,
+        userName: currentUser.name,
+        subscription,
+        orderId: input.orderId,
+        paymentId: `${input.orderId}-${paymentTransactionId}`,
+        paidAmount: finalAmount,
+        currency,
+      });
+    } catch (emailError) {
+      console.error('[PayWith3DS] Failed to send subscription success email:', emailError);
     }
 
     return {

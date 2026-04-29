@@ -10,8 +10,8 @@ import Colors from '@/constants/colors';
 export default function QRScannerScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState<boolean>(false);
   const scanLockedRef = useRef(false);
+  const lastScanAtRef = useRef(0);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const { checkIn, subscription } = useApp();
   const { isGuest } = useAuth();
@@ -69,19 +69,28 @@ export default function QRScannerScreen() {
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
     // Prevent multiple executions from rapid duplicate events
-    if (scanLockedRef.current || scanned) return;
+    const now = Date.now();
+    if (scanLockedRef.current || now - lastScanAtRef.current < 2500) return;
     
+    lastScanAtRef.current = now;
     scanLockedRef.current = true;
-    setScanned(true);
     
     console.log('[QRScanner] QR code scanned:', data);
     
     // Parse QR code - expected format: "xpass-gym-{gymId}" or just "{gymId}"
-    let gymId = data;
-    if (data.startsWith('xpass-gym-')) {
-      gymId = data.replace('xpass-gym-', '');
-    } else if (data.startsWith('gym-')) {
-      gymId = data.replace('gym-', '');
+    let gymId = data.trim();
+    const gymTagMatch = gymId.match(/(?:xpass-gym-|gym-)([a-zA-Z0-9_-]+)/);
+    if (gymTagMatch?.[1]) {
+      gymId = gymTagMatch[1];
+    } else {
+      try {
+        if (gymId.startsWith('http://') || gymId.startsWith('https://')) {
+          const url = new URL(gymId);
+          gymId = url.searchParams.get('gymId') || url.pathname.split('/').filter(Boolean).pop() || gymId;
+        }
+      } catch {
+        // keep raw
+      }
     }
     
     // Validate gymId is not empty
@@ -92,8 +101,8 @@ export default function QRScannerScreen() {
         message: 'Invalid QR code. Please scan a valid gym QR code.' 
       });
       setTimeout(() => {
-        setScanned(false);
         setResult(null);
+        scanLockedRef.current = false;
       }, 3000);
       return;
     }
@@ -108,11 +117,11 @@ export default function QRScannerScreen() {
       
       setTimeout(() => {
         if (checkInResult.success) {
-          router.back();
+          scanLockedRef.current = false;
+          setResult(null);
         } else {
           // Allow retry only on failure
           scanLockedRef.current = false;
-          setScanned(false);
           setResult(null);
         }
       }, 2000);
@@ -124,7 +133,6 @@ export default function QRScannerScreen() {
       });
       setTimeout(() => {
         scanLockedRef.current = false;
-        setScanned(false);
         setResult(null);
       }, 2000);
     }
@@ -135,7 +143,7 @@ export default function QRScannerScreen() {
       <CameraView
         style={styles.camera}
         facing={'back' as CameraType}
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        onBarcodeScanned={handleBarCodeScanned}
         barcodeScannerSettings={{
           barcodeTypes: ['qr'],
         }}

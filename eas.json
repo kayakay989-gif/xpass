@@ -4,21 +4,41 @@
   },
   "build": {
     "production": {
+      "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
       },
       "distribution": "store",
-      "environment": "production"
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com"
+      }
     },
     "production-apk": {
       "android": {
         "buildType": "apk"
       },
       "distribution": "internal",
-      "environment": "production"
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com"
+      }
+    },
+    "ios-simulator": {
+      "distribution": "internal",
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com"
+      },
+      "ios": {
+        "simulator": true
+      }
     }
   },
   "submit": {
@@ -26,7 +46,10 @@
       "ios": {
         "ascAppId": "6760907449",
         "bundleIdentifier": "com.xpass.app",
-        "appleTeamId": "PA266475ZW"
+        "appleTeamId": "PA266475ZW",
+        "ascApiKeyPath": "./AuthKey_CADG3C6255.p8",
+        "ascApiKeyId": "CADG3C6255",
+        "ascApiKeyIssuerId": "f508c5d0-a1b3-4aac-b661-3abb4886744d"
       }
     }
   }

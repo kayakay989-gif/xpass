@@ -46,8 +46,11 @@ export default function SecurityScreen() {
     const digits = phone.replace(/\D/g, '');
     if (!digits) return '';
     if (digits.startsWith('962')) return `+${digits}`;
-    if (digits.startsWith('+')) return digits;
     return `+962${digits}`;
+  };
+
+  const isValidJordanE164 = (fullPhone: string): boolean => {
+    return /^\+962\d{9}$/.test(fullPhone);
   };
 
   useEffect(() => {
@@ -68,8 +71,8 @@ export default function SecurityScreen() {
 
   const handleSendOtp = async () => {
     const fullPhone = normalizePhone();
-    if (!fullPhone || fullPhone.length < 10) {
-      Alert.alert('Invalid phone', 'Please enter a valid phone number.');
+    if (!isValidJordanE164(fullPhone)) {
+      Alert.alert('Invalid phone', 'Please enter a valid Jordan phone number in this format: +962XXXXXXXXX');
       return;
     }
     if (!firebaseUser || !auth.currentUser) {
@@ -98,7 +101,7 @@ export default function SecurityScreen() {
       showAlert(
         'Error',
         error?.message ||
-          'Failed to send OTP. Ensure Firebase Phone Auth is enabled and your domain is authorized.'
+          'Failed to send OTP. Please verify your number and try again.'
       );
     } finally {
       setIsSendingOtp(false);
@@ -107,6 +110,14 @@ export default function SecurityScreen() {
 
   const handleVerify = async () => {
     const fullPhone = normalizePhone();
+    if (!isValidJordanE164(fullPhone)) {
+      setToast({
+        visible: true,
+        message: 'Invalid phone number format. Use +962XXXXXXXXX.',
+        type: 'error',
+      });
+      return;
+    }
     if (!otp.trim()) {
       setToast({
         visible: true,

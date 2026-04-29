@@ -5,6 +5,7 @@ import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
+import { agentLog } from '@/lib/agent-debug-log';
 
 export default function MySubscriptionScreen() {
   const router = useRouter();
@@ -61,6 +62,9 @@ export default function MySubscriptionScreen() {
             <TouchableOpacity 
               style={styles.subscribeButton}
               onPress={() => {
+                // #region agent log
+                agentLog('H5', 'my-subscription.tsx:subscribeNow', 'replace_subscription_tab', {});
+                // #endregion
                 try {
                   router.replace('/(tabs)/subscription');
                 } catch (e) {
