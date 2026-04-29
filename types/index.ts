@@ -50,6 +50,7 @@ export interface Subscription {
   paymentStatus?: string | null; // e.g. "paid", "pending"
   autoRenew?: boolean | null;
   createdAt?: Date;
+  lastCheckInDate?: Date;
 }
 
 export interface Gym {
