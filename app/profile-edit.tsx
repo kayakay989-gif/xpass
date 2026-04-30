@@ -7,8 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app, db, auth } from '@/lib/firebase';
 import { doc, deleteDoc } from 'firebase/firestore';
-import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { PhoneAuthProvider, RecaptchaVerifier, signInWithPhoneNumber, updatePhoneNumber } from 'firebase/auth';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
@@ -25,7 +24,6 @@ export default function ProfileEditScreen() {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-profile-edit', []);
-  const recaptchaVerifier = useRef<any>(null);
 
   const initialPhoneRef = useRef<string>(user?.phone || '');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -186,17 +184,15 @@ export default function ProfileEditScreen() {
       return;
     }
     try {
-      const provider = new PhoneAuthProvider(auth);
       if (Platform.OS === 'web') {
         const verifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
         await verifier.render();
-        const id = await provider.verifyPhoneNumber(fullPhone, verifier);
+        const confirmation = await signInWithPhoneNumber(auth, fullPhone, verifier);
+        const id = confirmation.verificationId;
         setVerificationId(id);
       } else {
-        if (!recaptchaVerifier.current) {
-          throw new Error('reCAPTCHA verifier is not ready. Please try again.');
-        }
-        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current);
+        const confirmation = await signInWithPhoneNumber(auth, fullPhone);
+        const id = confirmation.verificationId;
         setVerificationId(id);
       }
 
@@ -316,12 +312,6 @@ export default function ProfileEditScreen() {
     <>
       <Stack.Screen options={{ title: 'Edit Profile' }} />
       <View style={styles.container}>
-        {Platform.OS !== 'web' && (
-          <FirebaseRecaptchaVerifierModal
-            ref={recaptchaVerifier}
-            firebaseConfig={app.options}
-          />
-        )}
         <Text style={styles.title}>Profile details</Text>
         <View style={styles.form}>
           <Text style={styles.label}>Profile photo (optional)</Text>

@@ -3,11 +3,10 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityInd
 import { Stack } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
-import { auth, app } from '@/lib/firebase';
+import { PhoneAuthProvider, RecaptchaVerifier, signInWithPhoneNumber, updatePhoneNumber } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
 import Toast from '@/components/Toast';
 import { CheckCircle } from 'lucide-react-native';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 
 export default function SecurityScreen() {
   const { user, firebaseUser, updateProfileData } = useAuth();
@@ -24,7 +23,6 @@ export default function SecurityScreen() {
   });
 
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-security', []);
-  const recaptchaVerifier = useRef<any>(null);
 
   useEffect(() => {
     const rawPhone = user?.phone || '';
@@ -83,17 +81,15 @@ export default function SecurityScreen() {
     }
     setIsSendingOtp(true);
     try {
-      const provider = new PhoneAuthProvider(auth);
       if (Platform.OS === 'web') {
         const verifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
         await verifier.render();
-        const id = await provider.verifyPhoneNumber(fullPhone, verifier);
+        const confirmation = await signInWithPhoneNumber(auth, fullPhone, verifier);
+        const id = confirmation.verificationId;
         setVerificationId(id);
       } else {
-        if (!recaptchaVerifier.current) {
-          throw new Error('reCAPTCHA verifier is not ready. Please try again.');
-        }
-        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current);
+        const confirmation = await signInWithPhoneNumber(auth, fullPhone);
+        const id = confirmation.verificationId;
         setVerificationId(id);
       }
 
@@ -199,12 +195,6 @@ export default function SecurityScreen() {
     <>
       <Stack.Screen options={{ title: 'Security' }} />
       <View style={styles.container}>
-        {Platform.OS !== 'web' && (
-          <FirebaseRecaptchaVerifierModal
-            ref={recaptchaVerifier}
-            firebaseConfig={app.options}
-          />
-        )}
         <Text style={styles.title}>Phone OTP</Text>
         <Text style={styles.subtitle}>Verify your phone to secure your account.</Text>
 
