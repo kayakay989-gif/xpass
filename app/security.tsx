@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { PhoneAuthProvider, RecaptchaVerifier, signInWithPhoneNumber, updatePhoneNumber } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { trpc } from '@/lib/trpc';
 import Toast from '@/components/Toast';
 import { CheckCircle } from 'lucide-react-native';
 
@@ -15,14 +14,15 @@ export default function SecurityScreen() {
   const [otpSent, setOtpSent] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [verificationId, setVerificationId] = useState<string | null>(null);
+  const [otpSessionPhone, setOtpSessionPhone] = useState<string | null>(null);
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>({
     visible: false,
     message: '',
     type: 'success',
   });
 
-  const recaptchaContainerId = useMemo(() => 'recaptcha-container-security', []);
+  const sendOtpMutation = trpc.auth.sendOTP.useMutation();
+  const verifyOtpMutation = trpc.auth.verifyOTP.useMutation();
 
   useEffect(() => {
     const rawPhone = user?.phone || '';
@@ -37,7 +37,7 @@ export default function SecurityScreen() {
   useEffect(() => {
     if (user?.phoneVerified) {
       setOtpSent(false);
-      setVerificationId(null);
+      setOtpSessionPhone(null);
       setOtp('');
     }
   }, [user?.phone, user?.phoneVerified]);
@@ -56,7 +56,7 @@ export default function SecurityScreen() {
   useEffect(() => {
     // If phone changes, force re-send OTP
     setOtpSent(false);
-    setVerificationId(null);
+    setOtpSessionPhone(null);
     setOtp('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phone]);
@@ -75,24 +75,20 @@ export default function SecurityScreen() {
       Alert.alert('Invalid phone', 'Please enter a valid Jordan phone number in this format: +962XXXXXXXXX');
       return;
     }
-    if (!firebaseUser || !auth.currentUser) {
+    if (!firebaseUser) {
       showAlert('Not logged in', 'Please log in to verify your phone.');
       return;
     }
     setIsSendingOtp(true);
     try {
-      if (Platform.OS === 'web') {
-        const verifier = new RecaptchaVerifier(auth, recaptchaContainerId, { size: 'invisible' });
-        await verifier.render();
-        const confirmation = await signInWithPhoneNumber(auth, fullPhone, verifier);
-        const id = confirmation.verificationId;
-        setVerificationId(id);
-      } else {
-        const confirmation = await signInWithPhoneNumber(auth, fullPhone);
-        const id = confirmation.verificationId;
-        setVerificationId(id);
+      const response = await sendOtpMutation.mutateAsync({
+        phoneNumber: fullPhone,
+        method: 'sms',
+      });
+      if ((response as any)?.devOtp) {
+        setOtp((response as any).devOtp);
       }
-
+      setOtpSessionPhone(fullPhone);
       setOtpSent(true);
       showAlert('OTP sent', 'Enter the code we sent to your phone.');
     } catch (error: any) {
@@ -125,7 +121,7 @@ export default function SecurityScreen() {
       });
       return;
     }
-    if (!verificationId) {
+    if (!otpSessionPhone) {
       setToast({
         visible: true,
         message: 'Please send an OTP first',
@@ -133,7 +129,7 @@ export default function SecurityScreen() {
       });
       return;
     }
-    if (!firebaseUser || !auth.currentUser) {
+    if (!firebaseUser) {
       setToast({
         visible: true,
         message: 'Please log in to verify your phone',
@@ -143,11 +139,10 @@ export default function SecurityScreen() {
     }
     setIsVerifying(true);
     try {
-      console.log('[Security] Verifying OTP with verificationId:', verificationId.substring(0, 10) + '...');
-      const credential = PhoneAuthProvider.credential(verificationId, otp.trim());
-      console.log('[Security] Credential created, updating phone number...');
-      await updatePhoneNumber(auth.currentUser, credential);
-      console.log('[Security] Phone number updated, updating profile data...');
+      await verifyOtpMutation.mutateAsync({
+        phoneNumber: otpSessionPhone,
+        otp: otp.trim(),
+      });
       
       // Update phone and mark as verified
       await updateProfileData({ 
@@ -167,7 +162,7 @@ export default function SecurityScreen() {
       
       setOtp('');
       setOtpSent(false);
-      setVerificationId('');
+      setOtpSessionPhone(null);
     } catch (error: any) {
       console.error('[Security] OTP verify failed:', error);
       let errorMessage = 'Verification failed.';
@@ -274,14 +269,6 @@ export default function SecurityScreen() {
           </View>
         )}
 
-        {Platform.OS === 'web' &&
-          // RN Web: render an offscreen div for the invisible reCAPTCHA
-          // @ts-ignore
-          React.createElement('div', {
-            id: recaptchaContainerId,
-            style: { position: 'absolute', left: '-10000px', top: '-10000px' },
-          })}
-        
         <Toast
           visible={toast.visible}
           message={toast.message}
