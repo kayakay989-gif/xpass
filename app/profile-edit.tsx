@@ -8,6 +8,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'fire
 import { app, db, auth } from '@/lib/firebase';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 
 export default function ProfileEditScreen() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export default function ProfileEditScreen() {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-profile-edit', []);
+  const recaptchaVerifier = useRef<any>(null);
 
   const initialPhoneRef = useRef<string>(user?.phone || '');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -191,9 +193,10 @@ export default function ProfileEditScreen() {
         const id = await provider.verifyPhoneNumber(fullPhone, verifier);
         setVerificationId(id);
       } else {
-        // For native platforms, we rely on Firebase's default verifier behavior.
-        // (This avoids depending on the deprecated `expo-firebase-recaptcha` package.)
-        const id = await provider.verifyPhoneNumber(fullPhone);
+        if (!recaptchaVerifier.current) {
+          throw new Error('reCAPTCHA verifier is not ready. Please try again.');
+        }
+        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current);
         setVerificationId(id);
       }
 
@@ -313,6 +316,12 @@ export default function ProfileEditScreen() {
     <>
       <Stack.Screen options={{ title: 'Edit Profile' }} />
       <View style={styles.container}>
+        {Platform.OS !== 'web' && (
+          <FirebaseRecaptchaVerifierModal
+            ref={recaptchaVerifier}
+            firebaseConfig={app.options}
+          />
+        )}
         <Text style={styles.title}>Profile details</Text>
         <View style={styles.form}>
           <Text style={styles.label}>Profile photo (optional)</Text>

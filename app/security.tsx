@@ -4,9 +4,10 @@ import { Stack } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { PhoneAuthProvider, RecaptchaVerifier, updatePhoneNumber } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, app } from '@/lib/firebase';
 import Toast from '@/components/Toast';
 import { CheckCircle } from 'lucide-react-native';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 
 export default function SecurityScreen() {
   const { user, firebaseUser, updateProfileData } = useAuth();
@@ -23,6 +24,7 @@ export default function SecurityScreen() {
   });
 
   const recaptchaContainerId = useMemo(() => 'recaptcha-container-security', []);
+  const recaptchaVerifier = useRef<any>(null);
 
   useEffect(() => {
     const rawPhone = user?.phone || '';
@@ -88,9 +90,10 @@ export default function SecurityScreen() {
         const id = await provider.verifyPhoneNumber(fullPhone, verifier);
         setVerificationId(id);
       } else {
-        // For native platforms, we rely on Firebase's default verifier behavior.
-        // (This avoids depending on the deprecated `expo-firebase-recaptcha` package.)
-        const id = await provider.verifyPhoneNumber(fullPhone);
+        if (!recaptchaVerifier.current) {
+          throw new Error('reCAPTCHA verifier is not ready. Please try again.');
+        }
+        const id = await provider.verifyPhoneNumber(fullPhone, recaptchaVerifier.current);
         setVerificationId(id);
       }
 
@@ -196,6 +199,12 @@ export default function SecurityScreen() {
     <>
       <Stack.Screen options={{ title: 'Security' }} />
       <View style={styles.container}>
+        {Platform.OS !== 'web' && (
+          <FirebaseRecaptchaVerifierModal
+            ref={recaptchaVerifier}
+            firebaseConfig={app.options}
+          />
+        )}
         <Text style={styles.title}>Phone OTP</Text>
         <Text style={styles.subtitle}>Verify your phone to secure your account.</Text>
 
