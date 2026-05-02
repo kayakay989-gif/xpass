@@ -25,8 +25,6 @@ import adminGetStats from "./routes/admin/getStats/route";
 import adminPayoutsGetAll from "./routes/admin/payouts/getAll/route";
 import adminPayoutsMarkPaid from "./routes/admin/payouts/markPaid/route";
 import adminRevenueGetSummary from "./routes/admin/revenue/getSummary/route";
-import { sendOTPProcedure } from "./routes/auth/sendOTP/route";
-import { verifyOTPProcedure } from "./routes/auth/verifyOTP/route";
 import { registerProcedure } from "./routes/auth/register/route";
 import { loginProcedure } from "./routes/auth/login/route";
 import { googleLoginProcedure } from "./routes/auth/googleLogin/route";
@@ -102,8 +100,6 @@ const couponsRouter = createTRPCRouter({
 });
 
 const authRouter = createTRPCRouter({
-  sendOTP: sendOTPProcedure,
-  verifyOTP: verifyOTPProcedure,
   register: registerProcedure,
   login: loginProcedure,
   googleLogin: googleLoginProcedure,

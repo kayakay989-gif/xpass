@@ -25,4 +25,8 @@ export const GOOGLE_ANDROID_CLIENT_ID =
 
 export const GOOGLE_IOS_CLIENT_ID =
   process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
-  '442632916178-74jt1lpgq98podv4olb8o7lvkijt1u6r.apps.googleusercontent.com';
+  '40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie.apps.googleusercontent.com';
+
+export const GOOGLE_CONFIG = {
+  iosClientId: GOOGLE_IOS_CLIENT_ID,
+};

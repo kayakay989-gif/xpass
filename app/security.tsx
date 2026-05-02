@@ -1,28 +1,41 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import { Stack } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { trpc } from '@/lib/trpc';
 import Toast from '@/components/Toast';
 import { CheckCircle } from 'lucide-react-native';
+import { nativeRequestPhoneVerificationId } from '@/lib/firebasePhoneNative';
+import { applySmsCodeToLinkedPhone } from '@/lib/linkPhoneWithNativeSms';
+import { mapPhoneAuthError } from '@/lib/phoneAuthErrors';
 
 export default function SecurityScreen() {
   const { user, firebaseUser, updateProfileData } = useAuth();
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [verificationId, setVerificationId] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [otpSessionPhone, setOtpSessionPhone] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>({
+  const [resendSeconds, setResendSeconds] = useState(0);
+  const [toast, setToast] = useState<{
+    visible: boolean;
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+  }>({
     visible: false,
     message: '',
     type: 'success',
   });
-
-  const sendOtpMutation = trpc.auth.sendOTP.useMutation();
-  const verifyOtpMutation = trpc.auth.verifyOTP.useMutation();
 
   useEffect(() => {
     const rawPhone = user?.phone || '';
@@ -33,11 +46,10 @@ export default function SecurityScreen() {
     }
   }, [user]);
 
-  // Reset verification state if phone number changes
   useEffect(() => {
     if (user?.phoneVerified) {
       setOtpSent(false);
-      setOtpSessionPhone(null);
+      setVerificationId(null);
       setOtp('');
     }
   }, [user?.phone, user?.phoneVerified]);
@@ -49,17 +61,19 @@ export default function SecurityScreen() {
     return `+962${digits}`;
   };
 
-  const isValidJordanE164 = (fullPhone: string): boolean => {
-    return /^\+962\d{9}$/.test(fullPhone);
-  };
+  const isValidJordanE164 = (fullPhone: string): boolean => /^\+962\d{9}$/.test(fullPhone);
 
   useEffect(() => {
-    // If phone changes, force re-send OTP
     setOtpSent(false);
-    setOtpSessionPhone(null);
+    setVerificationId(null);
     setOtp('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phone]);
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+    const id = setInterval(() => setResendSeconds((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [resendSeconds]);
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -69,10 +83,14 @@ export default function SecurityScreen() {
     Alert.alert(title, message);
   };
 
-  const handleSendOtp = async () => {
+  const handleSendOtp = async (forceResend: boolean) => {
+    if (Platform.OS === 'web') {
+      showAlert('Phone verification', 'Use the iOS or Android app to verify your phone number.');
+      return;
+    }
     const fullPhone = normalizePhone();
     if (!isValidJordanE164(fullPhone)) {
-      Alert.alert('Invalid phone', 'Please enter a valid Jordan phone number in this format: +962XXXXXXXXX');
+      Alert.alert('Invalid phone', 'Please enter a valid Jordan phone number (+962XXXXXXXXX).');
       return;
     }
     if (!firebaseUser) {
@@ -81,23 +99,14 @@ export default function SecurityScreen() {
     }
     setIsSendingOtp(true);
     try {
-      const response = await sendOtpMutation.mutateAsync({
-        phoneNumber: fullPhone,
-        method: 'sms',
-      });
-      if ((response as any)?.devOtp) {
-        setOtp((response as any).devOtp);
-      }
-      setOtpSessionPhone(fullPhone);
+      const vid = await nativeRequestPhoneVerificationId(fullPhone, forceResend);
+      setVerificationId(vid);
       setOtpSent(true);
-      showAlert('OTP sent', 'Enter the code we sent to your phone.');
-    } catch (error: any) {
-      console.error('[Security] Failed to send OTP:', error);
-      showAlert(
-        'Error',
-        error?.message ||
-          'Failed to send OTP. Please verify your number and try again.'
-      );
+      setResendSeconds(60);
+      showAlert('Code sent', 'Enter the code we sent to your phone.');
+    } catch (error: unknown) {
+      console.error('[Security] Failed to send SMS:', error);
+      showAlert('Error', mapPhoneAuthError(error));
     } finally {
       setIsSendingOtp(false);
     }
@@ -108,7 +117,7 @@ export default function SecurityScreen() {
     if (!isValidJordanE164(fullPhone)) {
       setToast({
         visible: true,
-        message: 'Invalid phone number format. Use +962XXXXXXXXX.',
+        message: 'Invalid phone number format.',
         type: 'error',
       });
       return;
@@ -121,10 +130,10 @@ export default function SecurityScreen() {
       });
       return;
     }
-    if (!otpSessionPhone) {
+    if (!verificationId) {
       setToast({
         visible: true,
-        message: 'Please send an OTP first',
+        message: 'Please send a code first',
         type: 'error',
       });
       return;
@@ -139,43 +148,28 @@ export default function SecurityScreen() {
     }
     setIsVerifying(true);
     try {
-      await verifyOtpMutation.mutateAsync({
-        phoneNumber: otpSessionPhone,
-        otp: otp.trim(),
-      });
-      
-      // Update phone and mark as verified
-      await updateProfileData({ 
+      await applySmsCodeToLinkedPhone(verificationId, otp.trim());
+
+      await updateProfileData({
         phone: fullPhone,
         phoneVerified: true,
         phoneVerifiedAt: new Date(),
       });
-      
-      console.log('[Security] Phone verification successful');
-      
-      // Show success toast
+
       setToast({
         visible: true,
         message: 'Phone number verified successfully',
         type: 'success',
       });
-      
+
       setOtp('');
       setOtpSent(false);
-      setOtpSessionPhone(null);
-    } catch (error: any) {
-      console.error('[Security] OTP verify failed:', error);
-      let errorMessage = 'Verification failed.';
-      if (error?.code === 'auth/invalid-verification-code') {
-        errorMessage = 'Invalid verification code';
-      } else if (error?.code === 'auth/code-expired') {
-        errorMessage = 'Verification code expired. Please request a new one.';
-      } else if (error?.message) {
-        errorMessage = error.message;
-      }
+      setVerificationId(null);
+    } catch (error: unknown) {
+      console.error('[Security] Verify failed:', error);
       setToast({
         visible: true,
-        message: errorMessage,
+        message: mapPhoneAuthError(error),
         type: 'error',
       });
     } finally {
@@ -190,8 +184,14 @@ export default function SecurityScreen() {
     <>
       <Stack.Screen options={{ title: 'Security' }} />
       <View style={styles.container}>
-        <Text style={styles.title}>Phone OTP</Text>
+        <Text style={styles.title}>Phone verification</Text>
         <Text style={styles.subtitle}>Verify your phone to secure your account.</Text>
+
+        {Platform.OS === 'web' && (
+          <Text style={styles.webHint}>
+            SMS verification is available in the mobile app (Firebase native phone auth).
+          </Text>
+        )}
 
         {isPhoneVerified && (
           <View style={styles.verifiedBadge}>
@@ -205,36 +205,42 @@ export default function SecurityScreen() {
           <Text style={styles.countryCode}>+962</Text>
           <TextInput
             style={[
-              styles.input, 
+              styles.input,
               { flex: 1, paddingLeft: 58 },
-              isPhoneVerified && styles.inputDisabled
+              isPhoneVerified && styles.inputDisabled,
             ]}
             placeholder="9 digit phone"
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
             maxLength={9}
-            editable={!isPhoneVerified}
+            editable={!isPhoneVerified && Platform.OS !== 'web'}
           />
         </View>
 
-        {!isPhoneVerified && (
+        {!isPhoneVerified && Platform.OS !== 'web' && (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={handleSendOtp}
-            disabled={isSendingOtp}
+            onPress={() => void handleSendOtp(otpSent)}
+            disabled={isSendingOtp || resendSeconds > 0}
           >
             {isSendingOtp ? (
               <ActivityIndicator color={Colors.white} />
             ) : (
-              <Text style={styles.primaryButtonText}>{otpSent ? 'Resend OTP' : 'Send OTP'}</Text>
+              <Text style={styles.primaryButtonText}>
+                {otpSent
+                  ? resendSeconds > 0
+                    ? `Resend code (${resendSeconds}s)`
+                    : 'Resend code'
+                  : 'Send code'}
+              </Text>
             )}
           </TouchableOpacity>
         )}
 
-        {otpSent && !isPhoneVerified && (
+        {otpSent && !isPhoneVerified && Platform.OS !== 'web' && (
           <>
-            <Text style={styles.label}>Enter OTP</Text>
+            <Text style={styles.label}>Enter code</Text>
             <TextInput
               style={styles.input}
               placeholder="6-digit code"
@@ -242,11 +248,13 @@ export default function SecurityScreen() {
               onChangeText={setOtp}
               keyboardType="number-pad"
               maxLength={6}
+              textContentType="oneTimeCode"
+              autoComplete="sms-otp"
             />
 
             <TouchableOpacity
               style={[styles.secondaryButton, isVerifying && styles.secondaryButtonDisabled]}
-              onPress={handleVerify}
+              onPress={() => void handleVerify()}
               disabled={isVerifying}
             >
               {isVerifying ? (
@@ -264,7 +272,7 @@ export default function SecurityScreen() {
               Your phone number {displayPhone} is verified and secure.
             </Text>
             <Text style={styles.verifiedInfoSubtext}>
-              To change your phone number, please contact support.
+              To change your phone number, contact support or use Edit Profile on mobile.
             </Text>
           </View>
         )}
@@ -296,6 +304,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textSecondary,
     marginBottom: 16,
+  },
+  webHint: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
   },
   label: {
     fontSize: 14,
@@ -382,4 +398,3 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
-

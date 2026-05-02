@@ -7,7 +7,6 @@ type InMemoryStore = {
   gyms: Gym[];
   checkIns: CheckIn[];
   payments: any[];
-  otps: OTP[];
   initialized: boolean;
 };
 
@@ -17,16 +16,7 @@ const memoryStore: InMemoryStore = {
   gyms: [],
   checkIns: [],
   payments: [],
-  otps: [],
   initialized: false,
-};
-
-
-
-type OTP = {
-  phoneNumber: string;
-  otp: string;
-  expiresAt: Date;
 };
 
 async function initializeDB(): Promise<void> {
@@ -267,31 +257,6 @@ export const db = {
 
     async list() {
       return memoryStore.payments;
-    },
-  },
-
-  otps: {
-    async store(phoneNumber: string, otp: string, expiresAt: Date): Promise<void> {
-      const existingIndex = memoryStore.otps.findIndex(o => o.phoneNumber === phoneNumber);
-      if (existingIndex !== -1) {
-        memoryStore.otps[existingIndex] = { phoneNumber, otp, expiresAt };
-      } else {
-        memoryStore.otps.push({ phoneNumber, otp, expiresAt });
-      }
-    },
-
-    async verify(phoneNumber: string, otp: string): Promise<boolean> {
-      const stored = memoryStore.otps.find(o => o.phoneNumber === phoneNumber);
-      
-      if (!stored) return false;
-      if (stored.otp !== otp) return false;
-      if (new Date(stored.expiresAt) < new Date()) return false;
-      
-      return true;
-    },
-
-    async delete(phoneNumber: string): Promise<void> {
-      memoryStore.otps = memoryStore.otps.filter(o => o.phoneNumber !== phoneNumber);
     },
   },
 };

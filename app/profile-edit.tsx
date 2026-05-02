@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityInd
 import { Stack, useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { trpc } from '@/lib/trpc';
+import { nativeRequestPhoneVerificationId } from '@/lib/firebasePhoneNative';
+import { applySmsCodeToLinkedPhone } from '@/lib/linkPhoneWithNativeSms';
+import { mapPhoneAuthError } from '@/lib/phoneAuthErrors';
 import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app, db } from '@/lib/firebase';
@@ -19,12 +21,12 @@ export default function ProfileEditScreen() {
   const [photoUrl, setPhotoUrl] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
-  const [otpSessionPhone, setOtpSessionPhone] = useState<string | null>(null);
+  const [verificationId, setVerificationId] = useState<string | null>(null);
+  const [isSendingPhoneCode, setIsSendingPhoneCode] = useState(false);
+  const [phoneResendSeconds, setPhoneResendSeconds] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const sendOtpMutation = trpc.auth.sendOTP.useMutation();
-  const verifyOtpMutation = trpc.auth.verifyOTP.useMutation();
 
   const initialPhoneRef = useRef<string>(user?.phone || '');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -160,11 +162,17 @@ export default function ProfileEditScreen() {
   }, [phone]);
 
   useEffect(() => {
-    // If phone changes, force re-send OTP
     setOtpSent(false);
-    setOtpSessionPhone(null);
+    setVerificationId(null);
     setOtp('');
+    setPhoneResendSeconds(0);
   }, [hasPhoneChanged]);
+
+  useEffect(() => {
+    if (phoneResendSeconds <= 0) return;
+    const id = setInterval(() => setPhoneResendSeconds((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(id);
+  }, [phoneResendSeconds]);
 
   const normalizePhone = (): string => {
     const digits = phone.replace(/\D/g, '');
@@ -174,7 +182,7 @@ export default function ProfileEditScreen() {
     return `+962${digits}`;
   };
 
-  const handleSendOtp = async () => {
+  const handleSendPhoneCode = async () => {
     const fullPhone = normalizePhone();
     if (!fullPhone || fullPhone.length < 10) {
       showAlert('Invalid phone', 'Please enter a valid phone number.');
@@ -184,21 +192,25 @@ export default function ProfileEditScreen() {
       showAlert('Not logged in', 'Please log in to verify your phone.');
       return;
     }
+    if (Platform.OS === 'web') {
+      showAlert(
+        'Mobile required',
+        'To verify a new phone number, use the iOS or Android app (Firebase SMS).'
+      );
+      return;
+    }
+    setIsSendingPhoneCode(true);
     try {
-      const response = await sendOtpMutation.mutateAsync({
-        phoneNumber: fullPhone,
-        method: 'sms',
-      });
-      if ((response as any)?.devOtp) {
-        setOtp((response as any).devOtp);
-      }
-      setOtpSessionPhone(fullPhone);
-
+      const vid = await nativeRequestPhoneVerificationId(fullPhone, otpSent);
+      setVerificationId(vid);
       setOtpSent(true);
-      showAlert('OTP sent', 'We sent a 6-digit code to your phone.');
-    } catch (error: any) {
-      console.error('[ProfileEdit] Failed to send OTP:', error);
-      showAlert('Error', error.message || 'Failed to send OTP.');
+      setPhoneResendSeconds(60);
+      showAlert('Code sent', 'We sent a 6-digit code to your phone.');
+    } catch (error: unknown) {
+      console.error('[ProfileEdit] Failed to send SMS:', error);
+      showAlert('Error', mapPhoneAuthError(error));
+    } finally {
+      setIsSendingPhoneCode(false);
     }
   };
 
@@ -210,32 +222,31 @@ export default function ProfileEditScreen() {
       return;
     }
 
-    // Only require OTP if phone number is being changed
     if (hasPhoneChanged) {
-      if (!otpSent) {
-        showAlert('OTP required', 'Send and verify OTP to update your phone.');
+      if (Platform.OS === 'web') {
+        showAlert(
+          'Mobile required',
+          'Phone updates with SMS verification must be done in the mobile app.'
+        );
+        return;
+      }
+      if (!otpSent || !verificationId) {
+        showAlert('Code required', 'Send and enter the SMS code to update your phone.');
         return;
       }
       if (!otp.trim()) {
-        showAlert('Enter OTP', 'Please enter the 6-digit code.');
+        showAlert('Enter code', 'Please enter the 6-digit code.');
         return;
       }
     }
 
     setIsSaving(true);
     try {
-      // Verify OTP only if phone changed
-      if (hasPhoneChanged) {
-        if (!otpSessionPhone) {
-          throw new Error('Please send OTP first.');
-        }
+      if (hasPhoneChanged && verificationId) {
         if (!firebaseUser) {
           throw new Error('Please log in to verify your phone.');
         }
-        await verifyOtpMutation.mutateAsync({
-          phoneNumber: otpSessionPhone,
-          otp: otp.trim(),
-        });
+        await applySmsCodeToLinkedPhone(verificationId, otp.trim());
       }
 
       // Update profile data (name, email, and phone if changed)
@@ -244,6 +255,9 @@ export default function ProfileEditScreen() {
         email,
         phone: fullPhone || user?.phone,
         photoUrl: photoUrl.trim(),
+        ...(hasPhoneChanged
+          ? { phoneVerified: true, phoneVerifiedAt: new Date() }
+          : {}),
       });
 
       showAlert('Saved', 'Profile updated successfully.');
@@ -376,27 +390,45 @@ export default function ProfileEditScreen() {
 
           {hasPhoneChanged && (
             <View style={styles.otpSection}>
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={handleSendOtp}
-                disabled={isSaving}
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+              {Platform.OS === 'web' ? (
+                <Text style={styles.webPhoneHint}>
+                  Changing your phone number requires the mobile app (SMS verification).
                 </Text>
-              </TouchableOpacity>
-
-              {otpSent && (
+              ) : (
                 <>
-                  <Text style={styles.label}>Enter OTP</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="6-digit code"
-                    value={otp}
-                    onChangeText={setOtp}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                  />
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, (isSaving || isSendingPhoneCode || phoneResendSeconds > 0) && styles.saveButtonDisabled]}
+                    onPress={() => void handleSendPhoneCode()}
+                    disabled={isSaving || isSendingPhoneCode || phoneResendSeconds > 0}
+                  >
+                    {isSendingPhoneCode ? (
+                      <ActivityIndicator color={Colors.white} />
+                    ) : (
+                      <Text style={styles.secondaryButtonText}>
+                        {otpSent
+                          ? phoneResendSeconds > 0
+                            ? `Resend code (${phoneResendSeconds}s)`
+                            : 'Resend code'
+                          : 'Send code'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+
+                  {otpSent && (
+                    <>
+                      <Text style={styles.label}>Enter code</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="6-digit code"
+                        value={otp}
+                        onChangeText={setOtp}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                        textContentType="oneTimeCode"
+                        autoComplete="sms-otp"
+                      />
+                    </>
+                  )}
                 </>
               )}
             </View>
@@ -504,6 +536,11 @@ const styles = StyleSheet.create({
   otpSection: {
     gap: 8,
     marginTop: 8,
+  },
+  webPhoneHint: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    paddingVertical: 8,
   },
   secondaryButton: {
     backgroundColor: Colors.black,

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { X, CheckCircle, XCircle } from 'lucide-react-native';
@@ -13,8 +13,12 @@ export default function QRScannerScreen() {
   const scanLockedRef = useRef(false);
   const lastScanAtRef = useRef(0);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const { checkIn, subscription } = useApp();
-  const { isGuest } = useAuth();
+  const [isResolvingSubscription, setIsResolvingSubscription] = useState<boolean>(true);
+  const [subscriptionResolveError, setSubscriptionResolveError] = useState<string | null>(null);
+  const subscriptionResolveKeyRef = useRef<string | null>(null);
+  const { checkIn, subscription, refreshSubscription } = useApp();
+  const { isGuest, firebaseUser } = useAuth();
+  const SUBSCRIPTION_RESOLVE_TIMEOUT_MS = 12000;
 
   useEffect(() => {
     return () => {
@@ -22,14 +26,80 @@ export default function QRScannerScreen() {
     };
   }, []);
 
+  const resolveSubscriptionStatus = useCallback(async (): Promise<void> => {
+    if (isGuest) {
+      setSubscriptionResolveError(null);
+      setIsResolvingSubscription(false);
+      return;
+    }
+
+    setIsResolvingSubscription(true);
+    setSubscriptionResolveError(null);
+
+    const withTimeout = async (promise: Promise<unknown>, timeoutMs: number): Promise<void> => {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Subscription check timed out.')), timeoutMs);
+      });
+      try {
+        await Promise.race([promise, timeoutPromise]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
+    try {
+      await withTimeout(refreshSubscription(), SUBSCRIPTION_RESOLVE_TIMEOUT_MS);
+    } catch (error) {
+      console.warn('[QRScanner] Failed to refresh subscription, retrying once...', error);
+      try {
+        await withTimeout(refreshSubscription(), SUBSCRIPTION_RESOLVE_TIMEOUT_MS);
+      } catch (retryError) {
+        console.error('[QRScanner] Subscription refresh retry failed:', retryError);
+        setSubscriptionResolveError(
+          'Unable to verify subscription right now. Please check your connection and try again.'
+        );
+      }
+    } finally {
+      setIsResolvingSubscription(false);
+    }
+  }, [isGuest, refreshSubscription]);
+
+  useEffect(() => {
+    const resolveKey = `${isGuest ? 'guest' : 'member'}:${firebaseUser?.uid ?? 'none'}`;
+    if (subscriptionResolveKeyRef.current === resolveKey) return;
+    subscriptionResolveKeyRef.current = resolveKey;
+    void resolveSubscriptionStatus();
+  }, [isGuest, firebaseUser?.uid, resolveSubscriptionStatus]);
+
+  if (isResolvingSubscription) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.permissionContainer}>
+          <Text style={styles.permissionTitle}>Checking subscription...</Text>
+          <Text style={styles.permissionText}>Please wait while we validate your access.</Text>
+        </View>
+      </View>
+    );
+  }
+
   if (isGuest || !subscription) {
     return (
       <View style={styles.container}>
         <View style={styles.permissionContainer}>
           <Text style={styles.permissionTitle}>Subscription Required</Text>
           <Text style={styles.permissionText}>
-            You need an active subscription to use the QR scanner and check in to gyms.
+            {subscriptionResolveError ||
+              'You need an active subscription to use the QR scanner and check in to gyms.'}
           </Text>
+          {!isGuest && (
+            <TouchableOpacity
+              style={[styles.permissionButton, styles.retryButton]}
+              onPress={() => void resolveSubscriptionStatus()}
+            >
+              <Text style={styles.permissionButtonText}>Retry Check</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={styles.permissionButton}
             onPress={() => {
@@ -305,6 +375,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600' as const,
     color: Colors.text,
+  },
+  retryButton: {
+    marginBottom: 10,
+    backgroundColor: Colors.textSecondary,
   },
   resultOverlay: {
     ...StyleSheet.absoluteFillObject,

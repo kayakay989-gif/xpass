@@ -35,10 +35,11 @@ export const [AppProvider, useApp] = createContextHook(() => {
     { userId: userId as any },
     {
       enabled: !!userId,
-      staleTime: 30_000,
+      staleTime: 10_000,
       gcTime: 10 * 60_000,
-      retry: 1,
-      retryDelay: (attempt) => Math.min(800 * (attempt + 1), 4000),
+      retry: 2,
+      retryDelay: (attempt) => Math.min(500 * (attempt + 1), 1500),
+      refetchOnMount: 'always',
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
     }
@@ -157,7 +158,19 @@ export const [AppProvider, useApp] = createContextHook(() => {
 
   const refreshSubscription = useCallback(async (): Promise<void> => {
     if (!userId) return;
-    await subscriptionQuery.refetch();
+    const timeoutMs = 10000;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error(`Subscription refresh timed out after ${timeoutMs / 1000}s`)),
+        timeoutMs
+      );
+    });
+    try {
+      await Promise.race([subscriptionQuery.refetch(), timeoutPromise]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   }, [userId, subscriptionQuery]);
 
   const createSubscriptionMutation = trpc.subscriptions.create.useMutation({

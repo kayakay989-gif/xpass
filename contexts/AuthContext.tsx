@@ -36,6 +36,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
+import { nativeSignOut } from '@/lib/firebasePhoneNative';
 
 // Complete the auth session properly
 WebBrowser.maybeCompleteAuthSession();
@@ -788,6 +789,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   /** Native: call after Google.useAuthRequest succeeds (opens system browser / Custom Tabs). */
   const signInWithApple = useCallback(async (): Promise<void> => {
+    console.log('[AuthContext] Apple OAuth Init');
     if (Platform.OS !== 'ios') {
       throw new Error('Sign in with Apple is only available on iOS.');
     }
@@ -858,11 +860,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         await loadUserProfile(userCredential.user.uid, userCredential.user);
       }
     } catch (error: any) {
-      console.error('[AuthContext] signInWithApple error:', error);
+      console.error('[AuthContext] Apple Sign-In Error:', error?.code, error?.message);
       if (error.code === 'auth/account-exists-with-different-credential') {
         throw new Error(
           'An account already exists with this email. Please sign in with email/password or Google.'
         );
+      }
+      if (error.code === 'auth/invalid-credential') {
+        throw new Error('Apple sign-in credential is invalid. Please try again.');
       }
       if (error.code === 'auth/operation-not-allowed') {
         throw new Error(
@@ -933,6 +938,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const logout = useCallback(async (): Promise<void> => {
     try {
       console.log('[AuthContext] Logout');
+      await nativeSignOut();
       await signOut(auth);
       setUser(null);
       setFirebaseUser(null);

@@ -1,0 +1,60 @@
+# Codemagic CI/CD — https://docs.codemagic.io/yaml-basic-configuration/yaml-getting-started/
+#
+# Prerequisites (Codemagic → Environment variables, or an Environment group):
+#   EXPO_TOKEN — https://expo.dev/accounts/[your-account]/settings/access-tokens
+#
+# These workflows delegate native builds to EAS (Expo Application Services), same as local `eas build`.
+# Ensure Apple / Google credentials are configured in Expo (eas credentials) or linked App Store / Play Console in Codemagic if you add submit steps later.
+
+workflows:
+  xpass-android:
+    name: Xpass Android (EAS)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      node: 22.11.0
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: EAS Build — Android (AAB, store profile)
+        script: |
+          npx eas-cli@latest build --platform android --profile production --non-interactive
+
+  xpass-android-apk:
+    name: Xpass Android APK (EAS internal)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      node: 22.11.0
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: EAS Build — Android APK (production-apk profile)
+        script: |
+          npx eas-cli@latest build --platform android --profile production-apk --non-interactive
+
+  xpass-ios:
+    name: Xpass iOS (EAS)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      node: 22.11.0
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: EAS Build — iOS (production)
+        script: |
+          npx eas-cli@latest build --platform ios --profile production --non-interactive
+
+  # Minimal sample workflow (Codemagic “hello world”) — disable or remove if you only use EAS workflows above.
+  sample-workflow:
+    name: Codemagic Sample Workflow
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    scripts:
+      - name: Echo
+        script: |
+          echo "Configuration file is valid. Replace this workflow or use xpass-android / xpass-ios."

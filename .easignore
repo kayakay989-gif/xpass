@@ -1,0 +1,6 @@
+# Keep EAS upload small and avoid locked Gradle caches on Windows (EBUSY during tarball)
+android/.gradle/
+android/app/build/
+android/build/
+android/**/.cxx/
+**/build/

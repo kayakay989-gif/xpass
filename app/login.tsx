@@ -5,10 +5,20 @@ import { useEffect, useRef, useState } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
 import { ResponseType } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import { CheckSquare, ChevronLeft, Eye, EyeOff, Gift as GiftIcon, Lock, Mail, Square, User } from 'lucide-react-native';
 import {
+  CheckSquare,
+  ChevronLeft,
+  Eye,
+  EyeOff,
+  Gift as GiftIcon,
+  Lock,
+  Mail,
+  Square,
+  User,
+} from 'lucide-react-native';
+import {
+  GOOGLE_CONFIG,
   GOOGLE_ANDROID_CLIENT_ID,
-  GOOGLE_IOS_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
 } from '@/constants/googleOAuth';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
@@ -40,6 +50,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [appleAuthAvailable, setAppleAuthAvailable] = useState(false);
+  const [appleSignInUnavailableReason, setAppleSignInUnavailableReason] = useState<string>('');
   
   // Validation error states
   const [errors, setErrors] = useState<{
@@ -63,15 +74,22 @@ export default function LoginScreen() {
   WebBrowser.maybeCompleteAuthSession();
 
   const googleIdTokenHandledRef = useRef<string | null>(null);
+  const googleIosClientId = GOOGLE_CONFIG.iosClientId?.trim() || '';
+  const isGoogleClientConfigValid = Platform.OS !== 'ios' || !!googleIosClientId;
 
   // Native: authorization code + PKCE; library exchanges for tokens and surfaces id_token for Firebase.
+  console.log('Google OAuth Init');
+  console.log('Using iOS Client ID:', GOOGLE_CONFIG.iosClientId);
   const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
-    iosClientId: GOOGLE_IOS_CLIENT_ID,
+    iosClientId: googleIosClientId || undefined,
     webClientId: GOOGLE_WEB_CLIENT_ID,
     scopes: ['profile', 'email'],
     ...(Platform.OS !== 'web' ? { responseType: ResponseType.Code } : {}),
   });
+  const isGoogleButtonAvailable =
+    isGoogleClientConfigValid &&
+    (Platform.OS === 'web' ? true : !!googleAuthRequest);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -91,6 +109,7 @@ export default function LoginScreen() {
         scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
       } catch (e: any) {
         googleIdTokenHandledRef.current = null;
+        console.error('Google Sign-In Error:', e?.code, e?.message);
         Alert.alert('Error', e?.message || 'Google sign-in failed.');
         setIsLoading(false);
       }
@@ -100,7 +119,12 @@ export default function LoginScreen() {
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
-    void isAppleAuthAvailableAsync().then(setAppleAuthAvailable);
+    void isAppleAuthAvailableAsync().then((available) => {
+      setAppleAuthAvailable(available);
+      if (!available) {
+        setAppleSignInUnavailableReason('Apple Sign-In currently unavailable');
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -358,6 +382,10 @@ export default function LoginScreen() {
   };
 
   const handleGoogleLogin = async () => {
+    if (!isGoogleButtonAvailable) {
+      Alert.alert('Google Sign-In currently unavailable');
+      return;
+    }
     if (Platform.OS === 'web') {
       setIsLoading(true);
       let willNavigate = false;
@@ -369,7 +397,7 @@ export default function LoginScreen() {
         scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
         willNavigate = true;
       } catch (error: any) {
-        console.error('Google login error:', error);
+        console.error('Google Sign-In Error:', error?.code, error?.message);
         let errorMessage = 'Google sign-in failed. Please try again.';
         if (error.message) {
           errorMessage = error.message;
@@ -405,7 +433,7 @@ export default function LoginScreen() {
     } catch (error: any) {
       const msg = error?.message || '';
       if (!msg.toLowerCase().includes('cancel')) {
-        console.error('Google login error:', error);
+        console.error('Google Sign-In Error:', error?.code, error?.message);
         Alert.alert('Error', msg || 'Google sign-in failed. Please try again.');
       }
     } finally {
@@ -423,8 +451,12 @@ export default function LoginScreen() {
       await signInWithApple();
         scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
     } catch (error: any) {
+      console.error('Apple Sign-In Error:', error?.code, error?.message);
       if (error?.message === 'SIGN_IN_CANCELLED') {
         return;
+      }
+      if (error?.code === 'auth/operation-not-allowed' || String(error?.message || '').toLowerCase().includes('not enabled')) {
+        setAppleSignInUnavailableReason('Apple Sign-In currently unavailable');
       }
       const msg = error?.message || 'Apple sign-in failed.';
       Alert.alert('Error', msg);
@@ -693,7 +725,7 @@ export default function LoginScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            {Platform.OS === 'ios' && appleAuthAvailable && (
+            {Platform.OS === 'ios' && appleAuthAvailable && !appleSignInUnavailableReason && (
               <View
                 style={[styles.appleButtonWrap, isLoading && styles.appleButtonWrapDisabled]}
                 pointerEvents={isLoading ? 'none' : 'auto'}
@@ -713,15 +745,28 @@ export default function LoginScreen() {
                 />
               </View>
             )}
+            {Platform.OS === 'ios' && (!!appleSignInUnavailableReason || !appleAuthAvailable) && (
+              <View style={[styles.googleButton, styles.googleButtonUnavailable]}>
+                <Text style={styles.googleButtonTextMuted}>
+                  {appleSignInUnavailableReason || 'Apple Sign-In currently unavailable'}
+                </Text>
+              </View>
+            )}
 
-            <TouchableOpacity 
-              style={styles.googleButton}
-              onPress={handleGoogleLogin}
-              disabled={isLoading || (Platform.OS !== 'web' && !googleAuthRequest)}
-            >
-              <Text style={styles.googleIcon}>G</Text>
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
-            </TouchableOpacity>
+            {isGoogleButtonAvailable ? (
+              <TouchableOpacity 
+                style={styles.googleButton}
+                onPress={handleGoogleLogin}
+                disabled={isLoading}
+              >
+                <Text style={styles.googleIcon}>G</Text>
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.googleButton, styles.googleButtonUnavailable]}>
+                <Text style={styles.googleButtonTextMuted}>Google Sign-In currently unavailable</Text>
+              </View>
+            )}
 
             <View style={styles.toggleContainer}>
               <TouchableOpacity onPress={() => {
@@ -909,6 +954,9 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     marginBottom: 24,
   },
+  googleButtonUnavailable: {
+    opacity: 0.6,
+  },
   googleIcon: {
     fontSize: 18,
     fontWeight: '700' as const,
@@ -918,6 +966,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600' as const,
     color: Colors.text,
+  },
+  googleButtonTextMuted: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.textSecondary,
   },
   toggleContainer: {
     alignItems: 'center',
