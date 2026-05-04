@@ -61,6 +61,7 @@ export const firestoreUsers = {
       walletBalance: data.walletBalance || 0,
       createdAt: timestampToDate(data.createdAt),
       savedCards: savedCards,
+      ...(typeof data.photoUrl === 'string' && data.photoUrl.trim() ? { photoUrl: data.photoUrl.trim() } : {}),
     };
   },
 
@@ -93,6 +94,7 @@ export const firestoreUsers = {
         referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
         walletBalance: data.walletBalance || 0,
         createdAt: timestampToDate(data.createdAt),
+        ...(typeof data.photoUrl === 'string' && data.photoUrl.trim() ? { photoUrl: data.photoUrl.trim() } : {}),
         // Optional admin fields (used by the admin dashboard for filtering)
         // Kept flexible so we don't depend on a strict User type including them.
         ...(typeof (data as any).status === 'string' && { status: (data as any).status }),

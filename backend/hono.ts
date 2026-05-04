@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import { firestorePayments } from "./lib/firestore-admin";
+import { runSubscriptionExpiryEmailJob } from "./lib/subscription-expiry-emails";
 
 const app = new Hono();
 
@@ -127,6 +128,23 @@ app.all("/api/3ds/callback", async (c) => {
     </html>
   `;
   return c.html(html);
+});
+
+/** Optional HTTP cron for hosted schedulers (Render, GitHub Actions). Set CRON_SECRET and pass ?secret= or x-cron-secret. */
+app.get("/api/cron/subscription-emails", async (c) => {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (secret) {
+    const q = c.req.query("secret");
+    const header = c.req.header("x-cron-secret");
+    const auth = c.req.header("authorization");
+    const bearer =
+      auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length).trim() : "";
+    if (q !== secret && header !== secret && bearer !== secret) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+  }
+  const result = await runSubscriptionExpiryEmailJob();
+  return c.json({ ok: true, ...result });
 });
 
 app.all("*", (c) => {

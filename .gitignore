@@ -47,6 +47,7 @@ backend/service-account-key.json
 
 # Firebase / Google
 .firebase/
+**/client_secret*.json
 
 # typescript
 *.tsbuildinfo

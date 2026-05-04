@@ -11,6 +11,8 @@ import subscriptionsCreate from "./routes/subscriptions/create/route";
 import subscriptionsCancel from "./routes/subscriptions/cancel/route";
 import usersGet from "./routes/users/get/route";
 import usersUpdateWallet from "./routes/users/updateWallet/route";
+import usersNotifyWelcome from "./routes/users/notifyWelcome/route";
+import usersApplyReferralCode from "./routes/users/applyReferralCode/route";
 import paymentsInitiate3ds from "./routes/payments/initiate3ds/route";
 import paymentsAuthenticate3ds from "./routes/payments/authenticate3ds/route";
 import paymentsPayWith3ds from "./routes/payments/payWith3ds/route";
@@ -61,6 +63,8 @@ const subscriptionsRouter = createTRPCRouter({
 const usersRouter = createTRPCRouter({
   get: usersGet,
   updateWallet: usersUpdateWallet,
+  notifyWelcome: usersNotifyWelcome,
+  applyReferralCode: usersApplyReferralCode,
 });
 
 const paymentsRouter = createTRPCRouter({

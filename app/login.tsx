@@ -20,11 +20,14 @@ import {
   GOOGLE_CONFIG,
   GOOGLE_ANDROID_CLIENT_ID,
   GOOGLE_WEB_CLIENT_ID,
+  getGoogleNativeOAuthRedirectUri,
 } from '@/constants/googleOAuth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { trpc } from '@/lib/trpc';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
 import { agentLog } from '@/lib/agent-debug-log';
 import Colors from '@/constants/colors';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, PENDING_REFERRAL_STORAGE_KEY } from '@/contexts/AuthContext';
 import Toast from '@/components/Toast';
 import {
   AppleAuthenticationButton,
@@ -38,6 +41,7 @@ type AuthMode = 'login' | 'signup';
 export default function LoginScreen() {
   const router = useRouter();
   const { loginWithEmail, signUpWithEmail, loginWithGoogle, signInWithGoogleIdToken, signInWithApple, logout, isAdmin, stayLoggedInEnabled, setStayLoggedInEnabled } = useAuth();
+  const applyReferralMutation = trpc.users.applyReferralCode.useMutation();
   const params = useLocalSearchParams<{ mode?: string; ref?: string }>();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<AuthMode>('login');
@@ -80,12 +84,16 @@ export default function LoginScreen() {
   // Native: authorization code + PKCE; library exchanges for tokens and surfaces id_token for Firebase.
   console.log('Google OAuth Init');
   console.log('Using iOS Client ID:', GOOGLE_CONFIG.iosClientId);
+  // Use Google's reversed-client scheme directly. makeRedirectUri({ native }) only applies that
+  // value in Standalone/Bare; other environments would fall back to the app scheme and break OAuth.
+  const googleOAuthRedirectUri = getGoogleNativeOAuthRedirectUri();
   const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
     iosClientId: googleIosClientId || undefined,
     webClientId: GOOGLE_WEB_CLIENT_ID,
     scopes: ['profile', 'email'],
     ...(Platform.OS !== 'web' ? { responseType: ResponseType.Code } : {}),
+    ...(googleOAuthRedirectUri ? { redirectUri: googleOAuthRedirectUri } : {}),
   });
   const isGoogleButtonAvailable =
     isGoogleClientConfigValid &&
@@ -102,7 +110,35 @@ export default function LoginScreen() {
     (async () => {
       try {
         setIsLoading(true);
-        await signInWithGoogleIdToken(idToken);
+        await signInWithGoogleIdToken(idToken, {
+          referralCode: referral.trim() || undefined,
+        });
+        const refTrim = referral.trim();
+        if (refTrim) {
+          let linkedOk = false;
+          for (let attempt = 0; attempt < 8; attempt++) {
+            try {
+              const res = await applyReferralMutation.mutateAsync({ code: refTrim });
+              if (res.ok) {
+                linkedOk = true;
+                break;
+              }
+              if (!res.ok && res.reason === 'no_profile' && attempt < 7) {
+                await new Promise((r) => setTimeout(r, 450 + attempt * 120));
+                continue;
+              }
+              break;
+            } catch (refErr) {
+              console.warn('[Login] applyReferralCode after Google attempt', attempt + 1, refErr);
+              if (attempt < 7) {
+                await new Promise((r) => setTimeout(r, 450 + attempt * 120));
+              }
+            }
+          }
+          if (!linkedOk) {
+            await AsyncStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, refTrim.toUpperCase());
+          }
+        }
         // #region agent log
         agentLog('H1', 'login.tsx:googleNative', 'schedule_auth_nav', { target: '/home' });
         // #endregion
@@ -115,7 +151,7 @@ export default function LoginScreen() {
       }
       /* Keep spinner until login unmounts on successful nav — avoids blank/404 flash */
     })();
-  }, [googleResponse, signInWithGoogleIdToken, router]);
+  }, [googleResponse, signInWithGoogleIdToken, router, referral, applyReferralMutation]);
 
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
@@ -131,7 +167,10 @@ export default function LoginScreen() {
     const m = typeof params.mode === 'string' ? params.mode.trim().toLowerCase() : '';
     const r = typeof params.ref === 'string' ? params.ref.trim().toUpperCase() : '';
     if (m === 'signup') setMode('signup');
-    if (r) setReferral(r);
+    if (r) {
+      setReferral(r);
+      void AsyncStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, r);
+    }
   }, [params.mode, params.ref]);
 
   const validateEmailFormat = (value: string): boolean => {
@@ -248,6 +287,33 @@ export default function LoginScreen() {
         referral.trim() || undefined, 
         ageNum
       );
+
+      const refTrim = referral.trim();
+      if (refTrim) {
+        let linkedOk = false;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          try {
+            const res = await applyReferralMutation.mutateAsync({ code: refTrim });
+            if (res.ok) {
+              linkedOk = true;
+              break;
+            }
+            if (!res.ok && res.reason === 'no_profile' && attempt < 7) {
+              await new Promise((r) => setTimeout(r, 450 + attempt * 120));
+              continue;
+            }
+            break;
+          } catch (refErr) {
+            console.warn('[Login] applyReferralCode attempt', attempt + 1, refErr);
+            if (attempt < 7) {
+              await new Promise((r) => setTimeout(r, 450 + attempt * 120));
+            }
+          }
+        }
+        if (!linkedOk) {
+          await AsyncStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, refTrim.toUpperCase());
+        }
+      }
 
       console.log('[Login] Signup successful - showing success and redirecting');
       
@@ -448,7 +514,9 @@ export default function LoginScreen() {
     if (Platform.OS !== 'ios' || isLoading) return;
     setIsLoading(true);
     try {
-      await signInWithApple();
+      await signInWithApple({
+        referralCode: referral.trim() || undefined,
+      });
         scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
     } catch (error: any) {
       console.error('Apple Sign-In Error:', error?.code, error?.message);

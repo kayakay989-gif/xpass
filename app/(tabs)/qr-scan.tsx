@@ -1,7 +1,9 @@
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { CheckCircle, XCircle } from 'lucide-react-native';
 
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,21 +13,51 @@ import { agentLog } from '@/lib/agent-debug-log';
 export default function QRScanScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanMessage, setScanMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [feedbackModal, setFeedbackModal] = useState<{
+    visible: boolean;
+    success: boolean;
+    text: string;
+  }>({ visible: false, success: false, text: '' });
   const [isResolvingSubscription, setIsResolvingSubscription] = useState<boolean>(true);
   const [subscriptionResolveError, setSubscriptionResolveError] = useState<string | null>(null);
   const scanLockedRef = useRef(false);
   const lastScanAtRef = useRef(0);
   const subscriptionResolveKeyRef = useRef<string | null>(null);
+  const timerIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const isFocused = useIsFocused();
+  const isFocusedRef = useRef(isFocused);
+  isFocusedRef.current = isFocused;
   const { checkIn, subscription, refreshSubscription } = useApp();
   const { isGuest, firebaseUser } = useAuth();
   const SUBSCRIPTION_RESOLVE_TIMEOUT_MS = 12000;
 
+  const clearScanTimersAndModal = useCallback(() => {
+    timerIdsRef.current.forEach(clearTimeout);
+    timerIdsRef.current = [];
+    setFeedbackModal({ visible: false, success: false, text: '' });
+    scanLockedRef.current = false;
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        clearScanTimersAndModal();
+      };
+    }, [clearScanTimersAndModal])
+  );
+
   useEffect(() => {
-    // Unlock scanner when screen unmounts
     return () => {
-      scanLockedRef.current = false;
+      clearScanTimersAndModal();
     };
+  }, [clearScanTimersAndModal]);
+
+  const safeSetTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timerIdsRef.current = timerIdsRef.current.filter((t) => t !== id);
+      fn();
+    }, ms);
+    timerIdsRef.current.push(id);
   }, []);
 
   const resolveSubscriptionStatus = useCallback(async (): Promise<void> => {
@@ -140,6 +172,7 @@ export default function QRScanScreen() {
   }
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
+    if (!isFocusedRef.current) return;
     const now = Date.now();
     if (scanLockedRef.current || now - lastScanAtRef.current < 2500) return;
     lastScanAtRef.current = now;
@@ -165,60 +198,119 @@ export default function QRScanScreen() {
 
     if (!gymId || gymId.trim() === '') {
       console.error('[QRScan] Invalid QR format:', data);
-      setScanMessage({ success: false, text: 'Invalid QR code. Please scan a valid gym QR code.' });
-      setTimeout(() => setScanMessage(null), 2500);
-      scanLockedRef.current = false;
+      setFeedbackModal({
+        visible: true,
+        success: false,
+        text: 'Invalid QR code. Please scan a valid gym QR code.',
+      });
+      safeSetTimeout(() => {
+        setFeedbackModal({ visible: false, success: false, text: '' });
+        scanLockedRef.current = false;
+      }, 3500);
       return;
     }
 
     const checkInResult = await checkIn(gymId);
+    if (!isFocusedRef.current) {
+      scanLockedRef.current = false;
+      return;
+    }
+
     console.log('[QRScan] Check-in result:', checkInResult);
-    setScanMessage({
-      success: checkInResult.success,
-      text: checkInResult.message || (checkInResult.success ? 'Check-in successful!' : 'Check-in unsuccessful'),
+    if (checkInResult.success) {
+      setFeedbackModal({ visible: true, success: true, text: 'Check in successful' });
+      safeSetTimeout(() => {
+        setFeedbackModal({ visible: false, success: false, text: '' });
+        scanLockedRef.current = false;
+        if (isFocusedRef.current) {
+          router.replace('/(tabs)/home');
+        }
+      }, 2000);
+      return;
+    }
+
+    setFeedbackModal({
+      visible: true,
+      success: false,
+      text: checkInResult.message || 'Check-in could not be completed.',
     });
-    setTimeout(() => setScanMessage(null), 2500);
-    scanLockedRef.current = false;
+    safeSetTimeout(() => {
+      setFeedbackModal({ visible: false, success: false, text: '' });
+      scanLockedRef.current = false;
+    }, 4000);
   };
 
   return (
     <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing={'back' as CameraType}
-        onBarcodeScanned={handleBarCodeScanned}
-        barcodeScannerSettings={{
-          barcodeTypes: ['qr'],
+      {isFocused ? (
+        <CameraView
+          style={styles.camera}
+          facing={'back' as CameraType}
+          onBarcodeScanned={handleBarCodeScanned}
+          barcodeScannerSettings={{
+            barcodeTypes: ['qr'],
+          }}
+        >
+          <View style={styles.overlay}>
+            <View style={styles.topOverlay} />
+            <View style={styles.middleRow}>
+              <View style={styles.sideOverlay} />
+              <View style={styles.scanArea}>
+                <View style={[styles.corner, styles.topLeft]} />
+                <View style={[styles.corner, styles.topRight]} />
+                <View style={[styles.corner, styles.bottomLeft]} />
+                <View style={[styles.corner, styles.bottomRight]} />
+              </View>
+              <View style={styles.sideOverlay} />
+            </View>
+            <View style={styles.bottomOverlay}>
+              <Text style={styles.instructionText}>
+                Position the QR code within the frame
+              </Text>
+            </View>
+          </View>
+        </CameraView>
+      ) : (
+        <View style={[styles.camera, styles.cameraInactive]} />
+      )}
+
+      <Modal
+        visible={feedbackModal.visible && isFocused}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!feedbackModal.success) {
+            setFeedbackModal({ visible: false, success: false, text: '' });
+            scanLockedRef.current = false;
+          }
         }}
       >
-        <View style={styles.overlay}>
-          <View style={styles.topOverlay} />
-          <View style={styles.middleRow}>
-            <View style={styles.sideOverlay} />
-            <View style={styles.scanArea}>
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
-            </View>
-            <View style={styles.sideOverlay} />
-          </View>
-          <View style={styles.bottomOverlay}>
-            <Text style={styles.instructionText}>
-              Position the QR code within the frame
-            </Text>
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.modalBackdropFill}
+            onPress={() => {
+              if (!feedbackModal.success) {
+                setFeedbackModal({ visible: false, success: false, text: '' });
+                scanLockedRef.current = false;
+              }
+            }}
+            accessibilityLabel="Close message"
+          />
+          <View
+            style={[
+              styles.modalCard,
+              feedbackModal.success ? styles.modalCardSuccess : styles.modalCardError,
+            ]}
+          >
+            {feedbackModal.success ? (
+              <CheckCircle size={56} color={Colors.success} />
+            ) : (
+              <XCircle size={56} color={Colors.error} />
+            )}
+            <Text style={styles.modalText}>{feedbackModal.text}</Text>
           </View>
         </View>
-        {scanMessage && (
-          <View style={styles.resultBanner}>
-            <Text style={[styles.resultBannerText, scanMessage.success ? styles.successText : styles.errorText]}>
-              {scanMessage.text}
-            </Text>
-          </View>
-        )}
-
-
-      </CameraView>
+      </Modal>
     </View>
   );
 }
@@ -230,6 +322,9 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  cameraInactive: {
+    backgroundColor: Colors.background,
   },
   overlay: {
     flex: 1,
@@ -293,26 +388,41 @@ const styles = StyleSheet.create({
     color: Colors.white,
     textAlign: 'center',
   },
-  resultBanner: {
-    position: 'absolute',
-    bottom: 120,
-    left: 16,
-    right: 16,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  resultBannerText: {
-    textAlign: 'center',
-    fontSize: 14,
+  modalBackdropFill: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  modalCard: {
+    zIndex: 1,
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    maxWidth: 340,
+    width: '100%',
+  },
+  modalCardSuccess: {
+    borderWidth: 2,
+    borderColor: Colors.success,
+  },
+  modalCardError: {
+    borderWidth: 2,
+    borderColor: Colors.error,
+  },
+  modalText: {
+    marginTop: 16,
+    fontSize: 17,
     fontWeight: '600' as const,
-  },
-  successText: {
-    color: '#4ADE80',
-  },
-  errorText: {
-    color: '#FCA5A5',
+    color: Colors.text,
+    textAlign: 'center',
+    lineHeight: 24,
   },
   permissionContainer: {
     flex: 1,

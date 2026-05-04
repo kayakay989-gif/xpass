@@ -1,0 +1,45 @@
+Xpass — One keystore, one set of SHAs (Expo = Firebase = Google Cloud)
+=====================================================================
+
+Goal: EAS signs the APK with keystore K. Every service must register K’s SHA-1 and SHA-2.
+
+Source of truth
+---------------
+- SHA-1 and SHA-2 for release/internal APKs: Expo → Project → Credentials → Android
+  (the default / active upload keystore for com.xpass.unique).
+- Do NOT mix in a different keystore’s SHAs (e.g. old debug PC key) for the build you install.
+
+1) Expo (EAS)
+-------------
+- expo.dev → your project → Credentials → Android.
+- Copy SHA-1 and SHA-256 from the keystore that signs your EAS builds.
+- Package / application id must be: com.xpass.unique (matches app.json + android/app/build.gradle).
+
+2) Firebase Console
+--------------------
+- Project settings → Your apps → Android app com.xpass.unique.
+- SHA certificate fingerprints: add exactly the SAME SHA-1 and SHA-256 as Expo (step 1).
+- Remove duplicate/conflicting fingerprints if Firebase warns (same SHA on two apps).
+- Download google-services.json → replace android/app/google-services.json (and repo root copy if used).
+- Verify JSON: under com.xpass.unique, oauth_client should include client_type 1 (Android) with certificate_hash = SHA-1 without colons.
+
+3) Google Cloud Console (same GCP project as Firebase: xpass-rork-1e6ad)
+------------------------------------------------------------------------
+- APIs & Services → Credentials.
+- Android OAuth client: package com.xpass.unique + SHA-1 = same as Expo/Firebase (one line).
+- If “already in use”: that pair exists — edit existing client; do not create duplicates.
+- Web / iOS clients unchanged unless you rotate OAuth branding.
+
+4) App code / Expo env
+----------------------
+- android/package: com.xpass.unique (already aligned).
+- constants/googleOAuth.ts — Android OAuth client id must match the Android client in google-services.json after download.
+- EAS env EXPO_PUBLIC_* only if you override client IDs in eas.json.
+
+5) Rebuild
+----------
+- eas build --platform android (your profile). Install only builds signed by the keystore from step 1.
+
+SMS / Phone Auth
+----------------
+- Stays Firebase Phone Auth (SMS). Alignment above fixes Play Integrity / missing-client-identifier.

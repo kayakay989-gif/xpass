@@ -1,4 +1,5 @@
 import { InteractionManager, Platform } from 'react-native';
+import { router } from 'expo-router';
 import { agentLog } from '@/lib/agent-debug-log';
 
 /**
@@ -24,6 +25,12 @@ export function scheduleAuthNavigation(replace: (href: string) => void, href: st
   // #endregion
 
   const run = () => {
+    try {
+      router.dismissAll();
+    } catch (e) {
+      console.warn('[scheduleAuthNavigation] dismissAll skipped:', e);
+    }
+
     const tryCandidate = (index: number) => {
       const target = hrefCandidates[index];
       if (!target) return;

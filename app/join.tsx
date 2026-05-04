@@ -1,7 +1,9 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Colors from '@/constants/colors';
+import { PENDING_REFERRAL_STORAGE_KEY } from '@/contexts/AuthContext';
 
 export default function JoinScreen() {
   const router = useRouter();
@@ -14,9 +16,13 @@ export default function JoinScreen() {
   const [referral, setReferral] = useState(initialRef);
 
   const goToSignup = () => {
+    const code = referral.trim().toUpperCase();
+    if (code) {
+      void AsyncStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, code);
+    }
     router.push({
       pathname: '/login',
-      params: { mode: 'signup', ref: referral.trim().toUpperCase() },
+      params: { mode: 'signup', ref: code },
     } as any);
   };
 

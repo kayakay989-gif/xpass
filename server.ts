@@ -12,6 +12,7 @@ if (fs.existsSync('.env.local')) {
 
 import app from './backend/hono';
 import { applyDailyMissedCheckInCreditDeduction } from './backend/lib/credits';
+import { runSubscriptionExpiryEmailJob } from './backend/lib/subscription-expiry-emails';
 
 const port = Number(process.env.PORT || 3000);
 
@@ -41,5 +42,18 @@ const maybeRunDailyCreditsJob = async () => {
 void maybeRunDailyCreditsJob();
 setInterval(() => {
   void maybeRunDailyCreditsJob();
+}, 60 * 60 * 1000);
+
+const runExpiryEmails = async () => {
+  try {
+    await runSubscriptionExpiryEmailJob();
+  } catch (error) {
+    console.error('[SubscriptionEmailJob] Failed:', error);
+  }
+};
+
+void runExpiryEmails();
+setInterval(() => {
+  void runExpiryEmails();
 }, 60 * 60 * 1000);
 

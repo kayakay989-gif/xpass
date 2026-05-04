@@ -3,7 +3,7 @@ import { protectedProcedure } from '@/backend/trpc/create-context';
 import { payWithAuthentication, computeAmount } from '@/backend/lib/mastercard';
 import { Subscription } from '@/types';
 import { firestorePayments, firestoreSubscriptions, firestoreCoupons, firestoreUsers, firestoreWalletTransactions } from '@/backend/lib/firestore-admin';
-import { awardReferralRewardAfterPaidSubscription } from '@/backend/lib/referrals';
+import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 
 export default protectedProcedure
@@ -179,14 +179,13 @@ export default protectedProcedure
         await firestoreCoupons.incrementUsage(couponId);
       }
 
-      // Referral reward is only valid after a successful PAID subscription.
-      if (finalAmount > 0) {
-        await awardReferralRewardAfterPaidSubscription({
-          referredUserId: input.userId,
-          subscriptionId: subscription.id,
-          referredUserName: currentUser?.name,
-        });
-      }
+      console.log('CALLING referral reward for:', input.userId, subscription.id);
+      await runReferralRewardAfterSubscriptionSuccess({
+        payerUserId: input.userId,
+        subscriptionId: subscription.id,
+        subscriptionIsActive: subscription.isActive === true,
+        referredUserName: currentUser?.name,
+      });
 
       try {
         await sendSubscriptionSuccessEmail({
@@ -348,14 +347,13 @@ export default protectedProcedure
       await firestoreCoupons.incrementUsage(couponId);
     }
 
-    // Referral reward is only valid after a successful PAID subscription.
-    if (finalAmount > 0) {
-      await awardReferralRewardAfterPaidSubscription({
-        referredUserId: input.userId,
-        subscriptionId: subscription.id,
-        referredUserName: currentUser?.name,
-      });
-    }
+    console.log('CALLING referral reward for:', input.userId, subscription.id);
+    await runReferralRewardAfterSubscriptionSuccess({
+      payerUserId: input.userId,
+      subscriptionId: subscription.id,
+      subscriptionIsActive: subscription.isActive === true,
+      referredUserName: currentUser?.name,
+    });
 
     try {
       await sendSubscriptionSuccessEmail({

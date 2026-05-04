@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { protectedProcedure } from '@/backend/trpc/create-context';
+import { TRPCError } from '@trpc/server';
 import { firestoreSubscriptions, firestoreCheckIns, firestoreGyms } from '@/backend/lib/firestore-admin';
 import { CheckIn, SubscriptionTier } from '@/types';
 import { randomUUID } from 'crypto';
@@ -31,45 +32,63 @@ export default protectedProcedure
     
     if (ctx.user?.uid !== input.userId) {
       console.error('[CheckIn] Unauthorized: user mismatch');
-      throw new Error('Unauthorized');
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Unauthorized' });
     }
 
     // Validate user has active subscription
     const subscription = await firestoreSubscriptions.getByUserId(input.userId);
     if (!subscription) {
       console.error('[CheckIn] No subscription found for user:', input.userId);
-      throw new Error('No active subscription found. Please subscribe to check in.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'No active subscription found. Please subscribe to check in.',
+      });
     }
     
     if (!subscription.isActive) {
       console.error('[CheckIn] Subscription is not active:', subscription.id);
-      throw new Error('Your subscription is not active. Please renew your subscription.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Your subscription is not active. Please renew your subscription.',
+      });
     }
 
     // Check if subscription has expired
     if (subscription.endDate < new Date()) {
       console.error('[CheckIn] Subscription expired:', subscription.endDate);
-      throw new Error('Your subscription has expired. Please renew your subscription.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Your subscription has expired. Please renew your subscription.',
+      });
     }
 
     // Check monthly visit limit
     if (subscription.visitsUsed >= subscription.maxVisitsPerMonth) {
       console.error('[CheckIn] Monthly visit limit reached:', { used: subscription.visitsUsed, max: subscription.maxVisitsPerMonth });
-      throw new Error('Monthly visit limit reached. Your limit resets next month.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Monthly visit limit reached. Your limit resets next month.',
+      });
     }
 
     // Daily policy: only one gym check-in per calendar day (regardless of gym).
     const todayCheckIn = await firestoreCheckIns.getTodayCheckIn(input.userId);
     if (todayCheckIn) {
       console.error('[CheckIn] Daily check-in limit reached');
-      throw new Error('Check In Daily Limit Reached, Limit Resets On the Next Calendar Day');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You have checked in once today. Check back tomorrow.',
+      });
     }
 
     // Validate gym exists
     const gym = await firestoreGyms.getById(input.gymId);
     if (!gym) {
       console.error('[CheckIn] Gym not found:', input.gymId);
-      throw new Error('Gym not found. Please scan a valid QR code.');
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'Gym not found. Please scan a valid QR code.',
+      });
     }
 
     console.log('[CheckIn] Gym found:', { gymId: gym.id, gymName: gym.name, category: gym.category });
@@ -88,7 +107,10 @@ export default protectedProcedure
 
     if (userTierLevel < gymTierLevel) {
       console.error('[CheckIn] Tier mismatch:', { userTier: subscription.tier, gymTier });
-      throw new Error(`Your current plan (${subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1)}) does not include this gym. Please upgrade your subscription to access ${gymTier.charAt(0).toUpperCase() + gymTier.slice(1)} tier gyms.`);
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Your current plan (${subscription.tier.charAt(0).toUpperCase() + subscription.tier.slice(1)}) does not include this gym. Please upgrade your subscription to access ${gymTier.charAt(0).toUpperCase() + gymTier.slice(1)} tier gyms.`,
+      });
     }
 
     // Get gym's pricePerVisit for payout calculation

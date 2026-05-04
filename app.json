@@ -7,7 +7,8 @@
     "icon": "./assets/images/icon.png",
     "scheme": [
       "xpass",
-      "com.googleusercontent.apps.40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie"
+      "com.googleusercontent.apps.40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie",
+      "com.googleusercontent.apps.40764236173-bb7qk1245ec2sgn1g02v9had3l9p1flj"
     ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -86,6 +87,30 @@
           "data": [
             {
               "scheme": "com.xpass.unique"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "com.googleusercontent.apps.40764236173-bb7qk1245ec2sgn1g02v9had3l9p1flj"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "com.googleusercontent.apps.40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie"
             }
           ]
         },

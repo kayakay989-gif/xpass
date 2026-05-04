@@ -2,10 +2,12 @@ import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { X, CheckCircle, XCircle } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
+import { getCheckInUserMessage } from '@/lib/check-in-errors';
 
 export default function QRScannerScreen() {
   const router = useRouter();
@@ -16,14 +18,41 @@ export default function QRScannerScreen() {
   const [isResolvingSubscription, setIsResolvingSubscription] = useState<boolean>(true);
   const [subscriptionResolveError, setSubscriptionResolveError] = useState<string | null>(null);
   const subscriptionResolveKeyRef = useRef<string | null>(null);
+  const timerIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const isFocused = useIsFocused();
+  const isFocusedRef = useRef(isFocused);
+  isFocusedRef.current = isFocused;
   const { checkIn, subscription, refreshSubscription } = useApp();
   const { isGuest, firebaseUser } = useAuth();
   const SUBSCRIPTION_RESOLVE_TIMEOUT_MS = 12000;
 
+  const clearScanTimersAndResult = useCallback(() => {
+    timerIdsRef.current.forEach(clearTimeout);
+    timerIdsRef.current = [];
+    setResult(null);
+    scanLockedRef.current = false;
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        clearScanTimersAndResult();
+      };
+    }, [clearScanTimersAndResult])
+  );
+
   useEffect(() => {
     return () => {
-      scanLockedRef.current = false;
+      clearScanTimersAndResult();
     };
+  }, [clearScanTimersAndResult]);
+
+  const safeSetTimeout = useCallback((fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timerIdsRef.current = timerIdsRef.current.filter((t) => t !== id);
+      fn();
+    }, ms);
+    timerIdsRef.current.push(id);
   }, []);
 
   const resolveSubscriptionStatus = useCallback(async (): Promise<void> => {
@@ -138,6 +167,7 @@ export default function QRScannerScreen() {
   }
 
   const handleBarCodeScanned = async ({ data }: { data: string }): Promise<void> => {
+    if (!isFocusedRef.current) return;
     // Prevent multiple executions from rapid duplicate events
     const now = Date.now();
     if (scanLockedRef.current || now - lastScanAtRef.current < 2500) return;
@@ -170,7 +200,7 @@ export default function QRScannerScreen() {
         success: false, 
         message: 'Invalid QR code. Please scan a valid gym QR code.' 
       });
-      setTimeout(() => {
+      safeSetTimeout(() => {
         setResult(null);
         scanLockedRef.current = false;
       }, 3000);
@@ -181,27 +211,38 @@ export default function QRScannerScreen() {
     
     try {
       const checkInResult = await checkIn(gymId);
+      if (!isFocusedRef.current) {
+        scanLockedRef.current = false;
+        return;
+      }
+
       console.log('[QRScanner] Check-in result:', checkInResult);
       
       setResult(checkInResult);
       
-      setTimeout(() => {
+      safeSetTimeout(() => {
         if (checkInResult.success) {
           scanLockedRef.current = false;
           setResult(null);
+          if (isFocusedRef.current) {
+            router.replace('/(tabs)/home');
+          }
         } else {
-          // Allow retry only on failure
           scanLockedRef.current = false;
           setResult(null);
         }
       }, 2000);
     } catch (error: any) {
       console.error('[QRScanner] Check-in error:', error);
+      if (!isFocusedRef.current) {
+        scanLockedRef.current = false;
+        return;
+      }
       setResult({ 
         success: false, 
-        message: error?.message || 'Check-in failed. Please try again.' 
+        message: getCheckInUserMessage(error),
       });
-      setTimeout(() => {
+      safeSetTimeout(() => {
         scanLockedRef.current = false;
         setResult(null);
       }, 2000);
@@ -210,6 +251,7 @@ export default function QRScannerScreen() {
 
   return (
     <View style={styles.container}>
+      {isFocused ? (
       <CameraView
         style={styles.camera}
         facing={'back' as CameraType}
@@ -237,7 +279,7 @@ export default function QRScannerScreen() {
           </View>
         </View>
 
-        {result && (
+        {result && isFocused && (
           <View style={styles.resultOverlay}>
             <View style={[
               styles.resultCard,
@@ -253,6 +295,9 @@ export default function QRScannerScreen() {
           </View>
         )}
       </CameraView>
+      ) : (
+        <View style={[styles.camera, styles.cameraInactive]} />
+      )}
 
       <TouchableOpacity 
         style={styles.closeButton}
@@ -271,6 +316,9 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  cameraInactive: {
+    backgroundColor: Colors.background,
   },
   overlay: {
     flex: 1,

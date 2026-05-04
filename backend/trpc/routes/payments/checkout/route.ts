@@ -10,7 +10,7 @@ import {
   firestoreUsers, 
   firestoreWalletTransactions 
 } from '@/backend/lib/firestore-admin';
-import { awardReferralRewardAfterPaidSubscription } from '@/backend/lib/referrals';
+import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { payWithToken, payWithCard, payWithAuthentication, initiateAuthentication, authenticatePayer } from '@/backend/lib/mastercard';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 
@@ -661,14 +661,13 @@ export default protectedProcedure
 
       await firestoreSubscriptions.create(subscription);
 
-      // Referral reward is only valid after a successful PAID subscription.
-      if (finalAmount > 0) {
-        await awardReferralRewardAfterPaidSubscription({
-          referredUserId: input.userId,
-          subscriptionId: subscription.id,
-          referredUserName: user.name,
-        });
-      }
+      console.log('CALLING referral reward for:', input.userId, subscription.id);
+      await runReferralRewardAfterSubscriptionSuccess({
+        payerUserId: input.userId,
+        subscriptionId: subscription.id,
+        subscriptionIsActive: subscription.isActive === true,
+        referredUserName: user.name,
+      });
 
       // Deduct wallet balance (only after subscription is created)
       if (walletUsed > 0) {

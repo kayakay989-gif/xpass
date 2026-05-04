@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
-import { Redirect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { TIER_COLORS } from '@/constants/tier-colors';
 import { normalizeSubscriptionTier } from '@/lib/subscription-tier';
@@ -154,10 +154,6 @@ export default function SubscriptionScreen() {
     };
   }, [selectedDuration]);
 
-  if (isGuest || !firebaseUser) {
-    return <Redirect href="/login" />;
-  }
-
   // First load only: keepPreviousData can supply subscription while refetching — don't block the whole screen.
   if (firebaseUser?.uid && subscriptionQuery.isPending && subscription == null) {
     return (
@@ -196,11 +192,15 @@ export default function SubscriptionScreen() {
       };
     }
     
-    // No active subscription - show Select Package
+    // No active subscription - show Select Package (guests go to login; members go to payment)
     return {
       label: 'Select Package',
       disabled: false,
       action: () => {
+        if (isGuest || !firebaseUser) {
+          router.push('/login');
+          return;
+        }
         const totalPrice = getTotalPrice(tier);
         console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
         // #region agent log
@@ -245,7 +245,10 @@ export default function SubscriptionScreen() {
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.greeting}>
-            Hello {user?.name?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'User'}
+            Hello{' '}
+            {isGuest
+              ? 'Guest'
+              : user?.name?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'User'}
           </Text>
           <View style={styles.iconsContainer}>
             <TouchableOpacity 

@@ -15,6 +15,7 @@ import {
   updateProfile,
   sendPasswordResetEmail,
   confirmPasswordReset,
+  getAdditionalUserInfo,
 } from 'firebase/auth';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import type { AppleAuthenticationCredential } from 'expo-apple-authentication';
@@ -37,9 +38,13 @@ import { Platform } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { nativeSignOut } from '@/lib/firebasePhoneNative';
+import { trpc } from '@/lib/trpc';
 
 // Complete the auth session properly
 WebBrowser.maybeCompleteAuthSession();
+
+/** Stored when user opens /join?ref=… so we can sync `referredBy` server-side after login. */
+export const PENDING_REFERRAL_STORAGE_KEY = 'xpass_pending_referral_code';
 
 function generateReferralCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -86,13 +91,27 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [isGymOwner, setIsGymOwner] = useState<boolean>(false);
   const [gymOwnerGymId, setGymOwnerGymId] = useState<string | null>(null);
   const [stayLoggedInEnabled, setStayLoggedInEnabledState] = useState<boolean>(false);
+  /** AsyncStorage prefs applied before routing / first auth callback (guest + stay logged in). */
+  const [prefsHydrated, setPrefsHydrated] = useState<boolean>(false);
   const biometricUnlockPassedRef = useRef<boolean>(false);
+  /** While email signup is writing Firestore, skip repair/loadUserProfile auto-create to avoid a bare profile racing referredBy. */
+  const signupFirestoreSetupUidRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const loadStayPreference = async () => {
-      const raw = await AsyncStorage.getItem('stayLoggedInEnabled');
-      setStayLoggedInEnabledState(raw === 'true');
-    };
-    void loadStayPreference();
+    void (async () => {
+      try {
+        const [stayRaw, guestRaw] = await Promise.all([
+          AsyncStorage.getItem('stayLoggedInEnabled'),
+          AsyncStorage.getItem('isGuest'),
+        ]);
+        setStayLoggedInEnabledState(stayRaw === 'true');
+        if (guestRaw === 'true') {
+          setIsGuest(true);
+        }
+      } finally {
+        setPrefsHydrated(true);
+      }
+    })();
   }, []);
 
   const setStayLoggedInEnabled = useCallback(async (enabled: boolean): Promise<void> => {
@@ -107,7 +126,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const enforceBiometricUnlock = useCallback(async (): Promise<boolean> => {
     if (Platform.OS === 'web') return true;
-    if (!stayLoggedInEnabled) return true;
+    // Read from storage here — not React state — so first onAuthStateChanged after cold start
+    // still respects "Stay logged in" even before prefs state has re-rendered (fixes Face ID / fingerprint skipped).
+    const stayRaw = await AsyncStorage.getItem('stayLoggedInEnabled');
+    const stayOn = stayRaw === 'true';
+    if (!stayOn) return true;
     if (biometricUnlockPassedRef.current) return true;
 
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
@@ -126,7 +149,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     biometricUnlockPassedRef.current = true;
     await SecureStore.setItemAsync('xpass_biometric_session', 'ok');
     return true;
-  }, [stayLoggedInEnabled]);
+  }, []);
 
 
   const evaluateAdminClaim = useCallback(async (fbUser: FirebaseUser | null) => {
@@ -172,6 +195,89 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   // Ensure user profile exists in Firestore (idempotent - safe to call multiple times)
+  /**
+   * Resolves a referral code (or legacy referrer UID) and writes `referredBy` = that referrer's public
+   * `referralCode` string (same value as on `users/{referrer}`), which `referrals.ts` reads at payment time.
+   */
+  const mergeReferralCodeIntoUserDoc = useCallback(async (uid: string, referralCodeRaw: string | undefined) => {
+    const raw = typeof referralCodeRaw === 'string' ? referralCodeRaw.trim() : '';
+    if (!raw) return;
+
+    const uidLike = /^[a-zA-Z0-9]{10,35}$/;
+
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const existing = await getDoc(userDocRef);
+      const existingBy =
+        typeof existing.data()?.referredBy === 'string'
+          ? String(existing.data()?.referredBy).trim()
+          : '';
+      if (existingBy) return;
+
+      // Legacy: raw might be a referrer Firebase UID — resolve to their `referralCode` for storage.
+      if (uidLike.test(raw)) {
+        if (raw === uid) {
+          console.warn('[AuthContext] mergeReferral: self-referral blocked');
+          return;
+        }
+        const refSnap = await getDoc(doc(db, 'users', raw));
+        if (refSnap.exists()) {
+          const rd = refSnap.data();
+          const codeStored =
+            typeof rd?.referralCode === 'string'
+              ? String(rd.referralCode).trim().toUpperCase()
+              : '';
+          if (!codeStored) {
+            console.warn('[AuthContext] mergeReferral: referrer doc has no referralCode field');
+            return;
+          }
+          await setDoc(userDocRef, { referredBy: codeStored }, { merge: true });
+          console.log('Referral LINKED:', { user: uid, referredBy: codeStored });
+          return;
+        }
+      }
+
+      const normalized = raw.toUpperCase();
+      const usersRef = collection(db, 'users');
+      const referralQuery = query(usersRef, where('referralCode', '==', normalized), limit(1));
+      const referralSnap = await getDocs(referralQuery);
+      if (referralSnap.empty) {
+        console.warn('[AuthContext] mergeReferral: invalid referral code', normalized);
+        return;
+      }
+      const referrerDoc = referralSnap.docs[0];
+      const referrerId = referrerDoc.id;
+      if (referrerId === uid) {
+        console.warn('[AuthContext] mergeReferral: self-referral blocked');
+        return;
+      }
+      const refData = referrerDoc.data();
+      const codeStored =
+        typeof refData?.referralCode === 'string'
+          ? String(refData.referralCode).trim().toUpperCase()
+          : normalized;
+      await setDoc(userDocRef, { referredBy: codeStored }, { merge: true });
+      console.log('Referral LINKED:', { user: uid, referredBy: codeStored });
+    } catch (e: any) {
+      console.error('[AuthContext] mergeReferral failed:', e?.message ?? e);
+    }
+  }, []);
+
+  /** Applies `PENDING_REFERRAL_STORAGE_KEY` after profile exists (recovery if server/client referral races). */
+  const applyPendingReferralFromStorage = useCallback(
+    async (uid: string) => {
+      try {
+        const pending = await AsyncStorage.getItem(PENDING_REFERRAL_STORAGE_KEY);
+        const raw = pending?.trim();
+        if (!raw) return;
+        await mergeReferralCodeIntoUserDoc(uid, raw);
+      } catch (e: any) {
+        console.warn('[AuthContext] applyPendingReferralFromStorage (non-critical):', e?.message);
+      }
+    },
+    [mergeReferralCodeIntoUserDoc]
+  );
+
   const ensureUserProfileExists = useCallback(async (
     uid: string,
     email: string,
@@ -181,15 +287,25 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     referralCode?: string,
     referredBy?: string,
     walletBalance: number = 0
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     console.log('[AuthContext] STEP: Ensuring user profile exists for:', uid);
     try {
       const userDocRef = doc(db, 'users', uid);
       const userDoc = await getDoc(userDocRef);
       
       if (userDoc.exists()) {
-        console.log('[AuthContext] User profile already exists, skipping creation');
-        return;
+        // Race: onAuthStateChanged may create the profile before we write referredBy — patch if missing.
+        const pendingReferral =
+          typeof referredBy === 'string' && referredBy.trim() ? referredBy.trim() : '';
+        const existingBy =
+          typeof userDoc.data()?.referredBy === 'string'
+            ? String(userDoc.data()?.referredBy).trim()
+            : '';
+        if (pendingReferral && !existingBy) {
+          await mergeReferralCodeIntoUserDoc(uid, pendingReferral);
+        }
+        console.log('[AuthContext] User profile already exists, skipped creation; referral merged if needed');
+        return true;
       }
       
       console.log('[AuthContext] Creating new user profile document');
@@ -221,7 +337,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         userData.age = newUser.age;
       }
       if (newUser.referredBy) {
-        userData.referredBy = newUser.referredBy;
+        userData.referredBy = String(newUser.referredBy).trim();
       }
       if (newUser.photoUrl) {
         userData.photoUrl = newUser.photoUrl;
@@ -230,17 +346,23 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       await setDoc(userDocRef, userData, { merge: true }); // Use merge to be safe
       
       console.log('[AuthContext] User profile created successfully');
+      return true;
     } catch (error: any) {
       console.error('[AuthContext] Error ensuring user profile:', error);
       // Don't throw - this is non-critical setup
       if (error.code === 'permission-denied') {
         console.warn('[AuthContext] Permission denied creating user profile - will retry on login');
       }
+      return false;
     }
-  }, []);
+  }, [mergeReferralCodeIntoUserDoc]);
 
   // Repair incomplete user account (called after login or signup)
   const repairUserAccountIfNeeded = useCallback(async (uid: string, firebaseAuthUser?: FirebaseUser | null) => {
+    if (signupFirestoreSetupUidRef.current === uid) {
+      console.log('[AuthContext] Skipping repair — signup Firestore setup in progress:', uid);
+      return;
+    }
     console.log('[AuthContext] Repairing user account if needed for:', uid);
     try {
       const userDocRef = doc(db, 'users', uid);
@@ -264,15 +386,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           undefined,
           0
         );
+        await applyPendingReferralFromStorage(uid);
         console.log('[AuthContext] ✅ User profile repaired');
       } else {
         console.log('[AuthContext] User profile exists, no repair needed');
+        await applyPendingReferralFromStorage(uid);
       }
     } catch (error: any) {
       console.error('[AuthContext] Error repairing user account:', error);
       // Non-critical - don't throw
     }
-  }, [ensureUserProfileExists]);
+  }, [ensureUserProfileExists, applyPendingReferralFromStorage]);
 
   // Load user profile from Firestore
   const loadUserProfile = useCallback(async (uid: string, firebaseAuthUser?: FirebaseUser | null) => {
@@ -303,6 +427,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setUser(userData);
         return userData;
       } else {
+        if (signupFirestoreSetupUidRef.current === uid) {
+          console.log('[AuthContext] Deferring loadUserProfile create — signup is writing profile:', uid);
+          return null;
+        }
         // Create user profile if it doesn't exist
         // BUT: Check if a user document exists with the same email (might be admin account)
         if (currentAuthUser && currentAuthUser.email) {
@@ -357,7 +485,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             createdAt: serverTimestamp(),
           };
           
-          await setDoc(doc(db, 'users', uid), userData);
+          await setDoc(doc(db, 'users', uid), userData, { merge: true });
+          await applyPendingReferralFromStorage(uid);
           setUser(newUser);
           return newUser;
         }
@@ -370,7 +499,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
     }
     return null;
-  }, []);
+  }, [applyPendingReferralFromStorage]);
 
   // Listen to Firebase auth state changes
   useEffect(() => {
@@ -453,20 +582,85 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       clearTimeout(failSafe);
       unsubscribe();
     };
-  }, [loadUserProfile, evaluateAdminClaim, repairUserAccountIfNeeded]);
+  }, [loadUserProfile, evaluateAdminClaim, repairUserAccountIfNeeded, enforceBiometricUnlock]);
 
-  // Check for guest mode
+  // Sync guest flag when storage says guest but user just logged in elsewhere in session
   useEffect(() => {
-    const checkGuestMode = async () => {
+    void (async () => {
       const savedIsGuest = await AsyncStorage.getItem('isGuest');
       if (savedIsGuest === 'true' && !firebaseUser) {
         setIsGuest(true);
       }
-    };
-    checkGuestMode();
+      if (firebaseUser && savedIsGuest === 'true') {
+        await AsyncStorage.removeItem('isGuest');
+        setIsGuest(false);
+      }
+    })();
   }, [firebaseUser]);
 
   const isLoading = isLoadingAuth;
+
+  const notifyWelcomeMut = trpc.users.notifyWelcome.useMutation();
+  const applyReferralMut = trpc.users.applyReferralCode.useMutation();
+  const pendingReferralSyncedRef = useRef(false);
+
+  /** Apply referral code from deep link via Admin API (fixes missing `referredBy` on user doc). */
+  useEffect(() => {
+    if (!firebaseUser || !prefsHydrated) return;
+    if (pendingReferralSyncedRef.current) return;
+    void (async () => {
+      try {
+        const pending = await AsyncStorage.getItem(PENDING_REFERRAL_STORAGE_KEY);
+        if (!pending?.trim()) return;
+        pendingReferralSyncedRef.current = true;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          try {
+            const res = await applyReferralMut.mutateAsync({ code: pending.trim() });
+            if (res.ok) {
+              await AsyncStorage.removeItem(PENDING_REFERRAL_STORAGE_KEY);
+              if ('linked' in res && res.linked && firebaseUser) {
+                await loadUserProfile(firebaseUser.uid, firebaseUser);
+              }
+              pendingReferralSyncedRef.current = false;
+              return;
+            }
+            if (!res.ok && res.reason === 'no_profile' && attempt < 7) {
+              await new Promise((r) => setTimeout(r, 450 + attempt * 120));
+              continue;
+            }
+            if (!res.ok && (res.reason === 'invalid_code' || res.reason === 'self_referral')) {
+              await AsyncStorage.removeItem(PENDING_REFERRAL_STORAGE_KEY);
+            }
+            pendingReferralSyncedRef.current = false;
+            return;
+          } catch (e) {
+            if (attempt < 7) {
+              await new Promise((r) => setTimeout(r, 450 + attempt * 120));
+            } else {
+              console.warn('[AuthContext] Pending referral sync failed after retries (non-critical):', e);
+              pendingReferralSyncedRef.current = false;
+            }
+          }
+        }
+        pendingReferralSyncedRef.current = false;
+      } catch (e) {
+        console.warn('[AuthContext] Pending referral sync failed (non-critical):', e);
+        pendingReferralSyncedRef.current = false;
+      }
+    })();
+  }, [firebaseUser, prefsHydrated, applyReferralMut, loadUserProfile]);
+
+  useEffect(() => {
+    if (!firebaseUser) {
+      pendingReferralSyncedRef.current = false;
+    }
+  }, [firebaseUser]);
+
+  /** True when AsyncStorage prefs + first Firebase auth tick finished (routing safe). */
+  const bootstrapNavigationReady =
+    prefsHydrated &&
+    !isLoadingAuth &&
+    !(firebaseUser != null && isCheckingAdmin);
 
   // Email/Password Login
   const loginWithEmail = useCallback(async (email: string, password: string): Promise<void> => {
@@ -535,7 +729,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     let authUserCreated = false; // Track if Stage A (Auth) succeeded
     let normalizedEmail = '';
     let normalizedPhone = '';
-    
+    /** In scope for catch/repair — `let` inside `try` is not visible in `catch`. */
+    let signupReferral: string | undefined;
+    /** Uppercase referral code from signup form / params — persists even if Stage B throws before signupReferral is set. */
+    let normalizedReferralForSignup = '';
+
     try {
       // Validate required parameters
       if (!email || !email.trim()) {
@@ -570,6 +768,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       try {
         userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
         authUserCreated = true; // Mark that Stage A succeeded
+        // Set immediately so repair/loadUserProfile do not create a bare user doc before Stage B writes referredBy.
+        signupFirestoreSetupUidRef.current = userCredential.user.uid;
         console.log('[AuthContext] ✅ STAGE A SUCCESS: Firebase Auth user created:', userCredential.user.uid);
       } catch (authError: any) {
         console.error('[AuthContext] ❌ STAGE A FAILED: Firebase Auth creation error:', {
@@ -609,32 +809,52 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
       }
 
-      // Process referral code (non-blocking - optional)
+      // Process referral code (non-blocking - optional) — store canonical code string in Firestore `referredBy` (not UID).
       const normalizedReferral = typeof referralCodeUsed === 'string' ? referralCodeUsed.trim().toUpperCase() : '';
+      normalizedReferralForSignup = normalizedReferral;
       let referredBy: string | undefined = undefined;
       let initialWalletBalance = 0;
 
       if (normalizedReferral) {
         try {
+          try {
+            await AsyncStorage.setItem(PENDING_REFERRAL_STORAGE_KEY, normalizedReferral);
+          } catch {
+            /* ignore */
+          }
           console.log('[AuthContext] STEP 4: Processing referral code:', normalizedReferral);
           const usersRef = collection(db, 'users');
           const referralQuery = query(usersRef, where('referralCode', '==', normalizedReferral), limit(1));
           const referralSnap = await getDocs(referralQuery);
           
           if (!referralSnap.empty) {
-            referredBy = normalizedReferral;
             const referrerDoc = referralSnap.docs[0];
             const referrerId = referrerDoc.id;
             
             // Prevent self-referral
             if (referrerId === userCredential.user.uid) {
-              console.warn('[AuthContext] ⚠️ User cannot refer themselves, skipping referral reward');
+              console.warn('[AuthContext] ⚠️ User cannot refer themselves, skipping referral');
+              referredBy = undefined;
             } else {
-              // Save referral linkage only. Reward is granted later after successful paid subscription.
+              const refData = referrerDoc.data();
+              const codeOnReferrer =
+                typeof refData?.referralCode === 'string'
+                  ? String(refData.referralCode).trim().toUpperCase()
+                  : normalizedReferral;
+              referredBy = codeOnReferrer;
+              console.log('Referral LINKED:', {
+                user: userCredential.user.uid,
+                referredBy: codeOnReferrer,
+              });
               console.log('[AuthContext] ✅ Referral code accepted; reward will be processed after paid subscription');
             }
           } else {
             console.warn('[AuthContext] ⚠️ Invalid referral code provided, continuing without referral benefits');
+            try {
+              await AsyncStorage.removeItem(PENDING_REFERRAL_STORAGE_KEY);
+            } catch {
+              /* ignore */
+            }
           }
         } catch (referralError: any) {
           // Don't fail signup if referral code processing fails
@@ -642,10 +862,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
       }
 
+      signupReferral = referredBy;
+
       // Create/ensure user profile in Firestore (idempotent)
       console.log('[AuthContext] STEP 5: Ensuring user profile exists in Firestore');
       const referralCode = generateReferralCode();
-      await ensureUserProfileExists(
+      let profileSaved = await ensureUserProfileExists(
         userCredential.user.uid,
         normalizedEmail,
         name,
@@ -654,6 +876,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         referralCode,
         referredBy,
         initialWalletBalance
+      );
+      if (!profileSaved && referredBy) {
+        await new Promise((r) => setTimeout(r, 800));
+        profileSaved = await ensureUserProfileExists(
+          userCredential.user.uid,
+          normalizedEmail,
+          name,
+          normalizedPhone || '',
+          age,
+          referralCode,
+          referredBy,
+          initialWalletBalance
+        );
+      }
+
+      if (referredBy) {
+        try {
+          await AsyncStorage.removeItem(PENDING_REFERRAL_STORAGE_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+
+      void notifyWelcomeMut.mutateAsync().catch((e) =>
+        console.warn('[AuthContext] notifyWelcome failed (non-critical):', e)
       );
       
       console.log('[AuthContext] ✅ STAGE B COMPLETE: Post-signup setup finished');
@@ -687,12 +934,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             normalizedPhone || '',
             age,
             generateReferralCode(),
-            undefined,
+            signupReferral ?? (normalizedReferralForSignup || undefined),
             0
           );
         } catch (repairError) {
           console.warn('[AuthContext] Could not repair profile immediately, will retry on login:', repairError);
         }
+
+        void notifyWelcomeMut.mutateAsync().catch((e) =>
+          console.warn('[AuthContext] notifyWelcome after repair (non-critical):', e)
+        );
         
         // Return successfully - Auth user exists, that's what matters
         console.log('[AuthContext] ========== SIGNUP FLOW COMPLETE (with warnings) ==========');
@@ -730,8 +981,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       } else {
         throw new Error('Failed to create account. Please try again.');
       }
+    } finally {
+      signupFirestoreSetupUidRef.current = null;
     }
-  }, [ensureUserProfileExists]);
+  }, [ensureUserProfileExists, notifyWelcomeMut]);
 
   // Password reset (email-based)
   const resetPassword = useCallback(async (email: string): Promise<void> => {
@@ -788,7 +1041,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   /** Native: call after Google.useAuthRequest succeeds (opens system browser / Custom Tabs). */
-  const signInWithApple = useCallback(async (): Promise<void> => {
+  const signInWithApple = useCallback(async (options?: { referralCode?: string }): Promise<void> => {
     console.log('[AuthContext] Apple OAuth Init');
     if (Platform.OS !== 'ios') {
       throw new Error('Sign in with Apple is only available on iOS.');
@@ -844,6 +1097,18 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       });
       const userCredential = await signInWithCredential(auth, credential);
 
+      const extra = getAdditionalUserInfo(userCredential);
+      if (
+        userCredential.user &&
+        extra?.isNewUser &&
+        options?.referralCode?.trim()
+      ) {
+        await mergeReferralCodeIntoUserDoc(
+          userCredential.user.uid,
+          options.referralCode.trim().toUpperCase()
+        );
+      }
+
       const nameFromApple = appleResult.fullName
         ? AppleAuthentication.formatFullName(appleResult.fullName)
         : '';
@@ -858,6 +1123,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[AuthContext] Apple login successful:', userCredential.user.uid);
       if (userCredential.user) {
         await loadUserProfile(userCredential.user.uid, userCredential.user);
+        if (extra?.isNewUser) {
+          void notifyWelcomeMut.mutateAsync().catch((e) =>
+            console.warn('[AuthContext] notifyWelcome (Apple) failed (non-critical):', e)
+          );
+        }
       }
     } catch (error: any) {
       console.error('[AuthContext] Apple Sign-In Error:', error?.code, error?.message);
@@ -876,10 +1146,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error(error?.message || 'Apple sign-in failed.');
     }
-  }, [loadUserProfile]);
+  }, [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut]);
 
   const signInWithGoogleIdToken = useCallback(
-    async (idToken: string): Promise<void> => {
+    async (idToken: string, options?: { referralCode?: string }): Promise<void> => {
       if (!idToken?.trim()) {
         throw new Error('Missing Google ID token.');
       }
@@ -887,8 +1157,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const credential = GoogleAuthProvider.credential(idToken);
         const userCredential = await signInWithCredential(auth, credential);
         console.log('[AuthContext] Google login successful (native id_token):', userCredential.user.uid);
+        const extra = getAdditionalUserInfo(userCredential);
+        if (
+          userCredential.user &&
+          extra?.isNewUser &&
+          options?.referralCode?.trim()
+        ) {
+          await mergeReferralCodeIntoUserDoc(
+            userCredential.user.uid,
+            options.referralCode.trim().toUpperCase()
+          );
+        }
         if (userCredential.user) {
-          await loadUserProfile(userCredential.user.uid);
+          await loadUserProfile(userCredential.user.uid, userCredential.user);
+          if (extra?.isNewUser) {
+            void notifyWelcomeMut.mutateAsync().catch((e) =>
+              console.warn('[AuthContext] notifyWelcome (Google) failed (non-critical):', e)
+            );
+          }
         }
       } catch (error: any) {
         console.error('[AuthContext] signInWithGoogleIdToken error:', error);
@@ -898,7 +1184,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error(error?.message || 'Google sign-in failed.');
       }
     },
-    [loadUserProfile]
+    [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut]
   );
 
   /** Web only (Firebase popup). On native use sign-in screen + Google.useAuthRequest. */
@@ -911,8 +1197,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       console.log('[AuthContext] Google login successful (web):', result.user.uid);
+      const extra = getAdditionalUserInfo(result);
       if (result.user) {
         await loadUserProfile(result.user.uid);
+        if (extra?.isNewUser) {
+          void notifyWelcomeMut.mutateAsync().catch((e) =>
+            console.warn('[AuthContext] notifyWelcome (Google web) failed (non-critical):', e)
+          );
+        }
       }
     } catch (error: any) {
       console.error('[AuthContext] Firebase web Google sign-in error:', error);
@@ -926,7 +1218,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error(errorMessage);
     }
-  }, [loadUserProfile]);
+  }, [loadUserProfile, notifyWelcomeMut]);
 
   // Legacy login method (for backward compatibility)
   const login = useCallback(async (newUserId: string): Promise<void> => {
@@ -1042,6 +1334,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return {
       user,
       isLoading,
+      bootstrapNavigationReady,
       isAuthenticated: !!user && !!firebaseUser,
       isGuest,
       login,
@@ -1067,6 +1360,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [
     user,
     isLoading,
+    bootstrapNavigationReady,
     isGuest,
     firebaseUser,
     login,

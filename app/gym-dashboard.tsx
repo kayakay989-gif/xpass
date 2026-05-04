@@ -68,12 +68,16 @@ export default function GymDashboardScreen() {
 
       setGym(gymData);
       
-      // Enrich check-ins with user names
+      // Enrich check-ins with user names and profile photo URL from Firestore (not placeholder avatars)
       const enrichedCheckIns = (checkInsData || []).map((checkIn: any) => {
         const user = usersData.find((u: any) => u.id === checkIn.userId);
+        const rawPhoto = user?.photoUrl;
+        const userPhotoUrl =
+          typeof rawPhoto === 'string' && rawPhoto.trim().length > 0 ? rawPhoto.trim() : undefined;
         return {
           ...checkIn,
           userName: user?.name || 'Unknown User',
+          userPhotoUrl,
         };
       });
       
@@ -329,10 +333,13 @@ export default function GymDashboardScreen() {
         <View style={styles.list}>
           {data.map((ci: any) => {
             const dt = new Date(ci.timestamp);
-            const avatarUrl = `https://i.pravatar.cc/100?u=${encodeURIComponent(ci.userId)}`;
             return (
               <View key={ci.id} style={styles.checkinCard}>
-                <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+                {ci.userPhotoUrl ? (
+                  <Image source={{ uri: ci.userPhotoUrl }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]} />
+                )}
                 <View style={styles.checkinInfo}>
                   <Text style={styles.checkinName}>{ci.userName}</Text>
                   <Text style={styles.checkinSub}>Checked into {gym.name}</Text>
@@ -977,6 +984,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F3F4F6' },
+  avatarPlaceholder: { backgroundColor: '#E5E7EB' },
   checkinInfo: { flex: 1 },
   checkinName: { fontSize: 15, fontWeight: '800' as const, color: '#111827' },
   checkinSub: { marginTop: 2, fontSize: 12, fontWeight: '600' as const, color: '#6B7280' },

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, TouchableOpacity, Image, ImageBackground } from 'react-native';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, Redirect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { agentLog } from '@/lib/agent-debug-log';
 
@@ -8,7 +8,12 @@ const mainLogoWhite = require('../assets/images/main logo white.png');
 
 export default function SplashScreen() {
   const router = useRouter();
-  const { continueAsGuest } = useAuth();
+  const { continueAsGuest, firebaseUser, isGuest, isAdmin, bootstrapNavigationReady } = useAuth();
+
+  // Splash is only for fully logged-out users. Redirect synchronously so logged-in users never see this screen.
+  if (bootstrapNavigationReady && firebaseUser && !isGuest) {
+    return <Redirect href={(isAdmin ? '/admin-dashboard' : '/(tabs)/home') as never} />;
+  }
 
   return (
     <>

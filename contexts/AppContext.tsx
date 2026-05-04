@@ -7,6 +7,7 @@ import { firestoreGyms } from '@/lib/firestore';
 import { config } from '@/lib/config';
 import { getGymTier } from '@/lib/gym-tier';
 import { agentLog } from '@/lib/agent-debug-log';
+import { getCheckInUserMessage } from '@/lib/check-in-errors';
 
 // Pricing table (TOTAL price for duration) based on provided spec
 const TOTAL_PRICES: Record<SubscriptionDuration, Record<SubscriptionTier, number>> = {
@@ -147,10 +148,10 @@ export const [AppProvider, useApp] = createContextHook(() => {
       if (!userId) {
         throw new Error('Please log in to check in');
       }
-      const result = await checkInMutation.mutateAsync({ userId, gymId });
-      return { success: true, message: 'Check-in successful!' };
+      await checkInMutation.mutateAsync({ userId, gymId });
+      return { success: true, message: 'Check in successful' };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Check-in failed';
+      const errorMessage = getCheckInUserMessage(error);
       console.error('[AppContext] Check-in error:', errorMessage);
       return { success: false, message: errorMessage };
     }

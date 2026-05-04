@@ -7,42 +7,6 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:40764236173:android:fa8b70b624067430de1dc4",
-        "android_client_info": {
-          "package_name": "app.rok"
-        }
-      },
-      "oauth_client": [
-        {
-          "client_id": "40764236173-nav2vohhco8l6lt7jdng77caklrm5s1l.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
-      "api_key": [
-        {
-          "current_key": "AIzaSyA7bGV-TdwJunzOZ5gA3x2RGJMj6pYrTgk"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "114078527294453622028",
-              "client_type": 3
-            },
-            {
-              "client_id": "40764236173-c56mvsahjfj5oftc78j5v0lviqhi49ie.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "com.xpass.app"
-              }
-            }
-          ]
-        }
-      }
-    },
-    {
-      "client_info": {
         "mobilesdk_app_id": "1:40764236173:android:816a2c366726d210de1dc4",
         "android_client_info": {
           "package_name": "com.xpass.unique"
@@ -50,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "40764236173-5pvmbd98ufa0c4cooudea5pan896i37g.apps.googleusercontent.com",
+          "client_id": "40764236173-bb7qk1245ec2sgn1g02v9had3l9p1flj.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.xpass.unique",
-            "certificate_hash": "e44421ab3968fc8a477574a4022583d236fe25dd"
+            "certificate_hash": "d5b5a5a35fa54ba8a361c248549c54083ee4d551"
           }
         },
         {
@@ -75,7 +39,7 @@
               "client_type": 3
             },
             {
-              "client_id": "40764236173-c56mvsahjfj5oftc78j5v0lviqhi49ie.apps.googleusercontent.com",
+              "client_id": "40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
                 "bundle_id": "com.xpass.app"

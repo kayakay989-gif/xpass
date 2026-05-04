@@ -19,7 +19,7 @@ type ViewMode = 'map' | 'list';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, firebaseUser, isGuest, isLoading: isLoadingAuth } = useAuth();
+  const { user, firebaseUser, isGuest, isLoading: isLoadingAuth, bootstrapNavigationReady } = useAuth();
   const { subscription, gyms, isLoading, subscriptionQuery } = useApp();
   const [spotlightBanners, setSpotlightBanners] = useState<any[]>([]);
   const [isLoadingBanners, setIsLoadingBanners] = useState(true);
@@ -27,12 +27,12 @@ export default function HomeScreen() {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   useEffect(() => {
-    // On web, Firebase Auth can be ready before the Firestore user profile loads.
-    // Guard routes based on firebaseUser (auth session), not on the Firestore profile object.
-    if (!isLoadingAuth && !firebaseUser && !isGuest) {
+    // Only redirect to splash when we are sure the user is logged out (never during auth loading flashes).
+    if (!bootstrapNavigationReady || isLoadingAuth) return;
+    if (!firebaseUser && !isGuest) {
       router.replace('/splash');
     }
-  }, [firebaseUser, isGuest, isLoadingAuth, router]);
+  }, [firebaseUser, isGuest, bootstrapNavigationReady, isLoadingAuth, router]);
 
   useEffect(() => {
     setIsLoadingBanners(true);

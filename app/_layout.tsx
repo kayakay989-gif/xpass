@@ -1,18 +1,57 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { TouchableOpacity } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppProvider } from "@/contexts/AppContext";
 import Colors from "@/constants/colors";
 import { trpc, trpcClient } from "@/lib/trpc";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { validateConfig } from "@/lib/config";
 import { ChevronLeft } from "lucide-react-native";
+
+function RootStackHeaderBack({
+  navigation,
+  routeName,
+}: {
+  navigation: { canGoBack: () => boolean; goBack: () => void };
+  routeName: string;
+}) {
+  const router = useRouter();
+  const { firebaseUser, isGuest, isLoading: isLoadingAuth } = useAuth();
+
+  if (routeName === "splash" || routeName === "gym-login" || routeName === "gym-dashboard") {
+    return null;
+  }
+
+  return (
+    <TouchableOpacity
+      onPress={() => {
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+          return;
+        }
+        // Never treat a transient "no user" during auth init as logged-out (avoids splash/login flash).
+        if (isLoadingAuth) {
+          return;
+        }
+        const authed = !!(firebaseUser && !isGuest);
+        if (authed) {
+          router.replace("/(tabs)/home" as never);
+        } else {
+          router.replace("/splash" as never);
+        }
+      }}
+      style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+    >
+      <ChevronLeft size={22} color={Colors.text} />
+    </TouchableOpacity>
+  );
+}
 
 const queryClient = new QueryClient();
 
@@ -31,25 +70,9 @@ function RootLayoutNav() {
         headerTitleStyle: {
           fontWeight: "700" as const,
         },
-        headerLeft: () => {
-          if (route.name === "splash" || route.name === "gym-login" || route.name === "gym-dashboard") {
-            return null;
-          }
-          return (
-            <TouchableOpacity
-              onPress={() => {
-                if (navigation.canGoBack()) {
-                  navigation.goBack();
-                } else {
-                  navigation.navigate("splash" as never);
-                }
-              }}
-              style={{ paddingHorizontal: 12, paddingVertical: 8 }}
-            >
-              <ChevronLeft size={22} color={Colors.text} />
-            </TouchableOpacity>
-          );
-        },
+        headerLeft: () => (
+          <RootStackHeaderBack navigation={navigation} routeName={route.name} />
+        ),
       })}
     >
       <Stack.Screen name="index" options={{ headerShown: false }} />

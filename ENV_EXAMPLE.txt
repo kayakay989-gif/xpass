@@ -4,6 +4,13 @@
 # Backend base URL for the mobile/web app to call:
 # EXPO_PUBLIC_RORK_API_BASE_URL=https://xpass-b66g.onrender.com
 
+# Resend (transactional email — verify sending domain in Resend dashboard, e.g. xpassjo.com)
+# RESEND_API_KEY=re_...
+# SUBSCRIPTION_EMAIL_FROM=Xpass <noreply@xpassjo.com>
+
+# Optional: protect GET /api/cron/subscription-emails (external cron)
+# CRON_SECRET=
+
 # Mastercard Payment Gateway (MPGS) configuration
 # Sandbox (MTF)
 # MPG_HOST=test-network.mtf.gateway.mastercard.com

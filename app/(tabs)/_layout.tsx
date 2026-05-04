@@ -1,7 +1,7 @@
-import { Tabs, useRouter } from "expo-router";
+import { Tabs, useRouter, useNavigation } from "expo-router";
 import { Home, Dumbbell, QrCode, CreditCard, ChevronLeft } from "lucide-react-native";
-import React from "react";
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useEffect } from "react";
+import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,7 +9,20 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { isGuest, firebaseUser } = useAuth();
+  const navigation = useNavigation();
+  const { isGuest, firebaseUser, isLoading: isLoadingAuth, bootstrapNavigationReady } = useAuth();
+
+  // Android: never pop to splash/login behind the tab stack for signed-in members (no in-tab stack to pop).
+  useEffect(() => {
+    if (Platform.OS !== "android") return undefined;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!bootstrapNavigationReady || isLoadingAuth) return false;
+      if (!firebaseUser || isGuest) return false;
+      if (navigation.canGoBack()) return false;
+      return true;
+    });
+    return () => sub.remove();
+  }, [bootstrapNavigationReady, isLoadingAuth, firebaseUser, isGuest, navigation]);
 
   return (
     <Tabs
@@ -45,22 +58,15 @@ export default function TabLayout() {
           fontWeight: '700' as const,
         },
         headerLeft: () => {
-          // Home: show back only for guest flow (lands on splash).
-          if (route.name === 'home') {
-            if (!isGuest && firebaseUser) return null;
-            return (
-              <TouchableOpacity
-                onPress={() => router.replace('/splash')}
-                style={{ paddingHorizontal: 12, paddingVertical: 8 }}
-              >
-                <ChevronLeft size={22} color={Colors.text} />
-              </TouchableOpacity>
-            );
+          // Home: no header back (Bug 4). Guests exit via profile / app switcher.
+          if (route.name === "home") {
+            return null;
           }
 
           return (
             <TouchableOpacity
               onPress={() => {
+                if (isLoadingAuth) return;
                 if (navigation.canGoBack()) {
                   navigation.goBack();
                   return;
@@ -109,16 +115,6 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="subscription"
-        listeners={
-          isGuest
-            ? {
-                tabPress: (e) => {
-                  e.preventDefault();
-                  router.push("/login");
-                },
-              }
-            : undefined
-        }
         options={{
           title: "Subscription",
           tabBarIcon: ({ focused }) => (

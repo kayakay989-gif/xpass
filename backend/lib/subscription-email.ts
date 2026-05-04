@@ -1,4 +1,5 @@
 import { Subscription } from '@/types';
+import { sendResendHtmlEmail } from '@/backend/lib/resend-email';
 
 type SubscriptionEmailInput = {
   toEmail: string;
@@ -32,17 +33,6 @@ function escapeHtml(value: string): string {
 }
 
 export async function sendSubscriptionSuccessEmail(input: SubscriptionEmailInput): Promise<void> {
-  const resendApiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.SUBSCRIPTION_EMAIL_FROM || 'Xpass <no-reply@xpass.app>';
-
-  if (!resendApiKey) {
-    console.warn('[SubscriptionEmail] RESEND_API_KEY is missing. Skipping subscription email.', {
-      toEmail: input.toEmail,
-      subscriptionId: input.subscription.id,
-    });
-    return;
-  }
-
   if (!input.toEmail?.trim()) {
     console.warn('[SubscriptionEmail] Missing recipient email. Skipping subscription email.', {
       subscriptionId: input.subscription.id,
@@ -97,22 +87,9 @@ export async function sendSubscriptionSuccessEmail(input: SubscriptionEmailInput
     </div>
   `;
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: [input.toEmail.trim()],
-      subject: 'Your Xpass subscription is active',
-      html,
-    }),
+  await sendResendHtmlEmail({
+    to: input.toEmail.trim(),
+    subject: 'Your Xpass payment receipt & subscription confirmation',
+    html,
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`[SubscriptionEmail] Failed to send email (${response.status}): ${errorText}`);
-  }
 }
