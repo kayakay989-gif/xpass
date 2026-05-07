@@ -94,6 +94,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   /** AsyncStorage prefs applied before routing / first auth callback (guest + stay logged in). */
   const [prefsHydrated, setPrefsHydrated] = useState<boolean>(false);
   const biometricUnlockPassedRef = useRef<boolean>(false);
+  /** Explicit login/signup in progress should not trigger an additional biometric gate in onAuthStateChanged. */
+  const lastInteractiveAuthAtRef = useRef<number>(0);
   /** While email signup is writing Firestore, skip repair/loadUserProfile auto-create to avoid a bare profile racing referredBy. */
   const signupFirestoreSetupUidRef = useRef<string | null>(null);
 
@@ -149,6 +151,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     biometricUnlockPassedRef.current = true;
     await SecureStore.setItemAsync('xpass_biometric_session', 'ok');
     return true;
+  }, []);
+
+  const markInteractiveAuth = useCallback(() => {
+    lastInteractiveAuthAtRef.current = Date.now();
   }, []);
 
 
@@ -516,7 +522,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
-          const biometricAllowed = await enforceBiometricUnlock();
+          const recentlyInteractive = Date.now() - lastInteractiveAuthAtRef.current < 30000;
+          const biometricAllowed = recentlyInteractive ? true : await enforceBiometricUnlock();
           if (!biometricAllowed) {
             await signOut(auth);
             setFirebaseUser(null);
@@ -572,6 +579,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       } catch (error) {
         console.error('[AuthContext] Error in auth state change:', error);
       } finally {
+        if (!firebaseUser) {
+          lastInteractiveAuthAtRef.current = 0;
+        }
         authResolved = true;
         clearTimeout(failSafe);
         setIsLoadingAuth(false);
@@ -674,6 +684,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
 
       console.log('[AuthContext] Attempting email/password login for:', normalizedEmail);
+      markInteractiveAuth();
 
       // Simple, reliable sign-in – let onAuthStateChanged drive the rest of the flow
       const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
@@ -710,7 +721,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Login failed. Please check your email and password and try again.');
       }
     }
-  }, [loadUserProfile]);
+  }, [loadUserProfile, markInteractiveAuth]);
 
   // Email/Password Sign Up
   const signUpWithEmail = useCallback(async (
@@ -766,6 +777,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       // ========== STAGE A: CREATE FIREBASE AUTH USER ==========
       console.log('[AuthContext] STAGE A: Creating Firebase Auth user');
       try {
+        markInteractiveAuth();
         userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
         authUserCreated = true; // Mark that Stage A succeeded
         // Set immediately so repair/loadUserProfile do not create a bare user doc before Stage B writes referredBy.
@@ -984,7 +996,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } finally {
       signupFirestoreSetupUidRef.current = null;
     }
-  }, [ensureUserProfileExists, notifyWelcomeMut]);
+  }, [ensureUserProfileExists, notifyWelcomeMut, markInteractiveAuth]);
 
   // Password reset (email-based)
   const resetPassword = useCallback(async (email: string): Promise<void> => {
@@ -1090,6 +1102,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
+      markInteractiveAuth();
       const provider = new OAuthProvider('apple.com');
       const credential = provider.credential({
         idToken,
@@ -1146,7 +1159,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error(error?.message || 'Apple sign-in failed.');
     }
-  }, [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut]);
+  }, [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut, markInteractiveAuth]);
 
   const signInWithGoogleIdToken = useCallback(
     async (idToken: string, options?: { referralCode?: string }): Promise<void> => {
@@ -1154,6 +1167,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error('Missing Google ID token.');
       }
       try {
+        markInteractiveAuth();
         const credential = GoogleAuthProvider.credential(idToken);
         const userCredential = await signInWithCredential(auth, credential);
         console.log('[AuthContext] Google login successful (native id_token):', userCredential.user.uid);
@@ -1184,7 +1198,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error(error?.message || 'Google sign-in failed.');
       }
     },
-    [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut]
+    [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut, markInteractiveAuth]
   );
 
   /** Web only (Firebase popup). On native use sign-in screen + Google.useAuthRequest. */
@@ -1194,6 +1208,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
     try {
       console.log('[AuthContext] Starting Google login (web popup)...');
+      markInteractiveAuth();
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       console.log('[AuthContext] Google login successful (web):', result.user.uid);
@@ -1218,7 +1233,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error(errorMessage);
     }
-  }, [loadUserProfile, notifyWelcomeMut]);
+  }, [loadUserProfile, notifyWelcomeMut, markInteractiveAuth]);
 
   // Legacy login method (for backward compatibility)
   const login = useCallback(async (newUserId: string): Promise<void> => {

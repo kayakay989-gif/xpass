@@ -1,0 +1,12 @@
+diff --git a/node_modules/expo/ios/AppDelegates/EXAppDelegateWrapper.mm b/node_modules/expo/ios/AppDelegates/EXAppDelegateWrapper.mm
+index f1af153..d7bc772 100644
+--- a/node_modules/expo/ios/AppDelegates/EXAppDelegateWrapper.mm
++++ b/node_modules/expo/ios/AppDelegates/EXAppDelegateWrapper.mm
+@@ -11,6 +11,7 @@
+ @implementation EXAppDelegateWrapper {
+   EXExpoAppDelegate *_expoAppDelegate;
+ }
++@synthesize dependencyProvider = _dependencyProvider;
+ 
+ - (instancetype)init
+ {

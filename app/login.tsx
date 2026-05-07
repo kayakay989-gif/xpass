@@ -730,8 +730,12 @@ export default function LoginScreen() {
             {mode === 'login' && (
               <TouchableOpacity
                 style={styles.stayLoggedInRow}
-                onPress={() => {
-                  void setStayLoggedInEnabled(!stayLoggedInEnabled);
+                onPress={async () => {
+                  try {
+                    await setStayLoggedInEnabled(!stayLoggedInEnabled);
+                  } catch (e) {
+                    console.warn('[Login] Failed to update stayLoggedIn setting:', e);
+                  }
                 }}
                 disabled={isLoading}
               >

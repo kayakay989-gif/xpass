@@ -20,8 +20,9 @@
     "ios": {
       "supportsTablet": true,
       "usesAppleSignIn": true,
+      "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "28",
+      "buildNumber": "41",
       "config": {},
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
@@ -55,7 +56,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 33,
+      "versionCode": 34,
       "config": {},
       "intentFilters": [
         {
@@ -197,6 +198,9 @@
       [
         "expo-build-properties",
         {
+          "ios": {
+            "useFrameworks": "static"
+          },
           "android": {
             "compileSdkVersion": 36,
             "targetSdkVersion": 36,
@@ -206,6 +210,7 @@
       ],
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
+      "./plugins/withIosNonModularHeadersFix.js",
       "./plugins/withAndroidSplashAaptFix",
       "./plugins/withCopyGoogleServices",
       "./plugins/withAndroidRemovePortraitOrientation"

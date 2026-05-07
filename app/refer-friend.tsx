@@ -19,27 +19,62 @@ export default function ReferFriendScreen() {
       loadReferralStats();
     }
   }, [firebaseUser, user]);
-
   const loadReferralStats = async () => {
     if (!firebaseUser || !user?.referralCode) return;
     
     try {
       setIsLoading(true);
-      // Count only validated rewards (created after paid subscription succeeds).
-      const referralTxRef = collection(db, 'referralTransactions');
-      const q = query(referralTxRef, where('referrerId', '==', firebaseUser.uid));
-      const snapshot = await getDocs(q);
+      // Safe baseline: if referralTransactions query is blocked/empty, reflect credited amount from wallet.
+      const fallbackWalletReward = Number(user?.walletBalance || 0);
+      setEarnedCredit(Number.isFinite(fallbackWalletReward) ? fallbackWalletReward : 0);
 
-      const count = snapshot.size;
-      const totalReward = snapshot.docs.reduce((sum, tx) => {
+      // Count validated rewards (created after paid subscription succeeds).
+      const referralTxRef = collection(db, 'referralTransactions');
+      const qByReferrerId = query(referralTxRef, where('referrerId', '==', firebaseUser.uid));
+      const qByReferrerCode = query(
+        referralTxRef,
+        where('referrerCode', '==', String(user.referralCode).trim().toUpperCase())
+      );
+      const [byIdSnap, byCodeSnap] = await Promise.all([getDocs(qByReferrerId), getDocs(qByReferrerCode)]);
+
+      const uniqueDocs = new Map<string, any>();
+      byIdSnap.docs.forEach((d) => uniqueDocs.set(d.id, d));
+      byCodeSnap.docs.forEach((d) => uniqueDocs.set(d.id, d));
+
+      const txDocs = Array.from(uniqueDocs.values());
+      const count = txDocs.length;
+      const totalReward = txDocs.reduce((sum, tx) => {
         const reward = Number((tx.data() as any)?.rewardAmount || 0);
         return sum + (Number.isFinite(reward) ? reward : 0);
       }, 0);
+      /**
+       * Derive referral count from the same rewards source that credits JDS so the UI
+       * always stays in sync with the backend behaviour:
+       * - Primary: count documents in `referralTransactions` (one per rewarded friend).
+       * - Fallback A: if we have a non‑zero totalReward but somehow no docs, infer
+       *   count as totalReward / 10 (each successful referral is worth 10 JDS).
+       * - Fallback B: if the query returns no reward rows but the wallet already has
+       *   credited balance, infer from walletBalance / 10 so old rewards still show.
+       */
+      const rewardUnit = 10; // 10 JDS per successful referral
+      let inferredCount = count;
 
-      setReferralCount(count);
-      setEarnedCredit(totalReward);
+      if (inferredCount === 0 && totalReward > 0) {
+        inferredCount = Math.floor(totalReward / rewardUnit);
+      } else if (inferredCount === 0 && totalReward === 0 && fallbackWalletReward > 0) {
+        inferredCount = Math.floor(fallbackWalletReward / rewardUnit);
+      }
+
+      setReferralCount(inferredCount);
+      // Prefer transaction-derived total; keep wallet fallback when tx total is unexpectedly zero.
+      setEarnedCredit(
+        totalReward > 0
+          ? totalReward
+          : (Number.isFinite(fallbackWalletReward) ? fallbackWalletReward : 0)
+      );
     } catch (error) {
       console.error('Error loading referral stats:', error);
+      // Keep fallback wallet-derived amount on query failure.
     } finally {
       setIsLoading(false);
     }
