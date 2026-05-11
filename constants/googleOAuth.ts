@@ -38,8 +38,9 @@ export const GOOGLE_ANDROID_CLIENT_ID =
   '40764236173-bb7qk1245ec2sgn1g02v9had3l9p1flj.apps.googleusercontent.com';
 
 export const GOOGLE_IOS_CLIENT_ID =
-  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim()) ||
+  // iOS must prefer the plist-synced extra value to avoid stale env overrides causing invalid_client.
   readExpoExtraString('googleIosClientId') ||
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim()) ||
   '40764236173-c56mvsahjfj5oftc78j5v0lviqhi49ie.apps.googleusercontent.com';
 
 export const GOOGLE_CONFIG = {

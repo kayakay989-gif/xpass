@@ -89,7 +89,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...(typeof config.extra === 'object' && config.extra !== null ? config.extra : {}),
       rorkApiBaseUrl,
       googleIosClientId:
-        (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '').trim() || googleIosClientIdFromPlist,
+        // Prefer plist value so runtime always matches iOS app registration in Firebase/Google.
+        googleIosClientIdFromPlist || (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '').trim(),
       googleMapsApiKey,
     },
   };
