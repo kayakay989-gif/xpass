@@ -116,11 +116,20 @@ export const trpcClient = trpc.createClient({
           const method = options?.method || 'POST';
           // No noisy request logging in production
           
-          const response = await fetch(url, {
-            ...options,
-            method, // Preserve the method set by tRPC
-            headers,
-          });
+          const REQUEST_TIMEOUT_MS = 14_000;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+          let response: Response;
+          try {
+            response = await fetch(url, {
+              ...options,
+              method, // Preserve the method set by tRPC
+              headers,
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timeoutId);
+          }
           
           if (!response.ok) {
             const text = await response.text();

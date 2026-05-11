@@ -14,6 +14,7 @@ import { calculateDistance, formatDistance } from '@/lib/distance';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { CITY_FILTER_OPTIONS } from '@/constants/cities';
 import SpotlightImageViewer from '@/components/SpotlightImageViewer';
+import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
 
 type ViewMode = 'map' | 'list';
 
@@ -246,8 +247,14 @@ export default function HomeScreen() {
     );
   }
 
-  const membershipPending =
-    !isGuest && !!firebaseUser && subscriptionQuery.isPending && subscription == null;
+  const { blockForMembershipLoad, timedOut } = useMembershipUiReady({
+    enabled: !isGuest && !!firebaseUser,
+    isPending: subscriptionQuery.isPending,
+    resetKey: firebaseUser?.uid ?? null,
+  });
+  const membershipUnresolved =
+    !isGuest && !!firebaseUser && subscription == null && !subscriptionQuery.isSuccess && !subscriptionQuery.isError;
+  const membershipPending = membershipUnresolved && (blockForMembershipLoad || timedOut);
 
   return (
     <ScrollView
@@ -295,7 +302,9 @@ export default function HomeScreen() {
       {membershipPending ? (
         <View style={[styles.noSubscriptionCard, { alignItems: 'center', paddingVertical: 28 }]}>
           <ActivityIndicator size="small" color={Colors.primary} />
-          <Text style={[styles.noSubText, { marginTop: 10 }]}>Loading membership…</Text>
+          <Text style={[styles.noSubText, { marginTop: 10 }]}>
+            {timedOut ? 'Still loading membership…' : 'Loading membership…'}
+          </Text>
         </View>
       ) : subscription && isSubscriptionActiveForMember(subscription) ? (
         <View style={styles.subscriptionCard}>

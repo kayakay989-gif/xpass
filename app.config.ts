@@ -1,6 +1,21 @@
 import type { ExpoConfig, ConfigContext } from 'expo/config';
+import fs from 'fs';
+import path from 'path';
 
 const DEFAULT_RORK_API_BASE_URL = 'https://xpass-b66g.onrender.com';
+
+/** Keep iOS Google OAuth client id aligned with `GoogleService-Info.plist` at build time. */
+function readGoogleServicePlistClientId(): string {
+  try {
+    const plistPath = path.join(__dirname, 'GoogleService-Info.plist');
+    if (!fs.existsSync(plistPath)) return '';
+    const xml = fs.readFileSync(plistPath, 'utf8');
+    const m = xml.match(/<key>CLIENT_ID<\/key>\s*<string>([^<]+)<\/string>/);
+    return (m?.[1] ?? '').trim();
+  } catch {
+    return '';
+  }
+}
 
 function uniqueArray<T>(value: T[] | undefined): T[] | undefined {
   if (!Array.isArray(value)) return value;
@@ -24,6 +39,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     process.env.GOOGLE_MAPS_API_KEY ||
     '';
 
+  const googleIosClientIdFromPlist = readGoogleServicePlistClientId();
+  const googleIosScheme = googleIosClientIdFromPlist
+    ? `com.googleusercontent.apps.${googleIosClientIdFromPlist.replace(/\.apps\.googleusercontent\.com$/i, '').trim()}`
+    : '';
+
   /** Baked into the native manifest; read at runtime via expo-constants (iOS + Android). */
   const rorkApiBaseUrl =
     (process.env.EXPO_PUBLIC_RORK_API_BASE_URL || '').trim() ||
@@ -32,6 +52,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
     name: config.name ?? 'Xpass',
+    scheme: uniqueArray(
+      [
+        ...(Array.isArray(config.scheme) ? config.scheme : []),
+        'xpass',
+        googleIosScheme || undefined,
+      ].filter(Boolean) as string[]
+    ),
     ios: {
       ...config.ios,
       associatedDomains: uniqueArray(config.ios?.associatedDomains),
@@ -61,6 +88,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     extra: {
       ...(typeof config.extra === 'object' && config.extra !== null ? config.extra : {}),
       rorkApiBaseUrl,
+      googleIosClientId:
+        (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '').trim() || googleIosClientIdFromPlist,
+      googleMapsApiKey,
     },
   };
 };

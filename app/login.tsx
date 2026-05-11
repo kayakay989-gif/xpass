@@ -81,18 +81,23 @@ export default function LoginScreen() {
   const googleIosClientId = GOOGLE_CONFIG.iosClientId?.trim() || '';
   const isGoogleClientConfigValid = Platform.OS !== 'ios' || !!googleIosClientId;
 
-  // Native: authorization code + PKCE; library exchanges for tokens and surfaces id_token for Firebase.
-  console.log('Google OAuth Init');
-  console.log('Using iOS Client ID:', GOOGLE_CONFIG.iosClientId);
+  // iOS: `IdToken` avoids fragile code-exchange paths with Google's native client.
+  // Android: `Code` + PKCE (library exchanges for tokens and surfaces id_token for Firebase).
   // Use Google's reversed-client scheme directly. makeRedirectUri({ native }) only applies that
   // value in Standalone/Bare; other environments would fall back to the app scheme and break OAuth.
   const googleOAuthRedirectUri = getGoogleNativeOAuthRedirectUri();
+  const nativeGoogleResponseType: ResponseType | undefined =
+    Platform.OS === 'web'
+      ? undefined
+      : Platform.OS === 'ios'
+        ? ResponseType.IdToken
+        : ResponseType.Code;
   const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
     iosClientId: googleIosClientId || undefined,
     webClientId: GOOGLE_WEB_CLIENT_ID,
     scopes: ['profile', 'email'],
-    ...(Platform.OS !== 'web' ? { responseType: ResponseType.Code } : {}),
+    ...(nativeGoogleResponseType ? { responseType: nativeGoogleResponseType } : {}),
     ...(googleOAuthRedirectUri ? { redirectUri: googleOAuthRedirectUri } : {}),
   });
   const isGoogleButtonAvailable =
@@ -104,7 +109,8 @@ export default function LoginScreen() {
     if (googleResponse?.type !== 'success') return;
     const idToken =
       (googleResponse.params?.id_token as string | undefined) ||
-      (googleResponse.params as any)?.id_token;
+      (googleResponse.params as any)?.id_token ||
+      ((googleResponse as any).authentication?.idToken as string | undefined);
     if (!idToken || googleIdTokenHandledRef.current === idToken) return;
     googleIdTokenHandledRef.current = idToken;
     (async () => {

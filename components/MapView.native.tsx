@@ -1,5 +1,7 @@
 import { View, StyleSheet, Text, Platform } from 'react-native';
+import Constants from 'expo-constants';
 import Colors from '@/constants/colors';
+import { config } from '@/lib/config';
 
 interface MapViewComponentProps {
   gyms: any[];
@@ -91,10 +93,24 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
     );
   }
 
-  // iOS: use Apple Maps (default). Google Maps on iOS requires a native GMS API key or tiles stay blank.
-  // Android: prefer Google maps when the native module exposes PROVIDER_GOOGLE.
+  const mapsApiKey =
+    (config.googleMaps.apiKey && config.googleMaps.apiKey !== 'REPLACE_ME'
+      ? String(config.googleMaps.apiKey).trim()
+      : '') ||
+    (typeof Constants.expoConfig?.extra?.googleMapsApiKey === 'string'
+      ? String(Constants.expoConfig.extra.googleMapsApiKey).trim()
+      : '');
+
+  // Android: Google Maps. iOS: use Google Maps when an API key is present (Expo injects `ios.config.googleMapsApiKey` at prebuild).
+  const useGoogleOnIos =
+    Platform.OS === 'ios' && !!mapsApiKey && PROVIDER_GOOGLE != null;
+
   const mapProvider =
-    Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE ?? undefined;
+    Platform.OS === 'android'
+      ? PROVIDER_GOOGLE ?? undefined
+      : useGoogleOnIos
+        ? PROVIDER_GOOGLE
+        : undefined;
 
   // Use native maps if available
   return (

@@ -6,11 +6,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { agentLog } from '@/lib/agent-debug-log';
+import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
 
 export default function MySubscriptionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, firebaseUser } = useAuth();
   const { subscription, subscriptionQuery } = useApp();
 
   const goBackOrHome = () => {
@@ -19,13 +20,42 @@ export default function MySubscriptionScreen() {
     return router.replace('/(tabs)/home');
   };
 
-  if (subscriptionQuery.isPending && subscription == null) {
+  const { blockForMembershipLoad, timedOut } = useMembershipUiReady({
+    enabled: !!firebaseUser?.uid,
+    isPending: subscriptionQuery.isPending,
+    resetKey: firebaseUser?.uid ?? null,
+  });
+  const membershipUnresolved =
+    !!firebaseUser?.uid && subscription == null && !subscriptionQuery.isSuccess && !subscriptionQuery.isError;
+
+  if (membershipUnresolved && !timedOut && blockForMembershipLoad) {
     return (
       <>
         <Stack.Screen options={{ headerShown: false }} />
         <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={{ marginTop: 14, fontSize: 15, color: Colors.textSecondary }}>Loading membership…</Text>
+        </View>
+      </>
+    );
+  }
+
+  if (membershipUnresolved && timedOut) {
+    return (
+      <>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.text }}>
+            Still loading membership…
+          </Text>
+          <TouchableOpacity
+            style={[styles.subscribeButton, { marginTop: 16 }]}
+            onPress={() => {
+              void subscriptionQuery.refetch();
+            }}
+          >
+            <Text style={styles.subscribeButtonText}>Try Again</Text>
+          </TouchableOpacity>
         </View>
       </>
     );

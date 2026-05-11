@@ -4,81 +4,31 @@ import { Stack } from 'expo-router';
 import { Gift, Copy, Share2, Users } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { trpc } from '@/lib/trpc';
 import * as Clipboard from 'expo-clipboard';
 
 export default function ReferFriendScreen() {
   const { user, firebaseUser } = useAuth();
-  const [referralCount, setReferralCount] = useState(0);
-  const [earnedCredit, setEarnedCredit] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const referralStatsQuery = trpc.users.getReferralStats.useQuery(undefined, {
+    enabled: !!firebaseUser,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+  });
 
   useEffect(() => {
-    if (firebaseUser && user?.referralCode) {
-      loadReferralStats();
-    }
-  }, [firebaseUser, user]);
-  const loadReferralStats = async () => {
-    if (!firebaseUser || !user?.referralCode) return;
-    
-    try {
-      setIsLoading(true);
-      // Safe baseline: if referralTransactions query is blocked/empty, reflect credited amount from wallet.
-      const fallbackWalletReward = Number(user?.walletBalance || 0);
-      setEarnedCredit(Number.isFinite(fallbackWalletReward) ? fallbackWalletReward : 0);
+    setIsLoading(referralStatsQuery.isLoading || referralStatsQuery.isRefetching);
+  }, [referralStatsQuery.isLoading, referralStatsQuery.isRefetching]);
 
-      // Count validated rewards (created after paid subscription succeeds).
-      const referralTxRef = collection(db, 'referralTransactions');
-      const qByReferrerId = query(referralTxRef, where('referrerId', '==', firebaseUser.uid));
-      const qByReferrerCode = query(
-        referralTxRef,
-        where('referrerCode', '==', String(user.referralCode).trim().toUpperCase())
-      );
-      const [byIdSnap, byCodeSnap] = await Promise.all([getDocs(qByReferrerId), getDocs(qByReferrerCode)]);
+  useEffect(() => {
+    if (!firebaseUser) return;
+    void referralStatsQuery.refetch();
+  }, [firebaseUser]);
 
-      const uniqueDocs = new Map<string, any>();
-      byIdSnap.docs.forEach((d) => uniqueDocs.set(d.id, d));
-      byCodeSnap.docs.forEach((d) => uniqueDocs.set(d.id, d));
-
-      const txDocs = Array.from(uniqueDocs.values());
-      const count = txDocs.length;
-      const totalReward = txDocs.reduce((sum, tx) => {
-        const reward = Number((tx.data() as any)?.rewardAmount || 0);
-        return sum + (Number.isFinite(reward) ? reward : 0);
-      }, 0);
-      /**
-       * Derive referral count from the same rewards source that credits JDS so the UI
-       * always stays in sync with the backend behaviour:
-       * - Primary: count documents in `referralTransactions` (one per rewarded friend).
-       * - Fallback A: if we have a non‑zero totalReward but somehow no docs, infer
-       *   count as totalReward / 10 (each successful referral is worth 10 JDS).
-       * - Fallback B: if the query returns no reward rows but the wallet already has
-       *   credited balance, infer from walletBalance / 10 so old rewards still show.
-       */
-      const rewardUnit = 10; // 10 JDS per successful referral
-      let inferredCount = count;
-
-      if (inferredCount === 0 && totalReward > 0) {
-        inferredCount = Math.floor(totalReward / rewardUnit);
-      } else if (inferredCount === 0 && totalReward === 0 && fallbackWalletReward > 0) {
-        inferredCount = Math.floor(fallbackWalletReward / rewardUnit);
-      }
-
-      setReferralCount(inferredCount);
-      // Prefer transaction-derived total; keep wallet fallback when tx total is unexpectedly zero.
-      setEarnedCredit(
-        totalReward > 0
-          ? totalReward
-          : (Number.isFinite(fallbackWalletReward) ? fallbackWalletReward : 0)
-      );
-    } catch (error) {
-      console.error('Error loading referral stats:', error);
-      // Keep fallback wallet-derived amount on query failure.
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const statsReady = referralStatsQuery.isSuccess;
+  const referralCount = referralStatsQuery.data?.referralCount ?? 0;
+  const earnedCredit = referralStatsQuery.data?.earnedCredit ?? 0;
 
   const referralCode = user?.referralCode || 'N/A';
   const webBaseUrl =
@@ -125,12 +75,14 @@ export default function ReferFriendScreen() {
           <View style={styles.statsContainer}>
             <View style={styles.statCard}>
               <Users size={24} color={Colors.text} />
-              <Text style={styles.statValue}>{referralCount}</Text>
+              <Text style={styles.statValue}>{statsReady ? referralCount : '-'}</Text>
               <Text style={styles.statLabel}>Friends Referred</Text>
             </View>
             <View style={styles.statCard}>
               <Gift size={24} color="#DC143C" />
-              <Text style={styles.statValue}>{earnedCredit}</Text>
+              <Text style={styles.statValue}>
+                {statsReady ? (Number.isInteger(earnedCredit) ? earnedCredit : earnedCredit.toFixed(2)) : '-'}
+              </Text>
               <Text style={styles.statLabel}>JDS Earned</Text>
             </View>
           </View>

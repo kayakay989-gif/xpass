@@ -1,5 +1,17 @@
 import { Platform } from 'react-native';
 
+function readExpoExtraString(key: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Constants = require('expo-constants').default;
+    const extra = Constants?.expoConfig?.extra ?? Constants?.manifest?.extra ?? {};
+    const v = extra?.[key];
+    return typeof v === 'string' ? v.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Google OAuth client IDs for Expo AuthSession + Firebase (same GCP project as Firebase).
  *
@@ -26,8 +38,9 @@ export const GOOGLE_ANDROID_CLIENT_ID =
   '40764236173-bb7qk1245ec2sgn1g02v9had3l9p1flj.apps.googleusercontent.com';
 
 export const GOOGLE_IOS_CLIENT_ID =
-  process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ||
-  '40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie.apps.googleusercontent.com';
+  (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim()) ||
+  readExpoExtraString('googleIosClientId') ||
+  '40764236173-c56mvsahjfj5oftc78j5v0lviqhi49ie.apps.googleusercontent.com';
 
 export const GOOGLE_CONFIG = {
   iosClientId: GOOGLE_IOS_CLIENT_ID,
