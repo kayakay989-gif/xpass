@@ -89,17 +89,110 @@ export default function LoginScreen() {
   const nativeGoogleResponseType: ResponseType | undefined =
     Platform.OS === 'web'
       ? undefined
-      : Platform.OS === 'ios'
-        ? ResponseType.IdToken
-        : ResponseType.Code;
+      : ResponseType.Code;
   const [googleAuthRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
     androidClientId: GOOGLE_ANDROID_CLIENT_ID,
     iosClientId: googleIosClientId || undefined,
-    webClientId: GOOGLE_WEB_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
     scopes: ['profile', 'email'],
     ...(nativeGoogleResponseType ? { responseType: nativeGoogleResponseType } : {}),
     ...(googleOAuthRedirectUri ? { redirectUri: googleOAuthRedirectUri } : {}),
   });
+  // #region agent log
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const url = googleAuthRequest?.url;
+    let urlResponseType: string | null = null;
+    let redirectUriHost = '';
+    let redirectInUrl = false;
+    try {
+      if (url) {
+        const parsed = new URL(url);
+        urlResponseType = parsed.searchParams.get('response_type');
+        const ru = parsed.searchParams.get('redirect_uri');
+        redirectInUrl = !!ru;
+        if (ru) {
+          try {
+            redirectUriHost = new URL(decodeURIComponent(ru)).hostname;
+          } catch {
+            redirectUriHost = 'decode_or_parse_err';
+          }
+        }
+      }
+    } catch {
+      urlResponseType = 'url_parse_err';
+    }
+    const payload = {
+      sessionId: '4fc1bb',
+      runId: 'post-fix',
+      hypothesisId: 'H1-H5',
+      location: 'login.tsx:googleOAuthInstrument',
+      message: 'native google auth request snapshot',
+      data: {
+        platform: Platform.OS,
+        responseTypeEnum: nativeGoogleResponseType ?? null,
+        redirectFromGetGoogleNative: googleOAuthRedirectUri ?? null,
+        webClientIdEnvLen: (process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '').length,
+        hasAuthUrl: !!url,
+        urlResponseType,
+        redirectInUrl,
+        redirectUriHost,
+        hasGoogleAuthRequest: !!googleAuthRequest,
+      },
+      timestamp: Date.now(),
+    };
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      try {
+        console.log('[agent-4fc1bb]', JSON.stringify(payload));
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4fc1bb' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }, [
+    googleAuthRequest?.url,
+    googleOAuthRedirectUri,
+    nativeGoogleResponseType,
+    googleAuthRequest,
+  ]);
+  useEffect(() => {
+    if (!googleResponse) return;
+    if (googleResponse.type !== 'error' && googleResponse.type !== 'dismiss') return;
+    const p = googleResponse.params as Record<string, unknown> | undefined;
+    const err = typeof p?.error === 'string' ? p.error : '';
+    const ed =
+      typeof p?.error_description === 'string' ? String(p.error_description).slice(0, 160) : '';
+    const payload2 = {
+      sessionId: '4fc1bb',
+      runId: 'post-fix',
+      hypothesisId: 'H4',
+      location: 'login.tsx:googleResponseError',
+      message: 'google auth session response non-success',
+      data: {
+        responseType: googleResponse.type,
+        oauthError: err,
+        errorDescSnippet: ed,
+      },
+      timestamp: Date.now(),
+    };
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      try {
+        console.log('[agent-4fc1bb]', JSON.stringify(payload2));
+      } catch {
+        /* ignore */
+      }
+    }
+    fetch('http://127.0.0.1:7259/ingest/afbf0a1a-8b00-4ff6-b84b-01802a5b1f64', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4fc1bb' },
+      body: JSON.stringify(payload2),
+    }).catch(() => {});
+  }, [googleResponse]);
+  // #endregion
   const isGoogleButtonAvailable =
     isGoogleClientConfigValid &&
     (Platform.OS === 'web' ? true : !!googleAuthRequest);

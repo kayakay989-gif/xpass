@@ -59,8 +59,12 @@ export const GOOGLE_CONFIG = {
  */
 export function getGoogleNativeOAuthRedirectUri(): string | undefined {
   if (Platform.OS === 'web') return undefined;
-  const full =
-    Platform.OS === 'android' ? GOOGLE_ANDROID_CLIENT_ID : GOOGLE_IOS_CLIENT_ID;
+  if (Platform.OS === 'ios') {
+    const full = GOOGLE_IOS_CLIENT_ID;
+    const idPart = full.replace(/\.apps\.googleusercontent\.com$/i, '').trim();
+    return `com.googleusercontent.apps.${idPart}:/oauthredirect`;
+  }
+  const full = GOOGLE_ANDROID_CLIENT_ID;
   const idPart = full.replace(/\.apps\.googleusercontent\.com$/i, '').trim();
   return `com.googleusercontent.apps.${idPart}:/oauthredirect`;
 }

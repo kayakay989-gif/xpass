@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": [
       "xpass",
-      "com.googleusercontent.apps.40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie",
+      "com.googleusercontent.apps.40764236173-c56mvsahjfj5oftc78j5v0lviqhi49ie",
       "com.googleusercontent.apps.40764236173-bb7qk1245ec2sgn1g02v9had3l9p1flj"
     ],
     "userInterfaceStyle": "automatic",
@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "41",
+      "buildNumber": "49",
       "config": {},
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
@@ -56,7 +56,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 34,
+      "versionCode": 38,
       "config": {},
       "intentFilters": [
         {
@@ -111,7 +111,7 @@
           ],
           "data": [
             {
-              "scheme": "com.googleusercontent.apps.40764236173-c56mvsahjfj50ftc78j5v0lviqhi49ie"
+              "scheme": "com.googleusercontent.apps.40764236173-c56mvsahjfj5oftc78j5v0lviqhi49ie"
             }
           ]
         },

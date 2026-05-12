@@ -10,6 +10,7 @@ import { TIER_COLORS } from '@/constants/tier-colors';
 import { normalizeSubscriptionTier } from '@/lib/subscription-tier';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { agentLog } from '@/lib/agent-debug-log';
+import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
 
 type Package = {
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
@@ -154,8 +155,14 @@ export default function SubscriptionScreen() {
     };
   }, [selectedDuration]);
 
-  // First load only: keepPreviousData can supply subscription while refetching — don't block the whole screen.
-  if (firebaseUser?.uid && subscriptionQuery.isPending && subscription == null) {
+  const { blockForMembershipLoad } = useMembershipUiReady({
+    enabled: !!firebaseUser?.uid,
+    isPending: subscriptionQuery.isPending,
+    resetKey: firebaseUser?.uid ?? null,
+  });
+
+  // First load only: never block indefinitely if the API hangs (App Store review / cold Render).
+  if (firebaseUser?.uid && blockForMembershipLoad && subscription == null) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -272,7 +279,7 @@ export default function SubscriptionScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>XPass Packages</Text>
+        <Text style={styles.title}>Xpass Packages</Text>
 
         <View style={styles.durationsContainer}>
           {DURATIONS.map((duration) => (
