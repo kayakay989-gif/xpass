@@ -99,14 +99,14 @@ app.all("/api/3ds/callback", async (c) => {
     }
   }
 
-  const msg = JSON.stringify({
+  const msgObj = {
     type: '3DS_AUTH_COMPLETE',
     orderId,
     authTransactionId,
     result,
     gatewayRecommendation,
     delegate,
-  });
+  };
 
   const html = `
     <html>
@@ -114,15 +114,23 @@ app.all("/api/3ds/callback", async (c) => {
         <h2>Authentication received</h2>
         <p>You can return to the app now.</p>
         <script>
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(${JSON.stringify(msg)});
-          }
-          // Web fallback: notify parent window if inside an iframe.
-          try {
-            if (window.parent && window.parent !== window) {
-              window.parent.postMessage(${JSON.stringify(msg)}, '*');
-          }
-          } catch (e) {}
+          (function () {
+            var payload = ${JSON.stringify(msgObj)};
+            var str = JSON.stringify(payload);
+            function notify() {
+              if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                window.ReactNativeWebView.postMessage(str);
+              }
+              try {
+                if (window.parent && window.parent !== window) {
+                  window.parent.postMessage(str, '*');
+                }
+              } catch (e) {}
+            }
+            notify();
+            setTimeout(notify, 250);
+            setTimeout(notify, 1000);
+          })();
         </script>
       </body>
     </html>
