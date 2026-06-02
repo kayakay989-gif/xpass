@@ -17,6 +17,34 @@ import Toast, { ToastType } from '@/components/Toast';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { paramFirst } from '@/lib/expo-router-params';
 import { agentLog } from '@/lib/agent-debug-log';
+import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
+
+type ThreeDsCallbackMessage = {
+  type: string;
+  orderId?: string;
+  authTransactionId?: string;
+  result?: string;
+};
+
+/** WKWebView may deliver the callback payload as a JSON string or double-encoded JSON. */
+function parse3dsCallbackMessage(raw: string): ThreeDsCallbackMessage | null {
+  try {
+    let parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === 'string') {
+      parsed = JSON.parse(parsed);
+    }
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      (parsed as ThreeDsCallbackMessage).type === '3DS_AUTH_COMPLETE'
+    ) {
+      return parsed as ThreeDsCallbackMessage;
+    }
+  } catch {
+    // Ignore non-JSON postMessage payloads.
+  }
+  return null;
+}
 
 export default function PaymentScreen() {
   const rawParams = useLocalSearchParams<{ tier?: string | string[]; duration?: string | string[]; price?: string | string[] }>();
@@ -55,6 +83,11 @@ export default function PaymentScreen() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [authTransactionId, setAuthTransactionId] = useState<string | null>(null);
   const finalizeSentRef = useRef(false);
+  const orderIdRef = useRef<string | null>(null);
+  const authTransactionIdRef = useRef<string | null>(null);
+  const challengeWebViewRef = useRef<WebView>(null);
+  const [challengePhase, setChallengePhase] = useState<'challenge' | 'completing'>('challenge');
+  const [ios3dsCallbackDetected, setIos3dsCallbackDetected] = useState(false);
   const [couponCode, setCouponCode] = useState<string>('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [couponError, setCouponError] = useState<string>('');
@@ -70,6 +103,17 @@ export default function PaymentScreen() {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<ToastType>('success');
+
+  const navigateHomeAfterPayment = useCallback(() => {
+    setChallengeHtml(null);
+    setPaymentProcessing(false);
+    setStatusMessage('');
+    if (Platform.OS === 'ios') {
+      scheduleAuthNavigation((href) => router.replace(href as any), '/(tabs)/home');
+      return;
+    }
+    router.replace('/(tabs)/home');
+  }, [router]);
 
   const validateCouponQuery = trpc.coupons.validate.useQuery(
     {
@@ -176,8 +220,12 @@ export default function PaymentScreen() {
       if (data.requires3DS && data.redirectHtml) {
         console.log('[Payment] 3DS challenge required, showing authentication page');
         finalizeSentRef.current = false; // New challenge => allow finalize again
+        setChallengePhase('challenge');
+        setIos3dsCallbackDetected(false);
         setOrderId(data.orderId);
         setAuthTransactionId(data.authenticationTransactionId);
+        orderIdRef.current = data.orderId ?? null;
+        authTransactionIdRef.current = data.authenticationTransactionId ?? null;
         setChallengeHtml(data.redirectHtml);
         setPaymentProcessing(false);
         setStatusMessage('Please complete bank verification');
@@ -186,6 +234,9 @@ export default function PaymentScreen() {
 
       setPaymentProcessing(false);
       setStatusMessage('');
+      setChallengeHtml(null);
+      setChallengePhase('challenge');
+      setIos3dsCallbackDetected(false);
 
       const subFromCheckout = data.subscription;
 
@@ -198,9 +249,12 @@ export default function PaymentScreen() {
         setToastType('success');
         setToastMessage('Subscribed successfully! Your membership is now active.');
         setToastVisible(true);
-        setTimeout(() => {
-          router.replace('/(tabs)/home');
-        }, 1200);
+        setTimeout(
+          () => {
+            navigateHomeAfterPayment();
+          },
+          Platform.OS === 'ios' ? 700 : 1200
+        );
       };
 
       // Same contract as web: successful checkout returns the created subscription immediately.
@@ -253,7 +307,7 @@ export default function PaymentScreen() {
           [
             {
               text: 'OK',
-              onPress: () => router.replace('/(tabs)/home'),
+              onPress: navigateHomeAfterPayment,
             },
           ]
         );
@@ -273,7 +327,7 @@ export default function PaymentScreen() {
           [
             {
               text: 'OK',
-              onPress: () => router.replace('/(tabs)/home'),
+              onPress: navigateHomeAfterPayment,
             },
           ]
         );
@@ -544,6 +598,7 @@ export default function PaymentScreen() {
       console.error('[Payment] Failed to finalize payment after 3DS:', error);
       setPaymentProcessing(false);
       setStatusMessage('');
+      setChallengePhase('challenge');
       finalizeSentRef.current = false; // Allow retry if finalize failed
       Alert.alert('Payment Failed', error.message || 'Failed to complete payment after authentication. Please try again.');
     }
@@ -606,6 +661,120 @@ export default function PaymentScreen() {
     window.addEventListener('message', handler as EventListener);
     return () => window.removeEventListener('message', handler as EventListener);
   }, [orderId, authTransactionId, handleFinalizePayment]);
+
+  useEffect(() => {
+    orderIdRef.current = orderId;
+  }, [orderId]);
+
+  useEffect(() => {
+    authTransactionIdRef.current = authTransactionId;
+  }, [authTransactionId]);
+
+  const is3dsCallbackUrl = useCallback(
+    (url: string | undefined): boolean => {
+      if (!url) return false;
+      if (url.includes('/api/3ds/callback')) return true;
+      if (redirectUrl && url.startsWith(redirectUrl)) return true;
+      return false;
+    },
+    [redirectUrl]
+  );
+
+  const tryFinalizeFrom3ds = useCallback(
+    (payload: { orderId?: string | null; authTransactionId?: string | null; result?: string }) => {
+      const finalOrderId = payload.orderId ?? orderIdRef.current;
+      const finalAuthTransactionId = payload.authTransactionId ?? authTransactionIdRef.current;
+      if (!finalOrderId || !finalAuthTransactionId) {
+        console.warn('[Payment][iOS] 3DS finalize skipped — missing order/auth ids', {
+          finalOrderId,
+          finalAuthTransactionId,
+        });
+        return;
+      }
+      if (finalizeSentRef.current) return;
+
+      finalizeSentRef.current = true;
+      setChallengePhase('completing');
+      setIos3dsCallbackDetected(true);
+      setStatusMessage('Completing payment...');
+      handleFinalizePayment(finalOrderId, finalAuthTransactionId, payload.result || 'Y');
+    },
+    [handleFinalizePayment]
+  );
+
+  const probeIos3dsCallbackPage = useCallback(() => {
+    if (Platform.OS !== 'ios') return;
+    challengeWebViewRef.current?.injectJavaScript(`
+      (function () {
+        var text = (document.body && document.body.innerText) || '';
+        if (/authentication received/i.test(text)) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: '3DS_AUTH_COMPLETE', detectedBy: 'dom' }));
+        }
+      })();
+      true;
+    `);
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !challengeHtml || challengePhase === 'completing') return;
+    const intervalId = setInterval(probeIos3dsCallbackPage, 800);
+    return () => clearInterval(intervalId);
+  }, [challengeHtml, challengePhase, probeIos3dsCallbackPage]);
+
+  const handleIos3dsMessage = useCallback(
+    (event: { nativeEvent: { data: string } }) => {
+      const raw = event.nativeEvent.data;
+      if (typeof raw !== 'string') return;
+
+      const message = parse3dsCallbackMessage(raw);
+      if (message) {
+        setIos3dsCallbackDetected(true);
+        tryFinalizeFrom3ds({
+          orderId: message.orderId,
+          authTransactionId: message.authTransactionId,
+          result: message.result,
+        });
+        return;
+      }
+
+      if (raw === '3DS_AUTH_COMPLETE') {
+        setIos3dsCallbackDetected(true);
+        tryFinalizeFrom3ds({});
+      }
+    },
+    [tryFinalizeFrom3ds]
+  );
+
+  const handleIos3dsNavigation = useCallback(
+    (navState: { url?: string }) => {
+      if (!is3dsCallbackUrl(navState.url)) return;
+      setIos3dsCallbackDetected(true);
+      tryFinalizeFrom3ds({});
+    },
+    [is3dsCallbackUrl, tryFinalizeFrom3ds]
+  );
+
+  const handleIos3dsLoadEnd = useCallback(
+    (event: { nativeEvent: { url?: string } }) => {
+      if (is3dsCallbackUrl(event.nativeEvent.url)) {
+        setIos3dsCallbackDetected(true);
+        tryFinalizeFrom3ds({});
+      }
+      probeIos3dsCallbackPage();
+    },
+    [is3dsCallbackUrl, tryFinalizeFrom3ds, probeIos3dsCallbackPage]
+  );
+
+  const handleIos3dsShouldStartLoad = useCallback(
+    (request: { url: string }) => {
+      if (is3dsCallbackUrl(request.url)) {
+        setIos3dsCallbackDetected(true);
+        tryFinalizeFrom3ds({});
+      }
+      return true;
+    },
+    [is3dsCallbackUrl, tryFinalizeFrom3ds]
+  );
 
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) {
@@ -1323,62 +1492,99 @@ export default function PaymentScreen() {
 
         {challengeHtml && Platform.OS !== 'web' && (
           <View style={styles.challengeOverlay}>
-            <Text style={styles.challengeTitle}>Complete bank verification</Text>
-            <Text style={styles.challengeSubtitle}>Follow the steps from your bank to continue</Text>
+            <Text style={styles.challengeTitle}>
+              {challengePhase === 'completing' ? 'Completing payment' : 'Complete bank verification'}
+            </Text>
+            <Text style={styles.challengeSubtitle}>
+              {challengePhase === 'completing'
+                ? 'Please wait while we confirm your subscription…'
+                : 'Follow the steps from your bank to continue'}
+            </Text>
+            {challengePhase === 'completing' ? (
+              <View style={styles.challengeCompleting}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+              </View>
+            ) : (
             <WebView
+              ref={challengeWebViewRef}
               originWhitelist={['*']}
               source={{ html: challengeHtml }}
               style={styles.challengeWebview}
-              onMessage={(event) => {
-                try {
-                  const message = typeof event.nativeEvent.data === 'string' 
-                    ? JSON.parse(event.nativeEvent.data) 
-                    : event.nativeEvent.data;
-                  
-                  if (
-                    message?.type === '3DS_AUTH_COMPLETE' &&
-                    orderId &&
-                    authTransactionId &&
-                    !finalizeSentRef.current
-                  ) {
-                    console.log('[Payment] 3DS authentication complete via message:', message);
-                    finalizeSentRef.current = true;
-                    setChallengeHtml(null);
-                    // Complete payment with authentication
-                    handleFinalizePayment(orderId, authTransactionId, message.result || 'Y');
-                  }
-                } catch (e) {
-                  // If message is not JSON, check for string match
-                  if (
-                    event.nativeEvent.data === '3DS_AUTH_COMPLETE' &&
-                    orderId &&
-                    authTransactionId &&
-                    !finalizeSentRef.current
-                  ) {
-                    console.log('[Payment] 3DS authentication complete via string message');
-                    finalizeSentRef.current = true;
-                    setChallengeHtml(null);
-                    handleFinalizePayment(orderId, authTransactionId, 'Y');
-                  }
-                }
-              }}
-              onNavigationStateChange={(navState) => {
-                if (
-                  navState.url &&
-                  redirectUrl &&
-                  (navState.url.startsWith(redirectUrl) || navState.url.includes('/api/3ds/callback')) &&
-                  orderId &&
-                  authTransactionId &&
-                  !finalizeSentRef.current
-                ) {
-                  console.log('[Payment] 3DS callback URL detected:', navState.url);
-                  finalizeSentRef.current = true;
-                  setChallengeHtml(null);
-                  // After challenge completion, authentication status is typically 'Y' (successful)
-                  handleFinalizePayment(orderId, authTransactionId, 'Y');
-                }
-              }}
+              onMessage={
+                Platform.OS === 'ios'
+                  ? handleIos3dsMessage
+                  : (event) => {
+                      try {
+                        const message =
+                          typeof event.nativeEvent.data === 'string'
+                            ? JSON.parse(event.nativeEvent.data)
+                            : event.nativeEvent.data;
+
+                        if (
+                          message?.type === '3DS_AUTH_COMPLETE' &&
+                          orderId &&
+                          authTransactionId &&
+                          !finalizeSentRef.current
+                        ) {
+                          console.log('[Payment] 3DS authentication complete via message:', message);
+                          finalizeSentRef.current = true;
+                          setChallengeHtml(null);
+                          handleFinalizePayment(orderId, authTransactionId, message.result || 'Y');
+                        }
+                      } catch {
+                        if (
+                          event.nativeEvent.data === '3DS_AUTH_COMPLETE' &&
+                          orderId &&
+                          authTransactionId &&
+                          !finalizeSentRef.current
+                        ) {
+                          console.log('[Payment] 3DS authentication complete via string message');
+                          finalizeSentRef.current = true;
+                          setChallengeHtml(null);
+                          handleFinalizePayment(orderId, authTransactionId, 'Y');
+                        }
+                      }
+                    }
+              }
+              onNavigationStateChange={
+                Platform.OS === 'ios'
+                  ? handleIos3dsNavigation
+                  : (navState) => {
+                      if (
+                        navState.url &&
+                        redirectUrl &&
+                        (navState.url.startsWith(redirectUrl) ||
+                          navState.url.includes('/api/3ds/callback')) &&
+                        orderId &&
+                        authTransactionId &&
+                        !finalizeSentRef.current
+                      ) {
+                        console.log('[Payment] 3DS callback URL detected:', navState.url);
+                        finalizeSentRef.current = true;
+                        setChallengeHtml(null);
+                        handleFinalizePayment(orderId, authTransactionId, 'Y');
+                      }
+                    }
+              }
+              onLoadEnd={Platform.OS === 'ios' ? handleIos3dsLoadEnd : undefined}
+              onShouldStartLoadWithRequest={
+                Platform.OS === 'ios' ? handleIos3dsShouldStartLoad : undefined
+              }
             />
+            )}
+            {Platform.OS === 'ios' && challengePhase !== 'completing' && (
+              <TouchableOpacity
+                style={styles.challengeContinueButton}
+                onPress={() => {
+                  setIos3dsCallbackDetected(true);
+                  tryFinalizeFrom3ds({});
+                }}
+              >
+                <Text style={styles.challengeContinueButtonText}>
+                  {ios3dsCallbackDetected ? 'Continue to app' : 'Bank verified — continue'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -1577,6 +1783,25 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderRadius: 12,
     overflow: 'hidden',
+  },
+  challengeCompleting: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  challengeContinueButton: {
+    marginTop: 12,
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  challengeContinueButtonText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
   // Coupon styles
   couponSection: {

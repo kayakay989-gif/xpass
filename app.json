@@ -2,7 +2,7 @@
   "expo": {
     "name": "Xpass",
     "slug": "xpass-subscription-app",
-    "version": "1.0.15",
+    "version": "1.0.16",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "49",
+      "buildNumber": "53",
       "config": {},
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
@@ -42,9 +42,9 @@
         },
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleLocalizations": [
-          "fr",
-          "fr"
-        ]
+          "en"
+        ],
+        "CFBundleDevelopmentRegion": "en"
       },
       "runtimeVersion": {
         "policy": "appVersion"

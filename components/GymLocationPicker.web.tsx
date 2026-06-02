@@ -14,6 +14,19 @@ type Props = {
   }) => void;
 };
 
+/** Google Places types for fitness / sports businesses (plus unrestricted search). */
+const FITNESS_PLACE_TYPES = ['gym', 'stadium', 'spa'] as const;
+
+function dedupePlacesById(places: any[]): any[] {
+  const seen = new Set<string>();
+  return places.filter((place) => {
+    const id = place?.place_id;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 // Web-only component to render the Google Maps div
 function GoogleMapDiv({ mapRef }: { mapRef: React.RefObject<HTMLDivElement> }) {
   // @ts-ignore - React Native Web supports HTML elements
@@ -224,7 +237,8 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
         // Initialize Autocomplete for search
         if (searchInputRef.current) {
           const autocomplete = new google.maps.places.Autocomplete(searchInputRef.current, {
-            types: ['gym', 'establishment'],
+            // All Google Business / POI establishments (gyms, sports clubs, fitness centers, etc.)
+            types: ['establishment'],
             fields: ['place_id', 'geometry', 'name', 'formatted_address', 'address_components'],
           });
 
@@ -267,8 +281,8 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
     };
   }, [googleMapsLoaded, onChange, onSelectPlace]);
 
-  // Search for gyms using Places API
-  const searchGyms = async (query: string) => {
+  // Search businesses via Places API (gyms, sports clubs, fitness centers, etc.)
+  const searchPlaces = async (query: string) => {
     if (!query.trim() || !placesServiceRef.current || !mapInstanceRef.current) {
       setSearchResults([]);
       return;
@@ -277,29 +291,50 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
     setIsSearching(true);
     const map = mapInstanceRef.current;
     const google = (window as any).google;
-    if (!google?.maps) return;
+    if (!google?.maps?.places) {
+      setIsSearching(false);
+      return;
+    }
 
-    const request = {
-      query: query + ' gym',
-      location: map.getCenter(),
-      radius: 5000, // 5km radius
-      type: 'gym',
+    const trimmed = query.trim();
+    const center = map.getCenter();
+    const baseRequest = {
+      query: trimmed,
+      location: center,
+      radius: 15000,
     };
 
-    placesServiceRef.current.textSearch(request, (results: any[], status: string) => {
+    const runTextSearch = (request: Record<string, unknown>): Promise<any[]> =>
+      new Promise((resolve) => {
+        placesServiceRef.current.textSearch(request, (results: any[], status: string) => {
+          if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+            resolve(results);
+          } else {
+            resolve([]);
+          }
+        });
+      });
+
+    try {
+      const requests: Record<string, unknown>[] = [
+        { ...baseRequest },
+        ...FITNESS_PLACE_TYPES.map((type) => ({ ...baseRequest, type })),
+      ];
+      const batches = await Promise.all(requests.map(runTextSearch));
+      const merged = dedupePlacesById(batches.flat());
+      setSearchResults(merged.slice(0, 12));
+    } catch (e) {
+      console.warn('[GymLocationPicker] Place search failed:', e);
+      setSearchResults([]);
+    } finally {
       setIsSearching(false);
-      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-        setSearchResults(results.slice(0, 10)); // Limit to 10 results
-      } else {
-        setSearchResults([]);
-      }
-    });
+    }
   };
 
   const handleSearchChange = (text: string) => {
     setSearchQuery(text);
     if (text.trim().length > 2) {
-      searchGyms(text);
+      searchPlaces(text);
     } else {
       setSearchResults([]);
     }
@@ -372,7 +407,7 @@ export default function GymLocationPicker({ coordinate, onChange, onSelectPlace 
           // @ts-ignore
           ref={searchInputRef}
           style={styles.searchInput}
-          placeholder="Search for gyms..."
+          placeholder="Search gyms, fitness centers, sports clubs..."
           value={searchQuery}
           onChangeText={handleSearchChange}
           placeholderTextColor="#9CA3AF"

@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, TouchableOpacity, Modal, Pressable } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Modal, Pressable, Platform } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,7 @@ import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Colors from '@/constants/colors';
 import { agentLog } from '@/lib/agent-debug-log';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 export default function QRScanScreen() {
   const router = useRouter();
@@ -106,6 +107,20 @@ export default function QRScanScreen() {
     void resolveSubscriptionStatus();
   }, [isGuest, firebaseUser?.uid, resolveSubscriptionStatus]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'ios' || isGuest) return;
+      void refreshSubscription().catch((err) => {
+        console.warn('[QRScan] iOS focus subscription refresh failed:', err);
+      });
+    }, [isGuest, refreshSubscription])
+  );
+
+  const hasQrAccess =
+    Platform.OS === 'ios'
+      ? isSubscriptionActiveForMember(subscription)
+      : !!subscription;
+
   if (isResolvingSubscription) {
     return (
       <View style={styles.container}>
@@ -117,7 +132,7 @@ export default function QRScanScreen() {
     );
   }
 
-  if (isGuest || !subscription) {
+  if (isGuest || !hasQrAccess) {
     return (
       <View style={styles.container}>
         <View style={styles.permissionContainer}>
