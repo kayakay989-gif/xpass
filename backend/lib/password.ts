@@ -38,9 +38,9 @@ export function verifyPassword(password: string, stored: string): boolean {
     const salt = parts[1] || '';
     const expectedHex = parts[2] || '';
     const actualHex = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
-    // constant time compare
-    const a = Buffer.from(actualHex, 'utf8');
-    const b = Buffer.from(expectedHex, 'utf8');
+    // constant time compare (case-insensitive hex — admin web hashes may differ in casing)
+    const a = Buffer.from(actualHex.toLowerCase(), 'utf8');
+    const b = Buffer.from(expectedHex.toLowerCase(), 'utf8');
     if (a.length !== b.length) return false;
     return crypto.timingSafeEqual(a, b);
   }

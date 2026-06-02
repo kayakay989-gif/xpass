@@ -141,7 +141,8 @@ export const trpcClient = trpc.createClient({
             }
 
             const err = new Error(
-              json?.error?.message ||
+              json?.error?.json?.message ||
+                json?.error?.message ||
                 json?.message ||
                 `HTTP ${response.status}: ${text}`
             ) as any;

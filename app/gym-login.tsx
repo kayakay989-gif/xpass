@@ -13,109 +13,15 @@ import {
 import { Stack, router } from 'expo-router';
 import { ChevronLeft, Lock, User } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { firestoreGymOwners, firestoreGyms } from '@/lib/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
+import { trpc } from '@/lib/trpc';
 
 export default function GymLoginScreen() {
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  // Simple password verification for client-side
-  // Supports plaintext passwords and sha256 hashes (common legacy format)
-  const verifyPasswordClient = async (inputPassword: string, storedHash: string | undefined, storedPlaintext: string | undefined): Promise<boolean> => {
-    try {
-      const trimmedInput = inputPassword.trim();
-      
-      // If plaintext password exists, use it (legacy support)
-      if (storedPlaintext && typeof storedPlaintext === 'string') {
-        const trimmedPlaintext = storedPlaintext.trim();
-        if (trimmedPlaintext === trimmedInput) {
-          console.log('[GymLogin] Plaintext password match (legacy)');
-          return true;
-        }
-      }
-
-      // If no hash, return false
-      if (!storedHash || typeof storedHash !== 'string') {
-        console.warn('[GymLogin] No password hash available');
-        return false;
-      }
-
-      const trimmedHash = storedHash.trim();
-
-      // Support sha256:<salt>:<hexDigest> format
-      if (trimmedHash.startsWith('sha256:')) {
-        const parts = trimmedHash.split(':');
-        if (parts.length !== 3) {
-          console.warn('[GymLogin] Invalid sha256 hash format');
-          return false;
-        }
-        const salt = parts[1] || '';
-        const expectedHex = parts[2] || '';
-        
-        if (!salt || !expectedHex) {
-          console.warn('[GymLogin] Missing salt or hash in sha256 format');
-          return false;
-        }
-
-        try {
-          const trimmedPassword = inputPassword.trim();
-          const hashInput = `${salt}:${trimmedPassword}`;
-          console.log('[GymLogin] Computing hash:', { 
-            saltLength: salt.length, 
-            passwordLength: trimmedPassword.length,
-            hashInputLength: hashInput.length
-          });
-          
-          const actualHex = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            hashInput
-          );
-          
-          const matches = actualHex.toLowerCase() === expectedHex.toLowerCase();
-          if (!matches) {
-            console.warn('[GymLogin] Password hash mismatch', {
-              expectedLength: expectedHex.length,
-              actualLength: actualHex.length,
-              expectedPrefix: expectedHex.substring(0, 10),
-              actualPrefix: actualHex.substring(0, 10)
-            });
-          } else {
-            console.log('[GymLogin] Password hash matches!');
-          }
-          return matches;
-        } catch (error) {
-          console.error('[GymLogin] Error computing hash:', error);
-          return false;
-        }
-      }
-
-      // For pbkdf2 hashes, we'd need more complex crypto - skip for now
-      // In practice, most passwords are plaintext or sha256
-      console.warn('[GymLogin] Unsupported hash format:', trimmedHash.substring(0, 20));
-      return false;
-    } catch (error) {
-      console.error('[GymLogin] Password verification error:', error);
-      return false;
-    }
-  };
-
-  const generateSessionToken = (): string => {
-    // Generate a simple session token
-    const randomBytes = new Uint8Array(32);
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-      crypto.getRandomValues(randomBytes);
-    } else {
-      // Fallback for environments without crypto
-      for (let i = 0; i < randomBytes.length; i++) {
-        randomBytes[i] = Math.floor(Math.random() * 256);
-      }
-    }
-    return Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
-  };
+  const loginMutation = trpc.gymOwners.login.useMutation();
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -127,73 +33,16 @@ export default function GymLoginScreen() {
     setIsLoading(true);
 
     try {
-      // Get gym owner by username
-      const trimmedUsername = username.trim();
-      const gymOwner = await firestoreGymOwners.getByUsername(trimmedUsername);
-      
-      if (!gymOwner) {
-        console.warn('[GymLogin] Gym owner not found for username:', trimmedUsername);
-        setError('Invalid username or password');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log('[GymLogin] Found gym owner:', { 
-        id: gymOwner.id, 
-        gymId: gymOwner.gymId, 
-        hasHash: !!gymOwner.passwordHash, 
-        hasPlaintext: !!gymOwner.password,
-        hashPrefix: gymOwner.passwordHash ? gymOwner.passwordHash.substring(0, 20) : 'none'
+      const result = await loginMutation.mutateAsync({
+        username: username.trim(),
+        password: password.trim(),
       });
 
-      // Verify password
-      console.log('[GymLogin] Verifying password...', { 
-        inputLength: password.length,
-        hasHash: !!gymOwner.passwordHash,
-        hasPlaintext: !!gymOwner.password
-      });
-      
-      const passwordValid = await verifyPasswordClient(
-        password,
-        gymOwner.passwordHash,
-        gymOwner.password
-      );
+      await AsyncStorage.setItem('gymOwnerSessionToken', result.sessionToken);
+      await AsyncStorage.setItem('gymOwnerGymId', result.gymId);
+      await AsyncStorage.setItem('gymOwnerId', result.owner.id);
 
-      console.log('[GymLogin] Password verification result:', passwordValid);
-
-      if (!passwordValid) {
-        console.warn('[GymLogin] Password verification failed for username:', trimmedUsername);
-        console.warn('[GymLogin] Debug info:', {
-          inputPassword: password.substring(0, 3) + '***',
-          hasHash: !!gymOwner.passwordHash,
-          hashType: gymOwner.passwordHash ? (gymOwner.passwordHash.startsWith('sha256:') ? 'sha256' : 'other') : 'none',
-          hasPlaintext: !!gymOwner.password
-        });
-        setError('Invalid username or password');
-        setIsLoading(false);
-        return;
-      }
-
-      console.log('[GymLogin] Password verified successfully');
-
-      // Get gym details
-      const gym = await firestoreGyms.getById(gymOwner.gymId);
-      
-      if (!gym) {
-        setError('Gym not found. Please contact administrator.');
-        setIsLoading(false);
-        return;
-      }
-
-      // Create a simple session token (stored in AsyncStorage)
-      // For full session management, you'd store this in Firestore, but for client-side only,
-      // we'll just store it locally
-      const sessionToken = generateSessionToken();
-      await AsyncStorage.setItem('gymOwnerSessionToken', sessionToken);
-      await AsyncStorage.setItem('gymOwnerGymId', gymOwner.gymId);
-      await AsyncStorage.setItem('gymOwnerId', gymOwner.id);
-
-      router.replace(`/gym-dashboard?gymId=${gymOwner.gymId}`);
+      router.replace(`/gym-dashboard?gymId=${result.gymId}`);
     } catch (err: any) {
       console.error('[GymLogin] Login error:', err);
       let message = 'Login failed. Please try again.';

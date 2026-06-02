@@ -572,6 +572,7 @@ export default function AdminDashboardScreen() {
     longitude: 35.930359,
   });
   const [isCreatingGym, setIsCreatingGym] = useState(false);
+  const createGymOwnerMutation = trpc.admin.createGymOwner.useMutation();
   const [isUploadingGymImages, setIsUploadingGymImages] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [createdGymData, setCreatedGymData] = useState<{
@@ -1397,30 +1398,19 @@ export default function AdminDashboardScreen() {
         username = `${sanitizedName}_${gymId.substring(0, 6)}`;
         password = `gym_${gymId.substring(0, 8)}`;
 
-        // Store only a hash in Firestore (never plaintext).
-        // Format: sha256:<salt>:<hexDigest>
-        const salt = (await generateId()).slice(0, 16);
-        const passwordHash = `sha256:${salt}:${await Crypto.digestStringAsync(
-          Crypto.CryptoDigestAlgorithm.SHA256,
-          `${salt}:${password}`
-        )}`;
-
-        // Try to create gym owner, but don't block the success flow if this fails
-        const ownerId = await generateId();
-        const gymOwnerData = {
-          id: ownerId,
-          gymId,
-          username,
-          passwordHash,
-          email: gymData.email,
-          name: gymData.ownerName,
-          // Owner phone is kept only on the gym doc for admin use; it is never exposed in the user app.
-          createdAt: new Date(),
-        };
-        console.log('[Admin] Creating gym owner in Firestore:', gymOwnerData);
         try {
-          await firestoreGymOwners.create(gymOwnerData);
-          console.log('[Admin] Gym owner created successfully in Firestore with ID:', ownerId);
+          const ownerResult = await createGymOwnerMutation.mutateAsync({
+            gymId,
+            gymName: gymData.name,
+            email: gymData.email,
+            ownerName: gymData.ownerName,
+            recreate: true,
+          });
+          username = ownerResult.username;
+          if (ownerResult.password) {
+            password = ownerResult.password;
+          }
+          console.log('[Admin] Gym owner created via backend with ID:', ownerResult.ownerId);
         } catch (ownerError: any) {
           console.error('[Admin] failed to create gym owner record:', ownerError);
           Alert.alert(
@@ -1430,9 +1420,26 @@ export default function AdminDashboardScreen() {
         }
       } else {
         // Update owner contact info if we have an owner record
-        const ownerId =
+        let ownerId =
           editingGymOwnerId ||
           (await firestoreGymOwners.getByGymId(gymId).catch(() => null))?.id;
+
+        if (!ownerId) {
+          try {
+            const ownerResult = await createGymOwnerMutation.mutateAsync({
+              gymId,
+              gymName: gymData.name,
+              email: gymData.email,
+              ownerName: gymData.ownerName,
+              recreate: true,
+            });
+            ownerId = ownerResult.ownerId;
+            console.log('[Admin] Created missing gym owner via backend:', ownerId);
+          } catch (ownerError: any) {
+            console.error('[Admin] failed to create missing gym owner record:', ownerError);
+          }
+        }
+
         if (ownerId && (gymData.email || gymData.ownerName)) {
           try {
             await firestoreGymOwners.update(ownerId, {
