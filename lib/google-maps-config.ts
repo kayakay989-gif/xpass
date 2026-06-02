@@ -1,7 +1,4 @@
 // Google Maps API Configuration
-const env =
-  typeof process !== 'undefined' && process.env ? (process.env as any) : ({} as Record<string, any>);
-
 const getGoogleMapsApiKeyFromExpoExtra = (): string => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -18,9 +15,10 @@ const getGoogleMapsApiKeyFromExpoExtra = (): string => {
   return '';
 };
 
+// Must reference process.env.EXPO_PUBLIC_* directly so Expo inlines it in production web builds.
 const fromEnv =
-  typeof env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY === 'string'
-    ? env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY.trim()
+  typeof process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY === 'string'
+    ? process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY.trim()
     : '';
 
 /** Env at build time (dev) or expo.extra.googleMapsApiKey (production web export). */
