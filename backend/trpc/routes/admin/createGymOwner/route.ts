@@ -33,6 +33,7 @@ export default adminProcedure
     }
 
     const gymName = input.gymName?.trim() || gym.name || 'gym';
+    const gymExtras = gym as typeof gym & { ownerEmail?: string; ownerName?: string };
     const { username, password } = buildOwnerCredentials(input.gymId, gymName);
 
     const existing = await firestoreGymOwners.getByGymId(input.gymId);
@@ -55,8 +56,8 @@ export default adminProcedure
       gymId: input.gymId,
       username,
       passwordHash: hashPassword(password),
-      email: input.email || gym.ownerEmail || undefined,
-      name: input.ownerName || gym.ownerName || `${gymName} Owner`,
+      email: input.email || gymExtras.ownerEmail || undefined,
+      name: input.ownerName || gymExtras.ownerName || `${gymName} Owner`,
       createdAt: new Date(),
     });
 
