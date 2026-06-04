@@ -12,6 +12,7 @@
     "lint": "expo lint",
     "seed-gyms": "bun scripts/seed-gyms.ts",
     "diagnose-gym-owners": "bun scripts/diagnose-gym-owners.ts",
+    "sync-gym-owner-passwords": "npx tsx scripts/sync-gym-owner-passwords.ts",
     "postinstall": "patch-package",
     "android": "expo run:android",
     "ios": "expo run:ios"

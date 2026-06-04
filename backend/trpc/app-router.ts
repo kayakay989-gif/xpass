@@ -24,6 +24,7 @@ import adminGetAllCheckIns from "./routes/admin/getAllCheckIns/route";
 import adminGetAllGyms from "./routes/admin/getAllGyms/route";
 import adminCreateGym from "./routes/admin/createGym/route";
 import adminCreateGymOwner from "./routes/admin/createGymOwner/route";
+import adminResetGymOwnerPassword from "./routes/admin/resetGymOwnerPassword/route";
 import adminDeleteGym from "./routes/admin/deleteGym/route";
 import adminGetStats from "./routes/admin/getStats/route";
 import adminPayoutsGetAll from "./routes/admin/payouts/getAll/route";
@@ -93,6 +94,7 @@ const adminRouter = createTRPCRouter({
   getAllGyms: adminGetAllGyms,
   createGym: adminCreateGym,
   createGymOwner: adminCreateGymOwner,
+  resetGymOwnerPassword: adminResetGymOwnerPassword,
   deleteGym: adminDeleteGym,
   getStats: adminGetStats,
   payouts: adminPayoutsRouter,

@@ -174,7 +174,9 @@ export default function GymLoginScreen() {
 
             <View style={styles.infoContainer}>
               <Text style={styles.infoText}>
-                Contact your administrator for your assigned username and password.
+                Contact your administrator for your assigned username and password. The password
+                starts with gym_ and uses the first 8 characters of your gym ID (not the short code
+                at the end of your username).
               </Text>
             </View>
           </View>

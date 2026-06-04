@@ -574,6 +574,7 @@ export default function AdminDashboardScreen() {
   });
   const [isCreatingGym, setIsCreatingGym] = useState(false);
   const createGymOwnerMutation = trpc.admin.createGymOwner.useMutation();
+  const resetGymOwnerPasswordMutation = trpc.admin.resetGymOwnerPassword.useMutation();
   const [isUploadingGymImages, setIsUploadingGymImages] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [createdGymData, setCreatedGymData] = useState<{
@@ -3802,6 +3803,34 @@ export default function AdminDashboardScreen() {
                         </TouchableOpacity>
                       </View>
                     </View>
+
+                    <Text style={styles.credentialHint}>
+                      Password is gym_ plus the first 8 characters of the Gym ID (not the short code at the end of the username).
+                    </Text>
+
+                    <TouchableOpacity
+                      style={styles.resetPasswordButton}
+                      onPress={async () => {
+                        if (!editingGymId) return;
+                        try {
+                          const result = await resetGymOwnerPasswordMutation.mutateAsync({
+                            gymId: editingGymId,
+                          });
+                          setEditingGymCredentials({
+                            username: result.username,
+                            password: result.password,
+                          });
+                          Alert.alert(
+                            'Password synced',
+                            `Share these credentials with the gym owner:\n\nUsername: ${result.username}\nPassword: ${result.password}`
+                          );
+                        } catch (e: any) {
+                          Alert.alert('Error', e?.message || 'Failed to reset gym owner password');
+                        }
+                      }}
+                    >
+                      <Text style={styles.resetPasswordButtonText}>Sync login password for this gym</Text>
+                    </TouchableOpacity>
                   </View>
 
                   {/* QR Code Section */}
@@ -5592,6 +5621,26 @@ const styles = StyleSheet.create({
   copyButton: {
     padding: 8,
     marginLeft: 8,
+  },
+  credentialHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  resetPasswordButton: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    alignItems: 'center' as const,
+  },
+  resetPasswordButtonText: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#4338CA',
   },
   copyAllButton: {
     flexDirection: 'row' as const,
