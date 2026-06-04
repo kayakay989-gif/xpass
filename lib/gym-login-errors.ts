@@ -24,9 +24,8 @@ export function getGymLoginUserMessage(error: unknown): string {
     const lower = message.trim().toLowerCase();
     if (lower.includes('invalid username or password')) {
       return (
-        'Invalid username or password. Use the exact password from admin ' +
-        '(format: gym_ followed by the first 8 characters of your gym ID — ' +
-        'not the short code at the end of your username).'
+        'Invalid username or password. Check both fields match admin exactly ' +
+        '(typing and pasting both work the same).'
       );
     }
     return message.trim();

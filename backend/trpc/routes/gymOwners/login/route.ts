@@ -5,8 +5,10 @@ import { firestoreGymOwners, firestoreGyms } from '@/backend/lib/firestore-admin
 import { createGymOwnerSession } from '@/backend/lib/gym-owner-auth';
 import { hashPassword, verifyPassword } from '@/backend/lib/password';
 import { logGymOwnerLogin, parseRequestMeta } from '@/backend/lib/gym-owner-login-log';
+import { verifyGymOwnerPassword } from '@/backend/lib/gym-owner-password';
 import {
   normalizeGymOwnerUsername,
+  sanitizeGymOwnerPassword,
   stripInvisibleUsernameChars,
 } from '@/lib/gym-owner-username';
 import admin from '@/backend/lib/firebase-admin';
@@ -19,7 +21,7 @@ export default publicProcedure
   .mutation(async ({ input, ctx }) => {
     const receivedUsername = input.username;
     const username = stripInvisibleUsernameChars(receivedUsername).trim();
-    const password = stripInvisibleUsernameChars(input.password).trim();
+    const password = sanitizeGymOwnerPassword(input.password);
     const normalizedUsername = normalizeGymOwnerUsername(username);
     const { origin, userAgent } = parseRequestMeta(ctx.req);
 
@@ -72,7 +74,7 @@ export default publicProcedure
     const legacyPlain = typeof gymOwner.password === 'string' ? gymOwner.password.trim() : '';
 
     const ok = hasHash
-      ? verifyPassword(password, gymOwner.passwordHash!)
+      ? verifyGymOwnerPassword(gymOwner.gymId, password, gymOwner.passwordHash!)
       : legacyPlain === password;
 
     if (!ok) {

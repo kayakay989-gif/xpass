@@ -32,9 +32,19 @@ export function buildGymOwnerUsername(gymId: string, gymName: string): string {
   return `${sanitizedName}_${suffix}`;
 }
 
-/** Default password pattern shown to admins (not a secret — gym id is in username). */
+/** Sanitize password input — trim/invisible chars only (never change letters or case). */
+export function sanitizeGymOwnerPassword(value: string): string {
+  return stripInvisibleUsernameChars(value).trim();
+}
+
+/** Default password pattern shown to admins (matches username gym-id suffix + 2 chars). */
 export function buildGymOwnerDefaultPassword(gymId: string): string {
   return `gym_${gymId.substring(0, 8)}`;
+}
+
+/** Shorter form some owners type from the username suffix (first 6 chars of gym id). */
+export function buildGymOwnerShortPassword(gymId: string): string {
+  return `gym_${gymId.substring(0, 6)}`;
 }
 
 export function usernamesMatchForLogin(stored: string, submitted: string): boolean {

@@ -18,6 +18,7 @@ import { trpc } from '@/lib/trpc';
 import { config } from '@/lib/config';
 import {
   normalizeGymOwnerUsername,
+  sanitizeGymOwnerPassword,
   stripInvisibleUsernameChars,
 } from '@/lib/gym-owner-username';
 import { getGymLoginUserMessage } from '@/lib/gym-login-errors';
@@ -31,7 +32,7 @@ export default function GymLoginScreen() {
 
   const handleLogin = async () => {
     const trimmedUsername = stripInvisibleUsernameChars(username).trim();
-    const trimmedPassword = stripInvisibleUsernameChars(password).trim();
+    const trimmedPassword = sanitizeGymOwnerPassword(password);
     const normalizedUsername = normalizeGymOwnerUsername(trimmedUsername);
 
     if (!normalizedUsername || !trimmedPassword) {
@@ -174,9 +175,8 @@ export default function GymLoginScreen() {
 
             <View style={styles.infoContainer}>
               <Text style={styles.infoText}>
-                Contact your administrator for your assigned username and password. The password
-                starts with gym_ and uses the first 8 characters of your gym ID (not the short code
-                at the end of your username).
+                Contact your administrator for your assigned username and password. You can type or
+                paste the password — both work the same when it matches admin exactly.
               </Text>
             </View>
           </View>
