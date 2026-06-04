@@ -20,6 +20,7 @@ import {
   normalizeGymOwnerUsername,
   stripInvisibleUsernameChars,
 } from '@/lib/gym-owner-username';
+import { getGymLoginUserMessage } from '@/lib/gym-login-errors';
 
 export default function GymLoginScreen() {
   const [username, setUsername] = useState<string>('');
@@ -47,11 +48,25 @@ export default function GymLoginScreen() {
       apiBaseUrl: config.api.baseUrl || '(default fallback)',
     });
 
-    try {
-      const result = await loginMutation.mutateAsync({
+    const attemptLogin = () =>
+      loginMutation.mutateAsync({
         username: normalizedUsername,
         password: trimmedPassword,
       });
+
+    try {
+      let result;
+      try {
+        result = await attemptLogin();
+      } catch (firstErr: any) {
+        const retryable =
+          String(firstErr?.name || '').includes('Abort') ||
+          String(firstErr?.message || '').toLowerCase().includes('abort');
+        if (!retryable) throw firstErr;
+        console.warn('[GymLogin] Login timed out, retrying once...');
+        await new Promise((r) => setTimeout(r, 800));
+        result = await attemptLogin();
+      }
 
       console.log('[GymLogin] Login success', {
         gymId: result.gymId,
@@ -69,15 +84,7 @@ export default function GymLoginScreen() {
         status: err?.status,
         normalizedUsername,
       });
-      let message = 'Login failed. Please try again.';
-      
-      if (err?.message) {
-        message = err.message;
-      } else if (typeof err === 'string') {
-        message = err;
-      }
-      
-      setError(message);
+      setError(getGymLoginUserMessage(err));
       setIsLoading(false);
     }
   };

@@ -94,14 +94,19 @@ export const trpcClient = trpc.createClient({
             ...(options?.headers as any),
           };
 
-          // Firebase user auth (mobile/user/admin)
-          let token = await auth.currentUser?.getIdToken?.().catch(() => null);
-          if (auth.currentUser && !token) {
-            await new Promise((r) => setTimeout(r, 120));
-            token = await auth.currentUser.getIdToken(true).catch(() => null);
-          }
-          if (token) {
-            headers["Authorization"] = `Bearer ${token}`;
+          const urlString = typeof url === 'string' ? url : String(url);
+          const isGymOwnerLogin = urlString.includes('gymOwners.login');
+
+          // Gym owner portal does not use Firebase Auth — skip token refresh to avoid slow login on web.
+          if (!isGymOwnerLogin) {
+            let token = await auth.currentUser?.getIdToken?.().catch(() => null);
+            if (auth.currentUser && !token) {
+              await new Promise((r) => setTimeout(r, 120));
+              token = await auth.currentUser.getIdToken(true).catch(() => null);
+            }
+            if (token) {
+              headers["Authorization"] = `Bearer ${token}`;
+            }
           }
 
           // Gym owner session auth (web gym panel)
@@ -116,7 +121,8 @@ export const trpcClient = trpc.createClient({
           const method = options?.method || 'POST';
           // No noisy request logging in production
           
-          const REQUEST_TIMEOUT_MS = 14_000;
+          // Render cold starts + gym owner lookup can exceed 14s on mobile Safari.
+          const REQUEST_TIMEOUT_MS = isGymOwnerLogin ? 60_000 : 14_000;
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
           let response: Response;
@@ -127,6 +133,13 @@ export const trpcClient = trpc.createClient({
               headers,
               signal: controller.signal,
             });
+          } catch (fetchError: any) {
+            if (fetchError?.name === 'AbortError') {
+              const err = new Error('Fetch is aborted') as Error & { name: string };
+              err.name = 'AbortError';
+              throw err;
+            }
+            throw fetchError;
           } finally {
             clearTimeout(timeoutId);
           }
