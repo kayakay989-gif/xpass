@@ -11,6 +11,7 @@
     "start-server": "node dist/server-standalone.js",
     "lint": "expo lint",
     "seed-gyms": "bun scripts/seed-gyms.ts",
+    "diagnose-gym-owners": "bun scripts/diagnose-gym-owners.ts",
     "postinstall": "patch-package",
     "android": "expo run:android",
     "ios": "expo run:ios"

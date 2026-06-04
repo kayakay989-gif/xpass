@@ -15,6 +15,11 @@ import { ChevronLeft, Lock, User } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trpc } from '@/lib/trpc';
+import { config } from '@/lib/config';
+import {
+  normalizeGymOwnerUsername,
+  stripInvisibleUsernameChars,
+} from '@/lib/gym-owner-username';
 
 export default function GymLoginScreen() {
   const [username, setUsername] = useState<string>('');
@@ -24,7 +29,11 @@ export default function GymLoginScreen() {
   const loginMutation = trpc.gymOwners.login.useMutation();
 
   const handleLogin = async () => {
-    if (!username || !password) {
+    const trimmedUsername = stripInvisibleUsernameChars(username).trim();
+    const trimmedPassword = stripInvisibleUsernameChars(password).trim();
+    const normalizedUsername = normalizeGymOwnerUsername(trimmedUsername);
+
+    if (!normalizedUsername || !trimmedPassword) {
       setError('Please enter both username and password');
       return;
     }
@@ -32,10 +41,21 @@ export default function GymLoginScreen() {
     setError('');
     setIsLoading(true);
 
+    console.log('[GymLogin] Submitting login', {
+      submittedUsernameLength: username.length,
+      normalizedUsername,
+      apiBaseUrl: config.api.baseUrl || '(default fallback)',
+    });
+
     try {
       const result = await loginMutation.mutateAsync({
-        username: username.trim(),
-        password: password.trim(),
+        username: normalizedUsername,
+        password: trimmedPassword,
+      });
+
+      console.log('[GymLogin] Login success', {
+        gymId: result.gymId,
+        ownerId: result.owner.id,
       });
 
       await AsyncStorage.setItem('gymOwnerSessionToken', result.sessionToken);
@@ -44,7 +64,11 @@ export default function GymLoginScreen() {
 
       router.replace(`/gym-dashboard?gymId=${result.gymId}`);
     } catch (err: any) {
-      console.error('[GymLogin] Login error:', err);
+      console.error('[GymLogin] Login error:', {
+        message: err?.message,
+        status: err?.status,
+        normalizedUsername,
+      });
       let message = 'Login failed. Please try again.';
       
       if (err?.message) {
@@ -100,6 +124,9 @@ export default function GymLoginScreen() {
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="username"
+                textContentType="username"
                 placeholderTextColor="#9CA3AF"
               />
             </View>
@@ -112,6 +139,10 @@ export default function GymLoginScreen() {
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="password"
+                textContentType="password"
                 placeholderTextColor="#9CA3AF"
               />
             </View>

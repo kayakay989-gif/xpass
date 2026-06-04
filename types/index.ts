@@ -134,6 +134,8 @@ export interface GymOwner {
   id: string;
   gymId: string;
   username: string;
+  /** Lowercase trimmed canonical key for login lookup */
+  usernameNormalized?: string;
   // Legacy (do not use in production): plaintext password
   password?: string;
   // Production: hashed password string (pbkdf2:...)

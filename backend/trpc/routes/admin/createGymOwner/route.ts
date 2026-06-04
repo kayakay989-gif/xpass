@@ -4,15 +4,15 @@ import { randomUUID } from 'crypto';
 import { adminProcedure } from '../../../create-context';
 import { firestoreGymOwners, firestoreGyms } from '@/backend/lib/firestore-admin';
 import { hashPassword } from '@/backend/lib/password';
+import {
+  buildGymOwnerDefaultPassword,
+  buildGymOwnerUsername,
+  normalizeGymOwnerUsername,
+} from '@/lib/gym-owner-username';
 
 function buildOwnerCredentials(gymId: string, gymName: string) {
-  const sanitizedName = gymName
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '_')
-    .replace(/_+/g, '_')
-    .substring(0, 20);
-  const username = `${sanitizedName}_${gymId.substring(0, 6)}`;
-  const password = `gym_${gymId.substring(0, 8)}`;
+  const username = buildGymOwnerUsername(gymId, gymName);
+  const password = buildGymOwnerDefaultPassword(gymId);
   return { username, password };
 }
 
@@ -55,6 +55,7 @@ export default adminProcedure
       id: ownerId,
       gymId: input.gymId,
       username,
+      usernameNormalized: normalizeGymOwnerUsername(username),
       passwordHash: hashPassword(password),
       email: input.email || gymExtras.ownerEmail || undefined,
       name: input.ownerName || gymExtras.ownerName || `${gymName} Owner`,

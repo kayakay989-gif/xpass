@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,14 +14,17 @@ import {
   Modal,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { ChevronRight, CreditCard, Filter, Home, User as UserIcon } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { firestoreGyms, firestoreCheckIns, firestoreGymOwners, firestoreUsers } from '@/lib/firestore';
+import { paramFirst } from '@/lib/expo-router-params';
 import { trpc } from '@/lib/trpc';
 
 export default function GymDashboardScreen() {
   const router = useRouter();
-  const urlParams = useLocalSearchParams<{ gymId?: string }>();
+  const trpcUtils = trpc.useUtils();
+  const urlParams = useLocalSearchParams<{ gymId?: string | string[] }>();
+  const urlGymId = paramFirst(urlParams.gymId);
   const [actualGymId, setActualGymId] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'home' | 'payments' | 'profile'>('home');
@@ -32,59 +35,52 @@ export default function GymDashboardScreen() {
   const [gymOwner, setGymOwner] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [checkInsLoadError, setCheckInsLoadError] = useState<string | null>(null);
   const [showSupportModal, setShowSupportModal] = useState(false);
 
-  // Load data from Firestore
+  // Load via backend API (gym owners are not Firebase Auth users — client Firestore reads fail)
   const loadData = async (gymIdToLoad: string) => {
     if (!gymIdToLoad) {
       console.warn('[GymDashboard] No gymId provided to loadData');
       setIsLoading(false);
       return;
     }
-    
+
     try {
       setIsRefreshing(true);
       console.log('[GymDashboard] Loading data for gymId:', gymIdToLoad);
-      
-      const [gymData, checkInsData, ownerData, usersData] = await Promise.all([
-        firestoreGyms.getById(gymIdToLoad),
-        firestoreCheckIns.getByGymId(gymIdToLoad),
-        firestoreGymOwners.getByGymId(gymIdToLoad),
-        firestoreUsers.getAll(),
-      ]);
 
-      console.log('[GymDashboard] Loaded data:', { 
-        gym: !!gymData, 
-        checkIns: checkInsData?.length || 0, 
-        owner: !!ownerData 
-      });
-
-      if (!gymData) {
-        console.error('[GymDashboard] Gym not found in Firestore for gymId:', gymIdToLoad);
-        setIsLoading(false);
-        setIsRefreshing(false);
+      const profile = await trpcUtils.gymOwners.getProfile.fetch({ gymId: gymIdToLoad });
+      if (!profile?.gym) {
+        console.error('[GymDashboard] Gym not found for gymId:', gymIdToLoad);
+        setGym(null);
         return;
       }
 
-      setGym(gymData);
-      
-      // Enrich check-ins with user names and profile photo URL from Firestore (not placeholder avatars)
-      const enrichedCheckIns = (checkInsData || []).map((checkIn: any) => {
-        const user = usersData.find((u: any) => u.id === checkIn.userId);
-        const rawPhoto = user?.photoUrl;
-        const userPhotoUrl =
-          typeof rawPhoto === 'string' && rawPhoto.trim().length > 0 ? rawPhoto.trim() : undefined;
-        return {
-          ...checkIn,
-          userName: user?.name || 'Unknown User',
-          userPhotoUrl,
-        };
-      });
-      
-      setCheckIns(enrichedCheckIns);
-      setGymOwner(ownerData);
+      setGym(profile.gym);
+      setGymOwner(profile.owner);
+
+      try {
+        const checkInsData = await trpcUtils.gyms.getCheckIns.fetch({ gymId: gymIdToLoad });
+        setCheckIns(checkInsData || []);
+        setCheckInsLoadError(null);
+        console.log('[GymDashboard] Check-ins loaded:', {
+          gymId: gymIdToLoad,
+          returnedCount: checkInsData?.length || 0,
+        });
+      } catch (checkInsError: any) {
+        const message =
+          checkInsError?.message || 'Failed to load check-ins. Pull down to refresh.';
+        console.error('[GymDashboard] Check-ins load failed:', {
+          gymId: gymIdToLoad,
+          message,
+        });
+        setCheckInsLoadError(message);
+        // Keep prior check-ins visible on refresh failure instead of clearing the list.
+      }
     } catch (error) {
       console.error('[GymDashboard] Error loading data:', error);
+      setGym(null);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -92,43 +88,58 @@ export default function GymDashboardScreen() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
         const [token, storedGymId] = await Promise.all([
           AsyncStorage.getItem('gymOwnerSessionToken'),
           AsyncStorage.getItem('gymOwnerGymId'),
         ]);
-        
-        // Use gymId from URL params if available, otherwise use stored gymId
-        const gymIdToUse = urlParams.gymId || storedGymId;
-        
-        console.log('[GymDashboard] Session check:', { 
-          hasToken: !!token, 
-          storedGymId, 
-          urlGymId: urlParams.gymId,
-          gymIdToUse 
+
+        // Session storage is authoritative (URL can be stale after login redirect)
+        const gymIdToUse = storedGymId || urlGymId;
+
+        console.log('[GymDashboard] Session check:', {
+          hasToken: !!token,
+          storedGymId,
+          urlGymId,
+          gymIdToUse,
         });
-        
+
         if (!token || !gymIdToUse) {
           console.warn('[GymDashboard] Missing token or gymId, redirecting to login');
           router.replace('/gym-login' as any);
           return;
         }
-        
-        // If URL has different gymId than stored, use stored one
-        if (urlParams.gymId && storedGymId && urlParams.gymId !== storedGymId) {
+
+        if (urlGymId && storedGymId && urlGymId !== storedGymId) {
           console.warn('[GymDashboard] URL gymId differs from stored, using stored:', storedGymId);
         }
-        
+
+        if (cancelled) return;
+
         setActualGymId(gymIdToUse);
         setSessionChecked(true);
         await loadData(gymIdToUse);
       } catch (error) {
+        if (cancelled) return;
         console.error('[GymDashboard] Session check error:', error);
         router.replace('/gym-login' as any);
       }
     })();
-  }, [urlParams.gymId, router]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [urlGymId, router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!actualGymId || !sessionChecked) return;
+      void loadData(actualGymId);
+    }, [actualGymId, sessionChecked])
+  );
 
   // Load payouts data (pending + paid) from the same source as the admin panel
   const payoutsQuery = trpc.gyms.getPayments.useQuery(
@@ -213,6 +224,7 @@ export default function GymDashboardScreen() {
           onPress={async () => {
             const storedGymId = await AsyncStorage.getItem('gymOwnerGymId');
             if (storedGymId) {
+              setIsLoading(true);
               await loadData(storedGymId);
             } else {
               router.replace('/gym-login' as any);
@@ -379,6 +391,14 @@ export default function GymDashboardScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.screenTitle}>{gym.name}</Text>
+
+          {checkInsLoadError ? (
+            <View style={styles.checkInsErrorBanner}>
+              <Text style={styles.checkInsErrorText}>
+                {checkInsLoadError} Pull down to refresh.
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.statsRow}>
             <TouchableOpacity
@@ -717,6 +737,15 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 18, color: '#EF4444', fontWeight: '600' as const, marginBottom: 8 },
   errorSubtext: { fontSize: 14, color: '#6B7280', marginBottom: 16 },
+  checkInsErrorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  checkInsErrorText: { fontSize: 13, color: '#B91C1C', fontWeight: '600' as const },
   loadingText: { marginTop: 12, fontSize: 14, color: '#6B7280' },
   retryButton: {
     backgroundColor: '#E31E24',

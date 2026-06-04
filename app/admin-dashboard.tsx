@@ -51,6 +51,7 @@ import { FIXED_CITIES } from '@/constants/cities';
 import { trpc } from '@/lib/trpc';
 import { TIER_COLORS as SHARED_TIER_COLORS } from '@/constants/tier-colors';
 import DatePicker from '@/components/DatePicker';
+import { buildGymOwnerUsername, buildGymOwnerDefaultPassword } from '@/lib/gym-owner-username';
 
 type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'revenue';
 
@@ -1181,21 +1182,16 @@ export default function AdminDashboardScreen() {
         
         // Set credentials - use stored username if available, otherwise reconstruct
         // Password is reconstructed from gym ID pattern: gym_${gymId.substring(0, 8)}
-        const password = `gym_${gym.id.substring(0, 8)}`;
         setEditingGymCredentials({
           username: owner.username || '',
-          password: password,
+          password: buildGymOwnerDefaultPassword(gym.id),
         });
       } else {
         // If no owner record, reconstruct credentials from gym ID pattern
-        const sanitizedName = (gym.name || '')
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '_')
-          .replace(/_+/g, '_')
-          .substring(0, 20);
-        const username = `${sanitizedName}_${gym.id.substring(0, 6)}`;
-        const password = `gym_${gym.id.substring(0, 8)}`;
-        setEditingGymCredentials({ username, password });
+        setEditingGymCredentials({
+          username: buildGymOwnerUsername(gym.id, gym.name || ''),
+          password: buildGymOwnerDefaultPassword(gym.id),
+        });
       }
 
       setShowAddGymModal(true);
@@ -1390,13 +1386,8 @@ export default function AdminDashboardScreen() {
       let password = '';
 
       if (!isEditing) {
-        const sanitizedName = gymData.name
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '_')
-          .replace(/_+/g, '_')
-          .substring(0, 20);
-        username = `${sanitizedName}_${gymId.substring(0, 6)}`;
-        password = `gym_${gymId.substring(0, 8)}`;
+        username = buildGymOwnerUsername(gymId, gymData.name);
+        password = buildGymOwnerDefaultPassword(gymId);
 
         try {
           const ownerResult = await createGymOwnerMutation.mutateAsync({

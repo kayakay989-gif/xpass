@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { firestoreGymOwners, firestoreGyms } from '@/backend/lib/firestore-admin';
 import { createGymOwnerSession } from '@/backend/lib/gym-owner-auth';
 import { hashPassword, verifyPassword } from '@/backend/lib/password';
+import { logGymOwnerLogin, parseRequestMeta } from '@/backend/lib/gym-owner-login-log';
+import {
+  normalizeGymOwnerUsername,
+  stripInvisibleUsernameChars,
+} from '@/lib/gym-owner-username';
 import admin from '@/backend/lib/firebase-admin';
 
 export default publicProcedure
@@ -11,20 +16,52 @@ export default publicProcedure
     username: z.string(),
     password: z.string(),
   }))
-  .mutation(async ({ input }) => {
-    const username = input.username.trim();
-    const password = input.password.trim();
+  .mutation(async ({ input, ctx }) => {
+    const receivedUsername = input.username;
+    const username = stripInvisibleUsernameChars(receivedUsername).trim();
+    const password = stripInvisibleUsernameChars(input.password).trim();
+    const normalizedUsername = normalizeGymOwnerUsername(username);
+    const { origin, userAgent } = parseRequestMeta(ctx.req);
+
+    const logBase = {
+      receivedUsernameLength: receivedUsername.length,
+      normalizedUsername,
+      origin,
+      userAgent,
+    };
+
+    logGymOwnerLogin({
+      event: 'gym_owner_login_attempt',
+      ...logBase,
+      userFound: false,
+    });
 
     if (!username || !password) {
+      logGymOwnerLogin({
+        event: 'gym_owner_login_failure',
+        ...logBase,
+        userFound: false,
+        reason: 'empty_credentials',
+        apiResponseCode: 'BAD_REQUEST',
+      });
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Please enter both username and password',
       });
     }
 
-    const gymOwner = await firestoreGymOwners.getByUsername(username);
+    const lookup = await firestoreGymOwners.findByLoginUsername(username);
+    const gymOwner = lookup.owner;
 
     if (!gymOwner) {
+      logGymOwnerLogin({
+        event: 'gym_owner_login_failure',
+        ...logBase,
+        userFound: false,
+        lookupMethod: lookup.lookupMethod,
+        reason: 'user_not_found',
+        apiResponseCode: 'UNAUTHORIZED',
+      });
       throw new TRPCError({
         code: 'UNAUTHORIZED',
         message: 'Invalid username or password',
@@ -39,10 +76,28 @@ export default publicProcedure
       : legacyPlain === password;
 
     if (!ok) {
+      logGymOwnerLogin({
+        event: 'gym_owner_login_failure',
+        ...logBase,
+        userFound: true,
+        passwordVerified: false,
+        lookupMethod: lookup.lookupMethod,
+        ownerId: gymOwner.id,
+        gymId: gymOwner.gymId,
+        reason: 'password_mismatch',
+        apiResponseCode: 'UNAUTHORIZED',
+      });
       throw new TRPCError({
         code: 'UNAUTHORIZED',
         message: 'Invalid username or password',
       });
+    }
+
+    // Best-effort: fix legacy usernames and add usernameNormalized for indexed lookup
+    try {
+      await firestoreGymOwners.ensureUsernameCanonical(gymOwner);
+    } catch (e) {
+      console.warn('[GymOwnerAuth] ensureUsernameCanonical failed (non-fatal):', e);
     }
 
     // Upgrade legacy/weak hashes to pbkdf2 (best-effort)
@@ -62,6 +117,17 @@ export default publicProcedure
     const gym = await firestoreGyms.getById(gymOwner.gymId);
 
     if (!gym) {
+      logGymOwnerLogin({
+        event: 'gym_owner_login_failure',
+        ...logBase,
+        userFound: true,
+        passwordVerified: true,
+        lookupMethod: lookup.lookupMethod,
+        ownerId: gymOwner.id,
+        gymId: gymOwner.gymId,
+        reason: 'gym_not_found',
+        apiResponseCode: 'NOT_FOUND',
+      });
       throw new TRPCError({
         code: 'NOT_FOUND',
         message: 'Gym not found. Please contact administrator.',
@@ -72,6 +138,17 @@ export default publicProcedure
       ownerId: gymOwner.id,
       gymId: gymOwner.gymId,
       ttlHours: 24 * 7,
+    });
+
+    logGymOwnerLogin({
+      event: 'gym_owner_login_success',
+      ...logBase,
+      userFound: true,
+      passwordVerified: true,
+      lookupMethod: lookup.lookupMethod,
+      ownerId: gymOwner.id,
+      gymId: gymOwner.gymId,
+      apiResponseCode: 'OK',
     });
 
     return {

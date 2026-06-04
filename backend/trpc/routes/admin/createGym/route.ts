@@ -4,6 +4,11 @@ import { firestoreGyms, firestoreGymOwners } from "@/backend/lib/firestore-admin
 import { Gym, GymCategory, SubscriptionTier, GymOwner } from "@/types";
 import { randomUUID } from "crypto";
 import { hashPassword } from "@/backend/lib/password";
+import {
+  buildGymOwnerDefaultPassword,
+  buildGymOwnerUsername,
+  normalizeGymOwnerUsername,
+} from "@/lib/gym-owner-username";
 
 export default adminProcedure
   .input(z.object({
@@ -48,16 +53,14 @@ export default adminProcedure
     // Save to Firestore
     await firestoreGyms.create(newGym);
     
-    // Create gym owner credentials
-    // Generate username from gym name (lowercase, replace spaces with underscores)
-    const username = input.name.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 20) + '_' + gymId.substring(0, 6);
-    // Generate default password (can be changed by admin later)
-    const defaultPassword = `gym_${gymId.substring(0, 8)}`;
-    
+    const username = buildGymOwnerUsername(gymId, input.name);
+    const defaultPassword = buildGymOwnerDefaultPassword(gymId);
+
     const gymOwner: GymOwner = {
       id: randomUUID(),
       gymId: gymId,
-      username: username,
+      username,
+      usernameNormalized: normalizeGymOwnerUsername(username),
       passwordHash: hashPassword(defaultPassword),
       email: input.email || undefined,
       name: input.ownerName || input.name + ' Owner',

@@ -1,6 +1,11 @@
 import { adminDb } from './firebase-admin';
 import { User, Subscription, Gym, CheckIn, GymOwner, Coupon, Payout, WalletTransaction } from '@/types';
 import admin from 'firebase-admin';
+import {
+  normalizeGymOwnerUsername,
+  stripInvisibleUsernameChars,
+  usernamesMatchForLogin,
+} from '@/lib/gym-owner-username';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -335,63 +340,87 @@ export const firestoreGyms = {
   },
 };
 
+function mapCheckInDoc(doc: admin.firestore.QueryDocumentSnapshot | admin.firestore.DocumentSnapshot): CheckIn {
+  const data = doc.data() as Record<string, unknown> | undefined;
+  if (!data) {
+    throw new Error(`Check-in document ${doc.id} has no data`);
+  }
+  return {
+    id: doc.id,
+    userId: String(data.userId ?? ''),
+    gymId: String(data.gymId ?? '').trim(),
+    timestamp: timestampToDate(data.timestamp),
+    subscriptionId: String(data.subscriptionId ?? ''),
+    payoutAmount: typeof data.payoutAmount === 'number' ? data.payoutAmount : undefined,
+  };
+}
+
+function sortCheckInsDesc(checkIns: CheckIn[]): CheckIn[] {
+  return [...checkIns].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+}
+
 // Check-ins collection
 export const firestoreCheckIns = {
+  async getById(checkInId: string): Promise<CheckIn | null> {
+    const doc = await adminDb.collection('checkIns').doc(checkInId).get();
+    if (!doc.exists) return null;
+    return mapCheckInDoc(doc);
+  },
+
   async getByUserId(userId: string): Promise<CheckIn[]> {
+    // Single-field query + in-memory sort avoids composite index failures.
     const snapshot = await adminDb
       .collection('checkIns')
       .where('userId', '==', userId)
-      .orderBy('timestamp', 'desc')
       .get();
-    
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        userId: data.userId,
-        gymId: data.gymId,
-        timestamp: timestampToDate(data.timestamp),
-        subscriptionId: data.subscriptionId,
-      };
-    });
+
+    return sortCheckInsDesc(snapshot.docs.map(mapCheckInDoc));
   },
 
   async getByGymId(gymId: string): Promise<CheckIn[]> {
+    const normalizedGymId = gymId.trim();
     const snapshot = await adminDb
       .collection('checkIns')
-      .where('gymId', '==', gymId)
-      .orderBy('timestamp', 'desc')
+      .where('gymId', '==', normalizedGymId)
       .get();
-    
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        userId: data.userId,
-        gymId: data.gymId,
-        timestamp: timestampToDate(data.timestamp),
-        subscriptionId: data.subscriptionId,
-      };
-    });
+
+    return sortCheckInsDesc(snapshot.docs.map(mapCheckInDoc));
   },
 
   async getAll(): Promise<CheckIn[]> {
     const snapshot = await adminDb.collection('checkIns').get();
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        userId: data.userId,
-        gymId: data.gymId,
-        timestamp: timestampToDate(data.timestamp),
-        subscriptionId: data.subscriptionId,
-      };
+    return sortCheckInsDesc(snapshot.docs.map(mapCheckInDoc));
+  },
+
+  /**
+   * Atomically persist check-in and subscription visit count.
+   */
+  async createWithSubscriptionUpdate(
+    checkIn: CheckIn,
+    subscriptionUpdate: { subscriptionId: string; visitsUsed: number; lastCheckInDate: Date }
+  ): Promise<void> {
+    const normalizedGymId = checkIn.gymId.trim();
+    const checkInRef = adminDb.collection('checkIns').doc(checkIn.id);
+    const subRef = adminDb.collection('subscriptions').doc(subscriptionUpdate.subscriptionId);
+
+    const batch = adminDb.batch();
+    batch.set(checkInRef, {
+      ...checkIn,
+      gymId: normalizedGymId,
+      timestamp: admin.firestore.Timestamp.fromDate(checkIn.timestamp),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+    batch.update(subRef, {
+      visitsUsed: subscriptionUpdate.visitsUsed,
+      lastCheckInDate: admin.firestore.Timestamp.fromDate(subscriptionUpdate.lastCheckInDate),
+    });
+    await batch.commit();
   },
 
   async create(checkIn: CheckIn): Promise<void> {
     await adminDb.collection('checkIns').doc(checkIn.id).set({
       ...checkIn,
+      gymId: checkIn.gymId.trim(),
       timestamp: admin.firestore.Timestamp.fromDate(checkIn.timestamp),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -457,29 +486,103 @@ export const firestoreCheckIns = {
   },
 };
 
+function mapGymOwnerDoc(doc: admin.firestore.QueryDocumentSnapshot): GymOwner {
+  const data = doc.data();
+  return {
+    id: doc.id,
+    gymId: data.gymId,
+    username: data.username,
+    usernameNormalized: data.usernameNormalized,
+    password: data.password,
+    passwordHash: data.passwordHash,
+    email: data.email,
+    name: data.name,
+    createdAt: timestampToDate(data.createdAt),
+  };
+}
+
+export type GymOwnerLoginLookupResult = {
+  owner: GymOwner | null;
+  lookupMethod: string;
+};
+
 // Gym Owners collection
 export const firestoreGymOwners = {
   async getByUsername(username: string): Promise<GymOwner | null> {
-    const snapshot = await adminDb
-      .collection('gymOwners')
-      .where('username', '==', username)
-      .limit(1)
-      .get();
-    
-    if (snapshot.empty) return null;
-    
-    const doc = snapshot.docs[0];
-    const data = doc.data();
-    return {
-      id: doc.id,
-      gymId: data.gymId,
-      username: data.username,
-      password: data.password,
-      passwordHash: data.passwordHash,
-      email: data.email,
-      name: data.name,
-      createdAt: timestampToDate(data.createdAt),
+    const result = await this.findByLoginUsername(username);
+    return result.owner;
+  },
+
+  /**
+   * Resilient login lookup: exact match, usernameNormalized index, then scan for
+   * legacy records with casing / whitespace / invisible-character mismatches.
+   */
+  async findByLoginUsername(rawUsername: string): Promise<GymOwnerLoginLookupResult> {
+    const trimmed = stripInvisibleUsernameChars(rawUsername).trim();
+    const normalized = normalizeGymOwnerUsername(trimmed);
+
+    if (!normalized) {
+      return { owner: null, lookupMethod: 'empty' };
+    }
+
+    const tryQuery = async (
+      field: 'username' | 'usernameNormalized',
+      value: string,
+      method: string
+    ): Promise<GymOwnerLoginLookupResult | null> => {
+      const snapshot = await adminDb
+        .collection('gymOwners')
+        .where(field, '==', value)
+        .limit(2)
+        .get();
+      if (snapshot.empty) return null;
+      if (snapshot.size > 1) {
+        console.warn('[GymOwnerAuth] Duplicate gymOwners for', field, value, 'count=', snapshot.size);
+      }
+      return { owner: mapGymOwnerDoc(snapshot.docs[0]), lookupMethod: method };
     };
+
+    const exact = await tryQuery('username', trimmed, 'exact_trimmed');
+    if (exact) return exact;
+
+    const byNormalizedField = await tryQuery('usernameNormalized', normalized, 'usernameNormalized');
+    if (byNormalizedField) return byNormalizedField;
+
+    const byLowerUsername = trimmed !== normalized
+      ? await tryQuery('username', normalized, 'username_lowercase')
+      : null;
+    if (byLowerUsername) return byLowerUsername;
+
+    const all = await adminDb.collection('gymOwners').get();
+    const matches = all.docs.filter((doc) => {
+      const stored = doc.data().username;
+      return typeof stored === 'string' && usernamesMatchForLogin(stored, trimmed);
+    });
+
+    if (matches.length === 0) {
+      return { owner: null, lookupMethod: 'not_found' };
+    }
+    if (matches.length > 1) {
+      console.warn('[GymOwnerAuth] Multiple owners normalize to same username:', normalized, 'count=', matches.length);
+    }
+    return { owner: mapGymOwnerDoc(matches[0]), lookupMethod: 'scan_normalized' };
+  },
+
+  /** Backfill canonical username fields after a successful normalized match. */
+  async ensureUsernameCanonical(owner: GymOwner): Promise<void> {
+    const usernameNormalized = normalizeGymOwnerUsername(owner.username);
+    if (!usernameNormalized) return;
+
+    const updates: Record<string, string> = {};
+    if (owner.usernameNormalized !== usernameNormalized) {
+      updates.usernameNormalized = usernameNormalized;
+    }
+    if (owner.username !== usernameNormalized) {
+      updates.username = usernameNormalized;
+    }
+    if (Object.keys(updates).length === 0) return;
+
+    await adminDb.collection('gymOwners').doc(owner.id).set(updates, { merge: true });
   },
 
   async getByGymId(gymId: string): Promise<GymOwner | null> {
@@ -490,43 +593,22 @@ export const firestoreGymOwners = {
       .get();
     
     if (snapshot.empty) return null;
-    
-    const doc = snapshot.docs[0];
-    const data = doc.data();
-    return {
-      id: doc.id,
-      gymId: data.gymId,
-      username: data.username,
-      password: data.password,
-      passwordHash: data.passwordHash,
-      email: data.email,
-      name: data.name,
-      createdAt: timestampToDate(data.createdAt),
-    };
+    return mapGymOwnerDoc(snapshot.docs[0]);
   },
 
   async create(gymOwner: GymOwner): Promise<void> {
+    const usernameNormalized = normalizeGymOwnerUsername(gymOwner.username);
     await adminDb.collection('gymOwners').doc(gymOwner.id).set({
       ...gymOwner,
+      username: usernameNormalized || gymOwner.username,
+      usernameNormalized,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   },
 
   async getAll(): Promise<GymOwner[]> {
     const snapshot = await adminDb.collection('gymOwners').get();
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        gymId: data.gymId,
-        username: data.username,
-        password: data.password,
-        passwordHash: data.passwordHash,
-        email: data.email,
-        name: data.name,
-        createdAt: timestampToDate(data.createdAt),
-      };
-    });
+    return snapshot.docs.map(mapGymOwnerDoc);
   },
 
   async delete(gymOwnerId: string): Promise<void> {
