@@ -3,7 +3,7 @@ import { User, Subscription, Gym, CheckIn, GymOwner, Coupon, Payout, WalletTrans
 import admin from 'firebase-admin';
 import {
   normalizeGymOwnerUsername,
-  stripInvisibleUsernameChars,
+  sanitizeGymOwnerUsernameInput,
   usernamesMatchForLogin,
 } from '@/lib/gym-owner-username';
 
@@ -161,19 +161,22 @@ export const firestoreSubscriptions = {
 
   /**
    * Member-facing subscription: active row first, else latest unexpired doc (handles stale `isActive` in DB).
+   * Single Firestore query; both selection rules are applied in memory (a user has very few
+   * subscription docs). Previously this could issue two sequential queries per request.
    */
   async getMemberViewSubscription(userId: string): Promise<Subscription | null> {
-    const active = await this.getByUserId(userId);
-    if (active) return active;
-
+    const queryStart = Date.now();
     const snapshot = await adminDb
       .collection('subscriptions')
       .where('userId', '==', userId)
       .get();
+    console.log(
+      '[Perf] getMemberViewSubscription firestore:',
+      JSON.stringify({ ms: Date.now() - queryStart, docs: snapshot.size })
+    );
 
     if (snapshot.empty) return null;
 
-    const now = Date.now();
     const toSub = (doc: { id: string; data: () => any }): Subscription => {
       const data = doc.data();
       return {
@@ -195,8 +198,21 @@ export const firestoreSubscriptions = {
       };
     };
 
-    const candidates = snapshot.docs
-      .map(toSub)
+    // Rule 1 (same as getByUserId): most recently created doc with isActive === true.
+    const activeDocs = snapshot.docs
+      .filter((doc) => doc.data().isActive === true)
+      .sort((a, b) => {
+        const aTime = timestampToDate(a.data().createdAt).getTime();
+        const bTime = timestampToDate(b.data().createdAt).getTime();
+        return bTime - aTime;
+      });
+    if (activeDocs.length > 0) return toSub(activeDocs[0]);
+
+    const all = snapshot.docs.map(toSub);
+
+    // Rule 2: latest unexpired doc whose isActive is not explicitly false.
+    const now = Date.now();
+    const candidates = all
       .filter((s) => {
         const end = s.endDate ? new Date(s.endDate).getTime() : 0;
         return Number.isFinite(end) && end > now && s.isActive !== false;
@@ -506,6 +522,11 @@ export type GymOwnerLoginLookupResult = {
   lookupMethod: string;
 };
 
+export type GymOwnerLoginLookupAllResult = {
+  owners: GymOwner[];
+  lookupMethod: string;
+};
+
 // Gym Owners collection
 export const firestoreGymOwners = {
   async getByUsername(username: string): Promise<GymOwner | null> {
@@ -514,58 +535,92 @@ export const firestoreGymOwners = {
   },
 
   /**
-   * Resilient login lookup: exact match, usernameNormalized index, then scan for
-   * legacy records with casing / whitespace / invisible-character mismatches.
+   * Return every gym owner record that matches the submitted username after normalization.
+   * Used by login to verify passwords against all duplicates (Firestore query order is not stable).
    */
-  async findByLoginUsername(rawUsername: string): Promise<GymOwnerLoginLookupResult> {
-    const trimmed = stripInvisibleUsernameChars(rawUsername).trim();
+  async findAllByLoginUsername(rawUsername: string): Promise<GymOwnerLoginLookupAllResult> {
+    const trimmed = sanitizeGymOwnerUsernameInput(rawUsername);
     const normalized = normalizeGymOwnerUsername(trimmed);
 
     if (!normalized) {
-      return { owner: null, lookupMethod: 'empty' };
+      return { owners: [], lookupMethod: 'empty' };
     }
 
-    const tryQuery = async (
-      field: 'username' | 'usernameNormalized',
-      value: string,
-      method: string
-    ): Promise<GymOwnerLoginLookupResult | null> => {
-      const snapshot = await adminDb
-        .collection('gymOwners')
-        .where(field, '==', value)
-        .limit(2)
-        .get();
-      if (snapshot.empty) return null;
-      if (snapshot.size > 1) {
-        console.warn('[GymOwnerAuth] Duplicate gymOwners for', field, value, 'count=', snapshot.size);
+    const owners: GymOwner[] = [];
+    const seenIds = new Set<string>();
+
+    const addDocs = (docs: admin.firestore.QueryDocumentSnapshot[], method: string) => {
+      for (const doc of docs) {
+        if (seenIds.has(doc.id)) continue;
+        seenIds.add(doc.id);
+        owners.push(mapGymOwnerDoc(doc));
       }
-      return { owner: mapGymOwnerDoc(snapshot.docs[0]), lookupMethod: method };
+      return method;
     };
 
-    const exact = await tryQuery('username', trimmed, 'exact_trimmed');
-    if (exact) return exact;
+    const queryField = async (
+      field: 'username' | 'usernameNormalized',
+      value: string
+    ): Promise<admin.firestore.QueryDocumentSnapshot[]> => {
+      const snapshot = await adminDb.collection('gymOwners').where(field, '==', value).get();
+      return snapshot.docs;
+    };
 
-    const byNormalizedField = await tryQuery('usernameNormalized', normalized, 'usernameNormalized');
-    if (byNormalizedField) return byNormalizedField;
+    // 1. Canonical indexed lookup (case-insensitive login)
+    let lookupMethod = 'usernameNormalized';
+    addDocs(await queryField('usernameNormalized', normalized), lookupMethod);
+    if (owners.length > 0) {
+      return { owners, lookupMethod };
+    }
 
-    const byLowerUsername = trimmed !== normalized
-      ? await tryQuery('username', normalized, 'username_lowercase')
-      : null;
-    if (byLowerUsername) return byLowerUsername;
+    // 2. Lowercase username field (legacy records missing usernameNormalized)
+    lookupMethod = 'username_lowercase';
+    addDocs(await queryField('username', normalized), lookupMethod);
+    if (owners.length > 0) {
+      return { owners, lookupMethod };
+    }
 
+    // 3. Exact trimmed username (legacy mixed-case records)
+    if (trimmed !== normalized) {
+      lookupMethod = 'exact_trimmed';
+      addDocs(await queryField('username', trimmed), lookupMethod);
+      if (owners.length > 0) {
+        return { owners, lookupMethod };
+      }
+    }
+
+    // 4. Full scan for whitespace / invisible-character legacy mismatches
+    lookupMethod = 'scan_normalized';
     const all = await adminDb.collection('gymOwners').get();
     const matches = all.docs.filter((doc) => {
       const stored = doc.data().username;
       return typeof stored === 'string' && usernamesMatchForLogin(stored, trimmed);
     });
+    addDocs(matches, lookupMethod);
 
-    if (matches.length === 0) {
-      return { owner: null, lookupMethod: 'not_found' };
+    if (owners.length === 0) {
+      return { owners: [], lookupMethod: 'not_found' };
     }
-    if (matches.length > 1) {
-      console.warn('[GymOwnerAuth] Multiple owners normalize to same username:', normalized, 'count=', matches.length);
+
+    return { owners, lookupMethod };
+  },
+
+  /**
+   * Resilient login lookup: usernameNormalized index first, then legacy fallbacks.
+   * Prefer findAllByLoginUsername for authentication (handles duplicate records safely).
+   */
+  async findByLoginUsername(rawUsername: string): Promise<GymOwnerLoginLookupResult> {
+    const result = await this.findAllByLoginUsername(rawUsername);
+    if (result.owners.length === 0) {
+      return { owner: null, lookupMethod: result.lookupMethod };
     }
-    return { owner: mapGymOwnerDoc(matches[0]), lookupMethod: 'scan_normalized' };
+    if (result.owners.length > 1) {
+      console.warn(
+        '[GymOwnerAuth] Multiple owners normalize to same username; returning first of',
+        result.owners.length
+      );
+    }
+    return { owner: result.owners[0], lookupMethod: result.lookupMethod };
   },
 
   /** Backfill canonical username fields after a successful normalized match. */

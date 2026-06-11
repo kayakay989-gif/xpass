@@ -9,7 +9,7 @@ export default gymOwnerOrAdminProcedure
     })
   )
   .query(async ({ input, ctx }) => {
-    if (!ctx.isAdmin && ctx.gymOwner?.gymId !== input.gymId) {
+    if (ctx.gymOwner?.gymId !== input.gymId && !(await ctx.getIsAdmin())) {
       throw new Error("Unauthorized");
     }
     const [gym, owner] = await Promise.all([

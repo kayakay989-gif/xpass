@@ -97,24 +97,34 @@ export const trpcClient = trpc.createClient({
           const urlString = typeof url === 'string' ? url : String(url);
           const isGymOwnerLogin = urlString.includes('gymOwners.login');
 
-          // Gym owner portal does not use Firebase Auth — skip token refresh to avoid slow login on web.
-          if (!isGymOwnerLogin) {
+          // Resolve Firebase token and gym owner session token in parallel
+          // (previously sequential awaits added latency to every request).
+          const getFirebaseToken = async (): Promise<string | null> => {
+            // Gym owner portal does not use Firebase Auth — skip token refresh to avoid slow login on web.
+            if (isGymOwnerLogin) return null;
             let token = await auth.currentUser?.getIdToken?.().catch(() => null);
             if (auth.currentUser && !token) {
               await new Promise((r) => setTimeout(r, 120));
               token = await auth.currentUser.getIdToken(true).catch(() => null);
             }
-            if (token) {
-              headers["Authorization"] = `Bearer ${token}`;
-            }
-          }
+            return token ?? null;
+          };
+          const getGymOwnerToken = async (): Promise<string | null> => {
+            if (!AsyncStorage) return null;
+            return AsyncStorage.getItem("gymOwnerSessionToken").catch(() => null);
+          };
 
+          const [token, gymOwnerToken] = await Promise.all([
+            getFirebaseToken(),
+            getGymOwnerToken(),
+          ]);
+
+          if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+          }
           // Gym owner session auth (web gym panel)
-          if (AsyncStorage) {
-            const gymOwnerToken = await AsyncStorage.getItem("gymOwnerSessionToken").catch(() => null);
-            if (gymOwnerToken) {
-              headers["x-gym-owner-token"] = gymOwnerToken;
-            }
+          if (gymOwnerToken) {
+            headers["x-gym-owner-token"] = gymOwnerToken;
           }
 
           // Preserve the method that tRPC sets (POST for mutations, GET for queries)

@@ -20,7 +20,7 @@ export default gymOwnerOrAdminProcedure
   .query(async ({ input, ctx }) => {
     const gymId = input.gymId.trim();
 
-    if (!ctx.isAdmin && ctx.gymOwner?.gymId !== gymId) {
+    if (ctx.gymOwner?.gymId !== gymId && !(await ctx.getIsAdmin())) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Unauthorized' });
     }
 

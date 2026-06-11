@@ -1,5 +1,5 @@
 import createContextHook from '@nkzw/create-context-hook';
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Subscription, Gym, CheckIn, SubscriptionTier, SubscriptionDuration } from '@/types';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from './AuthContext';
@@ -102,6 +102,33 @@ export const [AppProvider, useApp] = createContextHook(() => {
   }, [refetchGyms]);
 
   const [selectedGymFilter, setSelectedGymFilter] = useState<SubscriptionTier | 'all'>('all');
+
+  // Temporary perf instrumentation: time from auth-ready (userId available) to membership data resolved.
+  const membershipPerfRef = useRef<{ startedAt: number | null; reported: boolean }>({
+    startedAt: null,
+    reported: false,
+  });
+  useEffect(() => {
+    if (!userId) {
+      membershipPerfRef.current = { startedAt: null, reported: false };
+      return;
+    }
+    if (membershipPerfRef.current.startedAt == null) {
+      membershipPerfRef.current.startedAt = Date.now();
+    }
+    const perf = membershipPerfRef.current;
+    if (!perf.reported && perf.startedAt != null && (subscriptionQuery.isSuccess || subscriptionQuery.isError)) {
+      perf.reported = true;
+      console.log(
+        '[Perf] membership load (auth-ready -> resolved):',
+        JSON.stringify({
+          ms: Date.now() - perf.startedAt,
+          outcome: subscriptionQuery.isSuccess ? 'success' : 'error',
+          hasData: !!subscriptionQuery.data,
+        })
+      );
+    }
+  }, [userId, subscriptionQuery.isSuccess, subscriptionQuery.isError, subscriptionQuery.data]);
 
   // Debug logging for subscription lifecycle to help trace perceived delays.
   useEffect(() => {
