@@ -49,9 +49,15 @@ export function verifyPassword(password: string, stored: string): boolean {
   const parts = stored.split(':');
   if (parts.length !== 4) return false;
   const iterations = Number(parts[1]);
-  const salt = Buffer.from(parts[2], 'base64');
-  const hash = Buffer.from(parts[3], 'base64');
-  const derived = crypto.pbkdf2Sync(password, salt, iterations, KEYLEN, DIGEST);
-  return crypto.timingSafeEqual(hash, derived);
+  if (!Number.isFinite(iterations) || iterations < 1) return false;
+  try {
+    const salt = Buffer.from(parts[2], 'base64');
+    const hash = Buffer.from(parts[3], 'base64');
+    if (salt.length === 0 || hash.length === 0) return false;
+    const derived = crypto.pbkdf2Sync(password, salt, iterations, KEYLEN, DIGEST);
+    return crypto.timingSafeEqual(hash, derived);
+  } catch {
+    return false;
+  }
 }
 

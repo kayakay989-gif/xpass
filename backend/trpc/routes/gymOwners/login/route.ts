@@ -3,14 +3,10 @@ import { publicProcedure } from '../../../create-context';
 import { z } from 'zod';
 import { firestoreGymOwners, firestoreGyms } from '@/backend/lib/firestore-admin';
 import { createGymOwnerSession } from '@/backend/lib/gym-owner-auth';
-import { hashPassword, verifyPassword } from '@/backend/lib/password';
+import { hashPassword } from '@/backend/lib/password';
+import { resolveGymOwnerForLogin } from '@/backend/lib/gym-owner-login-resolve';
 import { logGymOwnerLogin, parseRequestMeta } from '@/backend/lib/gym-owner-login-log';
-import { verifyGymOwnerPassword } from '@/backend/lib/gym-owner-password';
-import {
-  normalizeGymOwnerUsername,
-  sanitizeGymOwnerPassword,
-  stripInvisibleUsernameChars,
-} from '@/lib/gym-owner-username';
+import { sanitizeGymOwnerPassword, sanitizeGymOwnerUsernameInput, normalizeGymOwnerUsername } from '@/lib/gym-owner-username';
 import admin from '@/backend/lib/firebase-admin';
 
 export default publicProcedure
@@ -20,16 +16,17 @@ export default publicProcedure
   }))
   .mutation(async ({ input, ctx }) => {
     const receivedUsername = input.username;
-    const username = stripInvisibleUsernameChars(receivedUsername).trim();
-    const password = sanitizeGymOwnerPassword(input.password);
-    const normalizedUsername = normalizeGymOwnerUsername(username);
-    const { origin, userAgent } = parseRequestMeta(ctx.req);
+    const preNormalizedUsername = normalizeGymOwnerUsername(
+      sanitizeGymOwnerUsernameInput(receivedUsername)
+    );
+    const { origin, userAgent, environment } = parseRequestMeta(ctx.req);
 
     const logBase = {
       receivedUsernameLength: receivedUsername.length,
-      normalizedUsername,
+      normalizedUsername: preNormalizedUsername,
       origin,
       userAgent,
+      environment,
     };
 
     logGymOwnerLogin({
@@ -38,7 +35,12 @@ export default publicProcedure
       userFound: false,
     });
 
-    if (!username || !password) {
+    const resolved = await resolveGymOwnerForLogin(input.username, input.password);
+    const normalizedUsername = resolved.normalizedUsername;
+
+    logBase.normalizedUsername = normalizedUsername;
+
+    if (resolved.reason === 'empty_credentials') {
       logGymOwnerLogin({
         event: 'gym_owner_login_failure',
         ...logBase,
@@ -52,15 +54,13 @@ export default publicProcedure
       });
     }
 
-    const lookup = await firestoreGymOwners.findByLoginUsername(username);
-    const gymOwner = lookup.owner;
-
-    if (!gymOwner) {
+    if (resolved.reason === 'user_not_found') {
       logGymOwnerLogin({
         event: 'gym_owner_login_failure',
         ...logBase,
         userFound: false,
-        lookupMethod: lookup.lookupMethod,
+        lookupMethod: resolved.lookupMethod,
+        candidateCount: resolved.candidateCount,
         reason: 'user_not_found',
         apiResponseCode: 'UNAUTHORIZED',
       });
@@ -70,22 +70,15 @@ export default publicProcedure
       });
     }
 
-    const hasHash = typeof gymOwner.passwordHash === 'string' && gymOwner.passwordHash.length > 0;
-    const legacyPlain = typeof gymOwner.password === 'string' ? gymOwner.password.trim() : '';
-
-    const ok = hasHash
-      ? verifyGymOwnerPassword(gymOwner.gymId, password, gymOwner.passwordHash!)
-      : legacyPlain === password;
-
-    if (!ok) {
+    const gymOwner = resolved.owner;
+    if (!gymOwner || resolved.reason === 'password_mismatch') {
       logGymOwnerLogin({
         event: 'gym_owner_login_failure',
         ...logBase,
-        userFound: true,
+        userFound: resolved.candidateCount > 0,
         passwordVerified: false,
-        lookupMethod: lookup.lookupMethod,
-        ownerId: gymOwner.id,
-        gymId: gymOwner.gymId,
+        lookupMethod: resolved.lookupMethod,
+        candidateCount: resolved.candidateCount,
         reason: 'password_mismatch',
         apiResponseCode: 'UNAUTHORIZED',
       });
@@ -95,6 +88,8 @@ export default publicProcedure
       });
     }
 
+    const hasHash = typeof gymOwner.passwordHash === 'string' && gymOwner.passwordHash.length > 0;
+
     // Best-effort: fix legacy usernames and add usernameNormalized for indexed lookup
     try {
       await firestoreGymOwners.ensureUsernameCanonical(gymOwner);
@@ -103,14 +98,24 @@ export default publicProcedure
     }
 
     // Upgrade legacy/weak hashes to pbkdf2 (best-effort)
-    if (!hasHash || (gymOwner.passwordHash && !gymOwner.passwordHash.startsWith('pbkdf2:'))) {
+    const submittedPassword = sanitizeGymOwnerPassword(input.password);
+    if (
+      submittedPassword &&
+      (!hasHash || (gymOwner.passwordHash && !gymOwner.passwordHash.startsWith('pbkdf2:')))
+    ) {
       try {
-        const passwordHash = hashPassword(password);
+        const passwordHash = hashPassword(submittedPassword);
         await admin
           .firestore()
           .collection('gymOwners')
           .doc(gymOwner.id)
-          .set({ passwordHash }, { merge: true });
+          .set(
+            {
+              passwordHash,
+              password: admin.firestore.FieldValue.delete(),
+            },
+            { merge: true }
+          );
       } catch {
         // non-fatal
       }
@@ -124,7 +129,8 @@ export default publicProcedure
         ...logBase,
         userFound: true,
         passwordVerified: true,
-        lookupMethod: lookup.lookupMethod,
+        lookupMethod: resolved.lookupMethod,
+        candidateCount: resolved.candidateCount,
         ownerId: gymOwner.id,
         gymId: gymOwner.gymId,
         reason: 'gym_not_found',
@@ -147,9 +153,11 @@ export default publicProcedure
       ...logBase,
       userFound: true,
       passwordVerified: true,
-      lookupMethod: lookup.lookupMethod,
+      lookupMethod: resolved.lookupMethod,
+      candidateCount: resolved.candidateCount,
       ownerId: gymOwner.id,
       gymId: gymOwner.gymId,
+      matchedOwnerId: resolved.matchedOwnerId,
       apiResponseCode: 'OK',
     });
 

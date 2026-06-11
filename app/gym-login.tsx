@@ -19,7 +19,7 @@ import { config } from '@/lib/config';
 import {
   normalizeGymOwnerUsername,
   sanitizeGymOwnerPassword,
-  stripInvisibleUsernameChars,
+  sanitizeGymOwnerUsernameInput,
 } from '@/lib/gym-owner-username';
 import { getGymLoginUserMessage } from '@/lib/gym-login-errors';
 
@@ -31,9 +31,9 @@ export default function GymLoginScreen() {
   const loginMutation = trpc.gymOwners.login.useMutation();
 
   const handleLogin = async () => {
-    const trimmedUsername = stripInvisibleUsernameChars(username).trim();
+    const sanitizedUsername = sanitizeGymOwnerUsernameInput(username);
     const trimmedPassword = sanitizeGymOwnerPassword(password);
-    const normalizedUsername = normalizeGymOwnerUsername(trimmedUsername);
+    const normalizedUsername = normalizeGymOwnerUsername(sanitizedUsername);
 
     if (!normalizedUsername || !trimmedPassword) {
       setError('Please enter both username and password');
@@ -51,7 +51,7 @@ export default function GymLoginScreen() {
 
     const attemptLogin = () =>
       loginMutation.mutateAsync({
-        username: normalizedUsername,
+        username: sanitizedUsername,
         password: trimmedPassword,
       });
 
@@ -131,6 +131,7 @@ export default function GymLoginScreen() {
                 placeholder="Username"
                 value={username}
                 onChangeText={setUsername}
+                onBlur={() => setUsername(sanitizeGymOwnerUsernameInput(username))}
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="username"
@@ -146,6 +147,7 @@ export default function GymLoginScreen() {
                 placeholder="Password"
                 value={password}
                 onChangeText={setPassword}
+                onBlur={() => setPassword(sanitizeGymOwnerPassword(password))}
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
