@@ -53,7 +53,7 @@ import { TIER_COLORS as SHARED_TIER_COLORS } from '@/constants/tier-colors';
 import DatePicker from '@/components/DatePicker';
 import { buildGymOwnerUsername, buildGymOwnerDefaultPassword } from '@/lib/gym-owner-username';
 
-type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'revenue';
+type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'revenue' | 'spotlight';
 
 // Use shared tier colors for consistency
 const TIER_COLORS = {
@@ -136,17 +136,27 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
       Alert.alert('Error', error.message);
     },
   });
+  // Web-aware notification: Alert.alert does not render on react-native-web.
+  const notifyCoupon = (title: string, message: string): void => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // eslint-disable-next-line no-alert
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
+
   const deleteMutation = trpc.coupons.delete.useMutation({
     onSuccess: () => {
       console.log('[Coupons] Delete successful, refreshing list...');
       setPage(0); // Reset to first page
       setAllCoupons([]); // Clear existing coupons
       refetchCoupons();
-      Alert.alert('Success', 'Coupon deleted successfully');
+      notifyCoupon('Success', 'Coupon deleted successfully');
     },
     onError: (error) => {
       console.error('[Coupons] Delete error:', error);
-      Alert.alert('Error', error.message || 'Failed to delete coupon. Please try again.');
+      notifyCoupon('Error', error.message || 'Failed to delete coupon. Please try again.');
     },
   });
 
@@ -216,18 +226,32 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
 
   const handleDeleteCoupon = (couponId: string) => {
     if (!couponId) {
-      Alert.alert('Error', 'Invalid coupon ID');
+      notifyCoupon('Error', 'Invalid coupon ID');
       return;
     }
-    
+
+    const message = 'Are you sure you want to delete this coupon? This action cannot be undone.';
+
+    // Alert.alert button callbacks do not fire on react-native-web, so use window.confirm there.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(`Delete Coupon\n\n${message}`)) {
+        console.log('[Coupons] Delete cancelled');
+        return;
+      }
+      console.log('[Coupons] Deleting coupon:', couponId);
+      deleteMutation.mutate({ couponId });
+      return;
+    }
+
     Alert.alert(
       'Delete Coupon',
-      'Are you sure you want to delete this coupon? This action cannot be undone.',
+      message,
       [
-        { 
-          text: 'Cancel', 
+        {
+          text: 'Cancel',
           style: 'cancel',
-          onPress: () => console.log('[Coupons] Delete cancelled')
+          onPress: () => console.log('[Coupons] Delete cancelled'),
         },
         {
           text: 'Delete',
@@ -673,7 +697,14 @@ export default function AdminDashboardScreen() {
       const paymentStatus = (sub.paymentStatus || '').toLowerCase();
       const status = (sub.status || '').toLowerCase();
       const amount = sub.totalPrice || 0;
-      return amount > 0 && (paymentStatus === 'paid' || status === 'active');
+      if (amount <= 0) return false;
+      // Explicitly unpaid / cancelled states never count as revenue.
+      if (['pending', 'failed', 'unpaid', 'refunded'].includes(paymentStatus)) return false;
+      if (['pending', 'cancelled', 'canceled'].includes(status)) return false;
+      // A subscription document is only created after a completed purchase, so any
+      // priced subscription that isn't explicitly pending/cancelled is realized revenue.
+      // (Legacy/most docs only carry `isActive` and have no paymentStatus/status fields.)
+      return true;
     };
 
     const paidSubs = enriched.filter((sub: any) => sub.createdAt && isPaid(sub));
@@ -1132,6 +1163,43 @@ export default function AdminDashboardScreen() {
         { text: 'OK', onPress: () => resolve(true) },
       ]);
     });
+  };
+
+  // Web-aware notification: React Native's Alert.alert does not render on react-native-web,
+  // so success/error feedback must use window.alert on web to actually be visible.
+  const notify = (title: string, message: string): void => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // eslint-disable-next-line no-alert
+      window.alert(`${title}\n\n${message}`);
+      return;
+    }
+    Alert.alert(title, message);
+  };
+
+  // Open the subscriber details modal and refresh the user's wallet balance from the
+  // canonical source (users/{id}.walletBalance) so the admin always sees the current value.
+  const openSubscriberDetails = (user: any) => {
+    setSelectedSubscriber(user);
+    if (!user?.id) return;
+    firestoreUsers
+      .getById(user.id)
+      .then((fresh) => {
+        if (!fresh) return;
+        setSelectedSubscriber((prev: any) =>
+          prev && prev.id === user.id
+            ? { ...prev, walletBalance: fresh.walletBalance ?? 0 }
+            : prev
+        );
+        // Keep the list row in sync as well.
+        setUsers((prev) =>
+          prev.map((u: any) =>
+            u.id === user.id ? { ...u, walletBalance: fresh.walletBalance ?? 0 } : u
+          )
+        );
+      })
+      .catch((e) => {
+        console.warn('[Admin] Failed to refresh wallet balance for user:', user.id, e);
+      });
   };
 
   const startEditGym = async (gym: any) => {
@@ -1953,48 +2021,43 @@ export default function AdminDashboardScreen() {
   };
 
   const handleDeleteSpotlightBanner = async (bannerId: string, imageUrl: string) => {
-    Alert.alert(
+    const confirmed = await confirmAction(
       'Delete Banner',
-      'Are you sure you want to delete this spotlight banner?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Delete from Firestore
-              await firestoreSpotlightImages.delete(bannerId);
-
-              // Try to delete from Storage (if it's a Firebase Storage URL)
-              try {
-                if (imageUrl.includes('firebasestorage')) {
-                  const storage = getStorage(app);
-                  const imageRef = ref(storage, imageUrl);
-                  await deleteObject(imageRef);
-                }
-              } catch (storageError) {
-                console.warn('[Admin] Could not delete image from storage:', storageError);
-                // Continue even if storage deletion fails
-              }
-
-              // Re-fetch and resequence positions
-              await loadSpotlightImages();
-              setSpotlightImages((prev) =>
-                [...prev]
-                  .filter((img) => img.id !== bannerId)
-                  .sort((a, b) => (a.position || 0) - (b.position || 0))
-                  .map((img, index) => ({ ...img, position: index + 1 }))
-              );
-              Alert.alert('Success', 'Spotlight image deleted successfully!');
-            } catch (error: any) {
-              console.error('[Admin] Error deleting banner:', error);
-              Alert.alert('Error', error?.message || 'Failed to delete banner. Please try again.');
-            }
-          },
-        },
-      ]
+      'Are you sure you want to delete this spotlight banner?'
     );
+    if (!confirmed) return;
+
+    try {
+      // Delete from Firestore
+      await firestoreSpotlightImages.delete(bannerId);
+
+      // Try to delete from Storage (if it's a Firebase Storage URL)
+      try {
+        if (imageUrl.includes('firebasestorage')) {
+          const storage = getStorage(app);
+          const imageRef = ref(storage, imageUrl);
+          await deleteObject(imageRef);
+        }
+      } catch (storageError) {
+        console.warn('[Admin] Could not delete image from storage:', storageError);
+        // Continue even if storage deletion fails
+      }
+
+      // Optimistically remove from UI state, then re-fetch to stay in sync
+      setSpotlightImages((prev) =>
+        [...prev]
+          .filter((img) => img.id !== bannerId)
+          .sort((a, b) => (a.position || 0) - (b.position || 0))
+          .map((img, index) => ({ ...img, position: index + 1 }))
+      );
+      await loadSpotlightImages();
+      notify('Success', 'Spotlight image deleted successfully!');
+    } catch (error: any) {
+      console.error('[Admin] Error deleting banner:', error);
+      notify('Error', error?.message || 'Failed to delete banner. Please try again.');
+      // Re-sync UI with the database in case the optimistic removal was wrong
+      loadSpotlightImages();
+    }
   };
 
   useEffect(() => {
@@ -2076,7 +2139,7 @@ export default function AdminDashboardScreen() {
                 activeOpacity={0.85}
                 onPress={() => setActiveTab('users')}
               >
-                <Text style={styles.statLabelMinimal}>Active Users</Text>
+                <Text style={styles.statLabelMinimal}>Users</Text>
                 <Text style={styles.statValueMinimal}>{stats?.totalUsers || 0}</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -2115,6 +2178,14 @@ export default function AdminDashboardScreen() {
                 <Text style={styles.statValueMinimal}>
                   {`JOD ${revenueMetrics.thisMonthRevenue.toFixed(0)}`}
                 </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statCardMinimal}
+                activeOpacity={0.85}
+                onPress={() => setActiveTab('spotlight')}
+              >
+                <Text style={styles.statLabelMinimal}>Spotlight Images</Text>
+                <Text style={styles.statValueMinimal}>{spotlightImages.length}</Text>
               </TouchableOpacity>
             </View>
 
@@ -2220,7 +2291,7 @@ export default function AdminDashboardScreen() {
                 <TouchableOpacity
                   key={user.id}
                   style={styles.userCard}
-                  onPress={() => setSelectedSubscriber(user)}
+                  onPress={() => openSubscriberDetails(user)}
                   activeOpacity={0.7}
                 >
                   <View style={styles.userHeader}>
@@ -2324,13 +2395,64 @@ export default function AdminDashboardScreen() {
 
             <Text style={styles.listCount}>Showing {filteredGyms.length} gyms</Text>
 
-            {/* Spotlight Images Management */}
-            <View style={styles.spotlightPanel}>
-              <Text style={styles.sectionTitle}>Spotlight Images</Text>
+            {/* Gyms Section */}
+            <View style={styles.gymsSection}>
+              <Text style={styles.sectionTitle}>Gyms</Text>
               <Text style={styles.spotlightDescription}>
+                Manage gym locations and settings.
+              </Text>
+            </View>
+
+            {filteredGyms.map((gym: any) => {
+              const logoUri =
+                typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
+                  ? gym.imageUrl
+                  : 'https://placehold.co/140x90/png?text=Gym';
+
+              return (
+              <View key={gym.id} style={styles.gymRowCard}>
+                <Image
+                  source={{ uri: logoUri }}
+                  style={styles.gymThumb}
+                />
+                <View style={styles.gymRowInfo}>
+                  <View style={styles.gymRowTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.gymName}>{gym.name}</Text>
+                      <Text style={styles.gymAddress}>{gym.city || gym.address}</Text>
+                      <View style={styles.amenitiesPills}>
+                        {(gym.amenities || []).slice(0, 3).map((a: string, idx: number) => (
+                          <View key={`${gym.id}-a-${idx}`} style={styles.pill}>
+                            <Text style={styles.pillText}>{a}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.editPill}
+                      activeOpacity={0.9}
+                      onPress={() => startEditGym(gym)}
+                    >
+                      <Text style={styles.editPillText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            );})}
+          </View>
+        )}
+
+        {activeTab === 'spotlight' && (
+          <View style={styles.content}>
+            <View style={styles.pageHeaderBlock}>
+              <Text style={styles.pageTitle}>Spotlight Images</Text>
+              <Text style={styles.pageSubtitle}>
                 Manage promotional banners shown in the user home carousel.
               </Text>
+            </View>
 
+            <View style={styles.spotlightPanel}>
               <TouchableOpacity
                 style={[
                   styles.uploadBannerButton,
@@ -2467,52 +2589,6 @@ export default function AdminDashboardScreen() {
                 </>
               )}
             </View>
-
-            {/* Gyms Section */}
-            <View style={styles.gymsSection}>
-              <Text style={styles.sectionTitle}>Gyms</Text>
-              <Text style={styles.spotlightDescription}>
-                Manage gym locations and settings.
-              </Text>
-            </View>
-
-            {filteredGyms.map((gym: any) => {
-              const logoUri =
-                typeof gym.imageUrl === 'string' && !gym.imageUrl.startsWith('blob:')
-                  ? gym.imageUrl
-                  : 'https://placehold.co/140x90/png?text=Gym';
-
-              return (
-              <View key={gym.id} style={styles.gymRowCard}>
-                <Image
-                  source={{ uri: logoUri }}
-                  style={styles.gymThumb}
-                />
-                <View style={styles.gymRowInfo}>
-                  <View style={styles.gymRowTop}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.gymName}>{gym.name}</Text>
-                      <Text style={styles.gymAddress}>{gym.city || gym.address}</Text>
-                      <View style={styles.amenitiesPills}>
-                        {(gym.amenities || []).slice(0, 3).map((a: string, idx: number) => (
-                          <View key={`${gym.id}-a-${idx}`} style={styles.pill}>
-                            <Text style={styles.pillText}>{a}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.editPill}
-                      activeOpacity={0.9}
-                      onPress={() => startEditGym(gym)}
-                    >
-                      <Text style={styles.editPillText}>Edit</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            );})}
           </View>
         )}
 
@@ -4162,7 +4238,7 @@ export default function AdminDashboardScreen() {
 
                 <Text style={styles.checkInDetailLabel}>Wallet Balance</Text>
                 <Text style={styles.checkInDetailValue}>
-                  JOD {selectedSubscriber.walletBalance || 0}
+                  JOD {Number(selectedSubscriber.walletBalance || 0).toFixed(2)}
                 </Text>
 
                 <Text style={styles.checkInDetailLabel}>Referral Code</Text>

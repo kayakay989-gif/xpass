@@ -233,6 +233,12 @@ export const firestoreSubscriptions = {
         visitsUsed: data.visitsUsed || 0,
         maxVisitsPerMonth: data.maxVisitsPerMonth,
         isActive: data.isActive,
+        // Include payment/status/createdAt so admin revenue analytics can identify
+        // completed transactions (these fields were previously dropped, causing JOD 0 revenue).
+        status: data.status ?? null,
+        paymentStatus: data.paymentStatus ?? null,
+        autoRenew: data.autoRenew ?? null,
+        createdAt: data.createdAt ? timestampToDate(data.createdAt) : undefined,
       };
     });
   },
