@@ -5,6 +5,8 @@ import { Subscription } from '@/types';
 import { firestorePayments, firestoreSubscriptions, firestoreCoupons, firestoreUsers, firestoreWalletTransactions } from '@/backend/lib/firestore-admin';
 import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
+import { getTotalPassesForDuration } from '@/backend/lib/pricing';
+import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 
 export default protectedProcedure
   .input(
@@ -127,7 +129,7 @@ export default protectedProcedure
         monthlyPrice,
         totalPrice: isFree ? 0 : finalAmount, // Free subscription or wallet payment
         visitsUsed: 0,
-        maxVisitsPerMonth: 30,
+        maxVisitsPerMonth: getTotalPassesForDuration(input.duration),
         isActive: true,
       };
 
@@ -200,6 +202,8 @@ export default protectedProcedure
       } catch (emailError) {
         console.error('[PayWith3DS] Failed to send subscription success email:', emailError);
       }
+
+      await notifySubscriptionActivated(input.userId, subscription);
 
       return {
         success: true,
@@ -314,7 +318,7 @@ export default protectedProcedure
       monthlyPrice,
       totalPrice: finalAmount, // Total amount (wallet + card)
       visitsUsed: 0,
-      maxVisitsPerMonth: 30,
+      maxVisitsPerMonth: getTotalPassesForDuration(input.duration),
       isActive: true,
     };
 
@@ -368,6 +372,8 @@ export default protectedProcedure
     } catch (emailError) {
       console.error('[PayWith3DS] Failed to send subscription success email:', emailError);
     }
+
+    await notifySubscriptionActivated(input.userId, subscription);
 
     return {
       success: true,

@@ -256,6 +256,23 @@ export default function HomeScreen() {
     !isGuest && !!firebaseUser && subscription == null && !subscriptionQuery.isSuccess && !subscriptionQuery.isError;
   const membershipPending = membershipUnresolved && (blockForMembershipLoad || timedOut);
 
+  const filtersBlock = (
+    <View style={styles.filtersContainer}>
+      <TouchableOpacity style={styles.filterButton} onPress={() => setActiveFilter('city')}>
+        <Text style={styles.filterLabel}>{selectedCity === 'all' ? 'City' : selectedCity}</Text>
+        <ChevronDown size={16} color={Colors.text} />
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.filterButton} onPress={() => setActiveFilter('tier')}>
+        <Text style={styles.filterLabel}>{selectedTier === 'all' ? 'Tier' : getTierName(selectedTier)}</Text>
+        <ChevronDown size={16} color={Colors.text} />
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.filterButton} onPress={() => setActiveFilter('facility')}>
+        <Text style={styles.filterLabel}>{selectedFacility === 'all' ? 'Facilities' : selectedFacility}</Text>
+        <ChevronDown size={16} color={Colors.text} />
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <ScrollView
       style={styles.container}
@@ -407,6 +424,8 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
+      {viewMode === 'list' && filtersBlock}
+
       {viewMode === 'map' ? (
         <MapViewComponent 
           gyms={filteredGyms}
@@ -460,20 +479,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      <View style={styles.filtersContainer}>
-        <TouchableOpacity style={styles.filterButton} onPress={() => setActiveFilter('city')}>
-          <Text style={styles.filterLabel}>{selectedCity === 'all' ? 'City' : selectedCity}</Text>
-          <ChevronDown size={16} color={Colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.filterButton} onPress={() => setActiveFilter('tier')}>
-          <Text style={styles.filterLabel}>{selectedTier === 'all' ? 'Tier' : getTierName(selectedTier)}</Text>
-          <ChevronDown size={16} color={Colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.filterButton} onPress={() => setActiveFilter('facility')}>
-          <Text style={styles.filterLabel}>{selectedFacility === 'all' ? 'Facilities' : selectedFacility}</Text>
-          <ChevronDown size={16} color={Colors.text} />
-        </TouchableOpacity>
-      </View>
+      {viewMode === 'map' && filtersBlock}
 
       <Modal visible={!!activeFilter} transparent animationType="fade" onRequestClose={() => setActiveFilter(null)}>
         <TouchableOpacity style={styles.filterOverlay} activeOpacity={1} onPress={() => setActiveFilter(null)}>

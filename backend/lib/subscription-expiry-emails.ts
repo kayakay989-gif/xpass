@@ -3,6 +3,7 @@ import { adminDb } from '@/backend/lib/firebase-admin';
 import { firestoreSubscriptions, firestoreUsers } from '@/backend/lib/firestore-admin';
 import { Subscription } from '@/types';
 import { sendResendHtmlEmail } from '@/backend/lib/resend-email';
+import { notifySubscriptionExpiringSoon } from '@/backend/lib/push-notifications';
 
 function escapeHtml(value: string): string {
   return value
@@ -154,6 +155,8 @@ export async function runSubscriptionExpiryEmailJob(): Promise<{
           userName: user?.name,
           subscription: sub,
         });
+        // Additive: also push the 3-day reminder (covers "passes about to expire").
+        await notifySubscriptionExpiringSoon(sub.userId, sub);
         await ref.update({
           expiryReminderEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
         });

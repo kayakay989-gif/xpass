@@ -21,3 +21,15 @@ export function calculateSubscriptionPrice(
   return { monthlyPrice, totalPrice };
 }
 
+/**
+ * Total passes allocated for a subscription, scaled by purchased duration.
+ * 1 pass per day: 1 month = 30, 3 months = 90, and a full year (12 months) = 365.
+ * Deduction rules (1 pass/day or per check-in, midnight expiry) are unchanged;
+ * this only controls the total allocation pool (the denominator shown as X/total).
+ */
+export function getTotalPassesForDuration(duration: SubscriptionDuration): number {
+  const months = Number(duration) || 1;
+  if (months === 12) return 365;
+  return months * 30;
+}
+

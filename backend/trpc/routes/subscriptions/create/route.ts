@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { protectedProcedure } from '@/backend/trpc/create-context';
 import { firestoreSubscriptions } from '@/backend/lib/firestore-admin';
 import { Subscription, SubscriptionTier, SubscriptionDuration } from '@/types';
-import { calculateSubscriptionPrice } from '@/backend/lib/pricing';
+import { calculateSubscriptionPrice, getTotalPassesForDuration } from '@/backend/lib/pricing';
+import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 import { randomUUID } from 'crypto';
 import { firestoreUsers } from '@/backend/lib/firestore-admin';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
@@ -44,7 +45,7 @@ export default protectedProcedure
       monthlyPrice,
       totalPrice,
       visitsUsed: 0,
-      maxVisitsPerMonth: 30,
+      maxVisitsPerMonth: getTotalPassesForDuration(input.duration),
       isActive: true,
     };
 
@@ -65,6 +66,8 @@ export default protectedProcedure
         console.error('[SubscriptionsCreate] Failed to send subscription success email:', emailError);
       }
     }
-    
+
+    await notifySubscriptionActivated(input.userId, subscription);
+
     return subscription;
   });

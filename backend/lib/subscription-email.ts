@@ -11,8 +11,17 @@ type SubscriptionEmailInput = {
   currency?: string | null;
 };
 
+/**
+ * Format subscription dates in the Jordan business timezone so the email shows the
+ * exact same calendar date the app shows (the app/expiry logic use Asia/Amman).
+ * Without a fixed timeZone this runs in the server's timezone (UTC on Render),
+ * which can shift the displayed day by one vs. what the user sees in-app.
+ */
+const JORDAN_TZ = 'Asia/Amman';
+
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat('en-GB', {
+    timeZone: JORDAN_TZ,
     year: 'numeric',
     month: 'short',
     day: '2-digit',

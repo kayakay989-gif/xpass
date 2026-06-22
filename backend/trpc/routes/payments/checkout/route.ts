@@ -13,6 +13,8 @@ import {
 import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { payWithToken, payWithCard, payWithAuthentication, initiateAuthentication, authenticatePayer } from '@/backend/lib/mastercard';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
+import { getTotalPassesForDuration } from '@/backend/lib/pricing';
+import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 
 /**
  * Unified checkout endpoint for all payment methods
@@ -655,7 +657,7 @@ export default protectedProcedure
         monthlyPrice,
         totalPrice: finalAmount,
         visitsUsed: 0,
-        maxVisitsPerMonth: 30,
+        maxVisitsPerMonth: getTotalPassesForDuration(input.duration),
         isActive: true,
       };
 
@@ -781,6 +783,8 @@ export default protectedProcedure
       } catch (emailError) {
         console.error('[Checkout] Failed to send subscription success email:', emailError);
       }
+
+      await notifySubscriptionActivated(input.userId, subscription);
 
       return {
         success: true,

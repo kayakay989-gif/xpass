@@ -38,6 +38,7 @@ import { Platform } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { nativeSignOut } from '@/lib/firebasePhoneNative';
+import { registerForPushNotificationsAsync, configurePushNotifications } from '@/lib/pushNotifications';
 import { trpc } from '@/lib/trpc';
 
 // Complete the auth session properly
@@ -664,6 +665,41 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     if (!firebaseUser) {
       pendingReferralSyncedRef.current = false;
     }
+  }, [firebaseUser]);
+
+  /**
+   * Register this device for push notifications (native only) and store the Expo
+   * push token on the user doc so the backend can target subscription/expiry alerts.
+   * Additive and best-effort: never blocks auth and is a no-op on web.
+   */
+  const pushTokenSavedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!firebaseUser) {
+      pushTokenSavedRef.current = null;
+      return;
+    }
+    configurePushNotifications();
+    const uid = firebaseUser.uid;
+    void (async () => {
+      try {
+        const token = await registerForPushNotificationsAsync();
+        if (!token) return;
+        if (pushTokenSavedRef.current === token) return;
+        await setDoc(
+          doc(db, 'users', uid),
+          {
+            expoPushToken: token,
+            pushTokenPlatform: Platform.OS,
+            pushTokenUpdatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        pushTokenSavedRef.current = token;
+      } catch (e) {
+        console.warn('[AuthContext] Push token registration failed (non-critical):', e);
+      }
+    })();
   }, [firebaseUser]);
 
   /** True when AsyncStorage prefs + first Firebase auth tick finished (routing safe). */

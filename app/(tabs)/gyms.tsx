@@ -278,8 +278,6 @@ export default function GymsScreen() {
                   )}
                 </View>
               )}
-
-              <Text style={styles.hoursText}>{gym.hours}</Text>
             </View>
           </TouchableOpacity>
           );
