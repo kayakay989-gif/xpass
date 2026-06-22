@@ -291,6 +291,57 @@ export async function payWithToken(params: {
   return putToGateway(orderId, paymentTransactionId, payload);
 }
 
+/* DEVICE / WALLET PAYMENT (Apple Pay / Google Pay)
+ *
+ * MPGS accepts a wallet payment token via sourceOfFunds.provided.card.devicePayment.
+ * The token is obtained natively on-device (Apple Pay PKPaymentToken / Google Pay
+ * payment token) and passed straight through to the gateway — the PAN is never
+ * handled by the app, keeping tokenization consistent with the existing flows.
+ */
+export async function payWithDeviceToken(params: {
+  orderId: string;
+  paymentTransactionId: string;
+  deviceToken: string;
+  walletType: 'APPLE_PAY' | 'GOOGLE_PAY';
+  amount: number;
+  currency: string;
+  reference?: string;
+}) {
+  const { orderId, paymentTransactionId, deviceToken, walletType, amount, currency, reference } =
+    params;
+
+  if (!deviceToken) {
+    throw new Error('Wallet payment token is required');
+  }
+
+  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+
+  const payload = {
+    apiOperation: 'PAY',
+    order: {
+      amount: amountStr,
+      currency,
+      reference: reference || orderId,
+      walletProvider: walletType === 'APPLE_PAY' ? 'APPLE_PAY' : 'GOOGLE_PAY',
+    },
+    sourceOfFunds: {
+      type: 'CARD',
+      provided: {
+        card: {
+          devicePayment: {
+            paymentToken: deviceToken,
+          },
+        },
+      },
+    },
+    transaction: {
+      reference: reference || orderId,
+    },
+  };
+
+  return putToGateway(orderId, paymentTransactionId, payload);
+}
+
 /* DIRECT CARD PAYMENT */
 
 export async function payWithCard(params: {

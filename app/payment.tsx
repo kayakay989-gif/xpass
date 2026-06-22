@@ -18,6 +18,7 @@ import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { paramFirst } from '@/lib/expo-router-params';
 import { agentLog } from '@/lib/agent-debug-log';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
+import { isWalletPayAvailable, requestWalletPayment, getWalletMethod } from '@/lib/wallet-pay';
 
 type ThreeDsCallbackMessage = {
   type: string;
@@ -96,6 +97,10 @@ export default function PaymentScreen() {
   // Card payments only
   const [paymentMethod] = useState<'card'>('card');
   const [saveCard, setSaveCard] = useState<boolean>(false);
+  // Apple Pay (iOS) / Google Pay (Android) — additive; hidden unless the native
+  // wallet module reports availability, so the card flow is never affected.
+  const [walletAvailable, setWalletAvailable] = useState<boolean>(false);
+  const [walletProcessing, setWalletProcessing] = useState<boolean>(false);
   const [selectedSavedCardId, setSelectedSavedCardId] = useState<string | null>(null);
   const [savedCards, setSavedCards] = useState<any[]>([]);
 
@@ -337,6 +342,89 @@ export default function PaymentScreen() {
 
   // Strict backend confirmation (used after 3DS so we don't show success until backend confirms).
   const verifyPaymentMutation = trpc.payments.verify.useMutation();
+
+  // Apple Pay / Google Pay: charged server-side via the existing MPGS gateway.
+  const payWithWalletMutation = trpc.payments.payWithWallet.useMutation();
+
+  // Detect native wallet availability once (no-op on web / unsupported devices).
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const available = await isWalletPayAvailable();
+        if (!cancelled) setWalletAvailable(available);
+      } catch {
+        if (!cancelled) setWalletAvailable(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleWalletPayment = useCallback(async () => {
+    if (!effectiveUserId) {
+      Alert.alert('Error', 'Please log in to complete payment');
+      return;
+    }
+    const method = getWalletMethod();
+    if (!method) return;
+
+    setWalletProcessing(true);
+    setPaymentProcessing(true);
+    setStatusMessage(method === 'apple_pay' ? 'Starting Apple Pay…' : 'Starting Google Pay…');
+    try {
+      // Display amount for the wallet sheet; the backend authoritatively
+      // recomputes and charges the correct package price.
+      const amountToCharge = parseFloat(price) || 0;
+      const walletResult = await requestWalletPayment({
+        amount: amountToCharge,
+        currency: 'JOD',
+        label: `${tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : 'Xpass'} - ${duration} month${Number(duration) > 1 ? 's' : ''}`,
+      });
+
+      if (walletResult.canceled) {
+        setWalletProcessing(false);
+        setPaymentProcessing(false);
+        setStatusMessage('');
+        return;
+      }
+      if (!walletResult.success || !walletResult.paymentToken) {
+        throw new Error(walletResult.error || 'Wallet payment failed');
+      }
+
+      const result = await payWithWalletMutation.mutateAsync({
+        userId: effectiveUserId,
+        tier: tier as any,
+        duration: parseInt(duration) as any,
+        paymentMethod: method,
+        paymentToken: walletResult.paymentToken,
+        currency: 'JOD',
+      });
+
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Payment was declined.');
+      }
+
+      try {
+        await subscriptionQuery.refetch();
+      } catch (e) {
+        console.warn('[Payment] Post-wallet subscription refetch (non-fatal):', e);
+      }
+      setToastType('success');
+      setToastMessage('Subscribed successfully! Your membership is now active.');
+      setToastVisible(true);
+      setTimeout(() => navigateHomeAfterPayment(), Platform.OS === 'ios' ? 700 : 1200);
+    } catch (error: any) {
+      console.error('[Payment] Wallet payment error:', error);
+      setPaymentProcessing(false);
+      setStatusMessage('');
+      Alert.alert('Payment Failed', error?.message || 'Failed to process payment. Please try again.');
+    } finally {
+      setWalletProcessing(false);
+    }
+  }, [effectiveUserId, tier, duration, price, payWithWalletMutation, subscriptionQuery, navigateHomeAfterPayment]);
 
   const formatCardNumber = (text: string) => {
     const cleaned = text.replace(/\s/g, '');
@@ -1040,6 +1128,31 @@ export default function PaymentScreen() {
               </View>
             )}
           </View>
+
+          {walletAvailable && !appliedCoupon && !useWallet && cardAmount > 0 && (
+            <View style={styles.walletPaySection}>
+              <TouchableOpacity
+                style={[styles.walletPayButton, (walletProcessing || paymentProcessing) && styles.walletPayButtonDisabled]}
+                onPress={handleWalletPayment}
+                disabled={walletProcessing || paymentProcessing}
+                activeOpacity={0.8}
+                testID="wallet-pay-button"
+              >
+                {walletProcessing ? (
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  <Text style={styles.walletPayButtonText}>
+                    {getWalletMethod() === 'apple_pay' ? 'Pay with Apple Pay' : 'Pay with Google Pay'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+              <View style={styles.walletDividerRow}>
+                <View style={styles.walletDividerLine} />
+                <Text style={styles.walletDividerText}>or pay with card</Text>
+                <View style={styles.walletDividerLine} />
+              </View>
+            </View>
+          )}
 
           {!appliedCoupon?.isFree && cardAmount > 0 && (
             <>
@@ -2133,6 +2246,39 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600' as const,
+  },
+  walletPaySection: {
+    marginBottom: 16,
+  },
+  walletPayButton: {
+    backgroundColor: Colors.black,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletPayButtonDisabled: {
+    opacity: 0.6,
+  },
+  walletPayButtonText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '700' as const,
+  },
+  walletDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    gap: 12,
+  },
+  walletDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.border,
+  },
+  walletDividerText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
   },
   quickPaymentSection: {
     marginTop: 24,

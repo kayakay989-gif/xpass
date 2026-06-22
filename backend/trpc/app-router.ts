@@ -18,6 +18,7 @@ import paymentsInitiate3ds from "./routes/payments/initiate3ds/route";
 import paymentsAuthenticate3ds from "./routes/payments/authenticate3ds/route";
 import paymentsPayWith3ds from "./routes/payments/payWith3ds/route";
 import paymentsCheckout from "./routes/payments/checkout/route";
+import paymentsPayWithWallet from "./routes/payments/payWithWallet/route";
 import paymentsVerify from "./routes/payments/verify/route";
 import adminGetAllUsers from "./routes/admin/getAllUsers/route";
 import adminGetAllCheckIns from "./routes/admin/getAllCheckIns/route";
@@ -76,6 +77,7 @@ const paymentsRouter = createTRPCRouter({
   authenticate3ds: paymentsAuthenticate3ds,
   payWith3ds: paymentsPayWith3ds,
   checkout: paymentsCheckout,
+  payWithWallet: paymentsPayWithWallet,
   verify: paymentsVerify,
 });
 

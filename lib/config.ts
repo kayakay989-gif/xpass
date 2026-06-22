@@ -53,6 +53,22 @@ export const config = {
     apiKey: env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '',
   },
 
+  // Digital Wallet (Apple Pay / Google Pay) Configuration.
+  // All values are env-driven; wallet buttons stay hidden until the native
+  // modules report availability, so the stable card flow is never affected.
+  wallet: {
+    merchantName: env.EXPO_PUBLIC_WALLET_MERCHANT_NAME || 'Xpass',
+    // Apple Pay merchant identifier, e.g. "merchant.com.xpass.app"
+    appleMerchantId: env.EXPO_PUBLIC_APPLE_MERCHANT_ID || '',
+    // Google Pay production merchant id
+    googleMerchantId: env.EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID || '',
+    // MPGS gateway tokenization parameters
+    gateway: env.EXPO_PUBLIC_WALLET_GATEWAY || 'mpgs',
+    gatewayMerchantId: env.EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID || '',
+    allowedNetworks: ['VISA', 'MASTERCARD'] as string[],
+    country: env.EXPO_PUBLIC_WALLET_COUNTRY || 'JO',
+  },
+
   // App Configuration
   app: {
     name: "Xpass Subscription App",
