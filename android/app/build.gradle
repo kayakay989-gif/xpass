@@ -92,8 +92,8 @@ android {
         applicationId 'com.xpass.unique'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 38
-        versionName "1.0.15"
+        versionCode 39
+        versionName "1.0.16"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -179,6 +179,9 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Google Pay
+    implementation 'com.google.android.gms:play-services-wallet:19.5.0'
 }
 
 // Apply last so google-services.json is merged into res/values (Firebase Phone Auth + OAuth client id).

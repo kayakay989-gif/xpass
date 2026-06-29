@@ -62,6 +62,9 @@ export default protectedProcedure
 
     let gatewayResponse: any = null;
     try {
+      // Gateway-managed decryption: pass the device wallet token straight through.
+      // Apple Pay requires the gateway to hold the Payment Processing Certificate
+      // (CSR generated in Merchant Administration, not on a Mac).
       gatewayResponse = await payWithDeviceToken({
         orderId,
         paymentTransactionId,

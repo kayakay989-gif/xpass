@@ -336,6 +336,71 @@ export async function payWithDeviceToken(params: {
     },
     transaction: {
       reference: reference || orderId,
+      source: 'INTERNET',
+    },
+  };
+
+  return putToGateway(orderId, paymentTransactionId, payload);
+}
+
+/* DECRYPTED APPLE PAY PAYMENT (self-managed decryption)
+ *
+ * When we decrypt the Apple Pay token on our own server (because the gateway
+ * does not hold the certificate's private key), we send the decrypted DPAN +
+ * device cryptogram fields instead of the raw token. See the gateway's
+ * "Decrypting the Payment Token" / "AUTHORIZE request example for decryption in
+ * your server" flow.
+ */
+export async function payWithDecryptedApplePay(params: {
+  orderId: string;
+  paymentTransactionId: string;
+  card: {
+    number: string;
+    expiryMonth: string;
+    expiryYear: string;
+    cryptogram: string;
+    eci?: string;
+  };
+  amount: number;
+  currency: string;
+  reference?: string;
+}) {
+  const { orderId, paymentTransactionId, card, amount, currency, reference } = params;
+
+  if (!card?.number || !card?.cryptogram) {
+    throw new Error('Decrypted Apple Pay card data is incomplete');
+  }
+
+  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+
+  const payload = {
+    apiOperation: 'PAY',
+    order: {
+      amount: amountStr,
+      currency,
+      reference: reference || orderId,
+      walletProvider: 'APPLE_PAY',
+    },
+    sourceOfFunds: {
+      type: 'CARD',
+      provided: {
+        card: {
+          number: card.number,
+          expiry: {
+            month: card.expiryMonth,
+            year: card.expiryYear,
+          },
+          devicePayment: {
+            cryptogramFormat: '3DSECURE',
+            onlinePaymentCryptogram: card.cryptogram,
+            ...(card.eci ? { eciIndicator: card.eci } : {}),
+          },
+        },
+      },
+    },
+    transaction: {
+      reference: reference || orderId,
+      source: 'INTERNET',
     },
   };
 

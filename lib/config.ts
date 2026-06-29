@@ -58,13 +58,16 @@ export const config = {
   // modules report availability, so the stable card flow is never affected.
   wallet: {
     merchantName: env.EXPO_PUBLIC_WALLET_MERCHANT_NAME || 'Xpass',
-    // Apple Pay merchant identifier, e.g. "merchant.com.xpass.app"
+    // Apple Pay merchant identifier, e.g. "merchant.com.xpass.app".
+    // NOTE: this is NOT the App ID (com.xpass.app). It must be a Merchant ID
+    // created under Apple Developer > Identifiers > Merchant IDs, with an
+    // Apple Pay Payment Processing Certificate registered in the MPGS gateway.
     appleMerchantId: env.EXPO_PUBLIC_APPLE_MERCHANT_ID || '',
-    // Google Pay production merchant id
-    googleMerchantId: env.EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID || '',
-    // MPGS gateway tokenization parameters
-    gateway: env.EXPO_PUBLIC_WALLET_GATEWAY || 'mpgs',
-    gatewayMerchantId: env.EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID || '',
+    // Google Pay production merchant id (Google Pay Business Console)
+    googleMerchantId: env.EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID || 'BCR2DN5T22RLHU35',
+    // MPGS gateway tokenization parameters (Google Pay gateway name is "mastercard")
+    gateway: env.EXPO_PUBLIC_WALLET_GATEWAY || 'mastercard',
+    gatewayMerchantId: env.EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID || '9589667361EP',
     allowedNetworks: ['VISA', 'MASTERCARD'] as string[],
     country: env.EXPO_PUBLIC_WALLET_COUNTRY || 'JO',
   },
