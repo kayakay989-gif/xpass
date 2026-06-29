@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "53",
+      "buildNumber": "54",
       "config": {},
       "associatedDomains": [
         "applinks:xpass-rork-1e6ad.web.app",
