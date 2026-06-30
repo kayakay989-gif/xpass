@@ -71,7 +71,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun isReadyToPay(promise: Promise) {
-        val activity = currentActivity
+        val activity = reactApplicationContext.currentActivity
         if (activity == null) {
             promise.resolve(false)
             return
@@ -96,7 +96,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun requestPayment(config: ReadableMap, promise: Promise) {
-        val activity = currentActivity
+        val activity = reactApplicationContext.currentActivity
         if (activity == null) {
             promise.reject("NO_ACTIVITY", "No current activity available for Google Pay")
             return
@@ -158,7 +158,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
     }
 
     override fun onActivityResult(
-        activity: Activity?,
+        activity: Activity,
         requestCode: Int,
         resultCode: Int,
         data: Intent?
@@ -202,7 +202,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
         paymentPromise = null
     }
 
-    override fun onNewIntent(intent: Intent?) {}
+    override fun onNewIntent(intent: Intent) {}
 
     companion object {
         private const val LOAD_PAYMENT_DATA_REQUEST_CODE = 991
