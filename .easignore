@@ -1,4 +1,12 @@
 # Keep EAS upload small and avoid locked Gradle caches on Windows (EBUSY during tarball)
+xpass-test-build.tar.gz
+*.tar.gz
+logcat-*.txt
+dist/
+artifacts/
+ios-inspect/
+ios-inspect2/
+expo-public-config.json
 android/.gradle/
 android/app/build/
 android/build/

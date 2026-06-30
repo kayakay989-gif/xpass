@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "54",
+      "buildNumber": "55",
       "entitlements": {
         "aps-environment": "production",
         "com.apple.developer.in-app-payments": [
