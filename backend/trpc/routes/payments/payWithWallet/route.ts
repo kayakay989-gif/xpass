@@ -3,7 +3,13 @@ import { protectedProcedure } from '@/backend/trpc/create-context';
 import { TRPCError } from '@trpc/server';
 import { computeAmount, payWithDeviceToken, MastercardGatewayError } from '@/backend/lib/mastercard';
 import { Subscription } from '@/types';
-import { firestorePayments, firestoreSubscriptions, firestoreUsers } from '@/backend/lib/firestore-admin';
+import {
+  firestorePayments,
+  firestoreSubscriptions,
+  firestoreUsers,
+  firestoreCoupons,
+  firestoreWalletTransactions,
+} from '@/backend/lib/firestore-admin';
 import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
@@ -12,11 +18,9 @@ import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 /**
  * Apple Pay / Google Pay checkout.
  *
- * The wallet sheet is presented natively on-device; the resulting tokenized
- * payment token is passed here and charged through the existing MPGS gateway via
- * payWithDeviceToken(). After a successful charge this follows the SAME
- * post-payment subscription logic as the card flow (scaled passes, referral
- * reward, confirmation email, push). The card flow is untouched.
+ * Supports coupons and partial internal-wallet balance (same pricing rules as
+ * card checkout). The device wallet is charged only for the remaining amount
+ * after coupon discount and optional wallet balance.
  */
 export default protectedProcedure
   .input(
@@ -25,7 +29,9 @@ export default protectedProcedure
       tier: z.enum(['silver', 'gold', 'diamond', 'elite']),
       duration: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(9), z.literal(12)]),
       paymentMethod: z.enum(['apple_pay', 'google_pay']),
-      paymentToken: z.string().min(1), // Tokenized wallet payment data from the device
+      paymentToken: z.string().min(1),
+      useWallet: z.boolean().default(false),
+      couponCode: z.string().optional(),
       currency: z.string().optional().default('JOD'),
     })
   )
@@ -42,7 +48,6 @@ export default protectedProcedure
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
     }
 
-    // Block duplicate active subscriptions (parity with card checkout).
     const existing = await firestoreSubscriptions.getByUserId(input.userId);
     if (existing) {
       const endDate = existing.endDate ? new Date(existing.endDate) : null;
@@ -52,52 +57,90 @@ export default protectedProcedure
       }
     }
 
-    const { amount: totalPrice, monthlyPrice } = computeAmount({
+    const { amount: originalAmount, monthlyPrice } = computeAmount({
       tier: input.tier,
       duration: input.duration,
     });
+
+    let finalAmount = originalAmount;
+    let couponId: string | null = null;
+    let discountAmount = 0;
+
+    if (input.couponCode) {
+      const upperCode = input.couponCode.toUpperCase().trim();
+      const coupon = await firestoreCoupons.getByCode(upperCode);
+
+      if (!coupon) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid coupon code' });
+      }
+      if (!coupon.isActive) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This coupon is not active' });
+      }
+      if (coupon.expiresAt && coupon.expiresAt < new Date()) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This coupon has expired' });
+      }
+      if (coupon.usageLimit !== null && coupon.usedCount >= coupon.usageLimit) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This coupon has reached its usage limit' });
+      }
+
+      discountAmount = (originalAmount * coupon.discountPercent) / 100;
+      finalAmount = Math.max(0, originalAmount - discountAmount);
+      couponId = coupon.id;
+    }
+
+    const walletBalance = user.walletBalance || 0;
+    const walletUsed = input.useWallet ? Math.min(walletBalance, finalAmount) : 0;
+    const remainingAmount = Math.max(0, finalAmount - walletUsed);
+
+    if (input.useWallet && walletUsed > walletBalance) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Insufficient wallet balance' });
+    }
 
     const orderId = `wallet-${Date.now()}`;
     const paymentTransactionId = '1';
 
     let gatewayResponse: any = null;
-    try {
-      // Gateway-managed decryption: pass the device wallet token straight through.
-      // Apple Pay requires the gateway to hold the Payment Processing Certificate
-      // (CSR generated in Merchant Administration, not on a Mac).
-      gatewayResponse = await payWithDeviceToken({
-        orderId,
-        paymentTransactionId,
-        deviceToken: input.paymentToken,
-        walletType,
-        amount: totalPrice,
-        currency,
-        reference: orderId,
-      });
-    } catch (err) {
-      if (err instanceof MastercardGatewayError) {
-        console.error('[PayWithWallet] Gateway error', { orderId, status: err.status });
+
+    if (remainingAmount > 0) {
+      if (!input.paymentToken) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Wallet payment token is required' });
+      }
+
+      try {
+        gatewayResponse = await payWithDeviceToken({
+          orderId,
+          paymentTransactionId,
+          deviceToken: input.paymentToken,
+          walletType,
+          amount: remainingAmount,
+          currency,
+          reference: orderId,
+        });
+      } catch (err) {
+        if (err instanceof MastercardGatewayError) {
+          console.error('[PayWithWallet] Gateway error', { orderId, status: err.status });
+          return {
+            success: false,
+            error: {
+              type: err.isNetworkError ? 'network' : 'payment_declined',
+              message: err.isNetworkError
+                ? 'Payment service is temporarily unavailable. Please try again.'
+                : 'Your bank declined the payment. Try another method or contact your bank.',
+            },
+          };
+        }
+        throw err;
+      }
+
+      if (gatewayResponse?.result !== 'SUCCESS') {
         return {
           success: false,
           error: {
-            type: err.isNetworkError ? 'network' : 'payment_declined',
-            message: err.isNetworkError
-              ? 'Payment service is temporarily unavailable. Please try again.'
-              : 'Your bank declined the payment. Try another method or contact your bank.',
+            type: 'payment_declined',
+            message: 'Your bank declined the payment. Try another method or contact your bank.',
           },
         };
       }
-      throw err;
-    }
-
-    if (gatewayResponse?.result !== 'SUCCESS') {
-      return {
-        success: false,
-        error: {
-          type: 'payment_declined',
-          message: 'Your bank declined the payment. Try another method or contact your bank.',
-        },
-      };
     }
 
     const startDate = new Date();
@@ -112,7 +155,7 @@ export default protectedProcedure
       startDate,
       endDate,
       monthlyPrice,
-      totalPrice,
+      totalPrice: finalAmount,
       visitsUsed: 0,
       maxVisitsPerMonth: getTotalPassesForDuration(input.duration),
       isActive: true,
@@ -120,22 +163,45 @@ export default protectedProcedure
 
     await firestoreSubscriptions.create(subscription);
 
+    if (walletUsed > 0) {
+      await firestoreUsers.update(input.userId, {
+        walletBalance: walletBalance - walletUsed,
+      });
+      await firestoreWalletTransactions.create({
+        userId: input.userId,
+        type: 'subscription_payment',
+        amount: -walletUsed,
+        description: `Subscription payment for ${input.tier} package (${input.duration} month${input.duration > 1 ? 's' : ''})`,
+        subscriptionId: subscription.id,
+        createdAt: new Date(),
+      });
+    }
+
     await firestorePayments.create({
       id: `${orderId}-${paymentTransactionId}`,
       userId: input.userId,
       tier: input.tier,
       duration: input.duration,
-      amount: totalPrice,
+      amount: remainingAmount,
+      originalAmount,
+      discountAmount,
       currency,
       orderId,
       transactionId: paymentTransactionId,
       status: 'succeeded',
       paymentMethod: input.paymentMethod,
-      externalPaymentAmount: totalPrice,
-      totalAmount: totalPrice,
+      couponCode: input.couponCode?.toUpperCase().trim() || null,
+      walletUsed,
+      externalPaymentAmount: remainingAmount,
+      totalAmount: finalAmount,
       completedAt: new Date(),
       gatewayResponse,
+      subscriptionId: subscription.id,
     });
+
+    if (couponId) {
+      await firestoreCoupons.incrementUsage(couponId);
+    }
 
     await runReferralRewardAfterSubscriptionSuccess({
       payerUserId: input.userId,
@@ -152,7 +218,7 @@ export default protectedProcedure
           subscription,
           orderId,
           paymentId: `${orderId}-${paymentTransactionId}`,
-          paidAmount: totalPrice,
+          paidAmount: finalAmount,
           currency,
         });
       } catch (emailError) {
@@ -167,6 +233,8 @@ export default protectedProcedure
       subscription,
       orderId,
       paymentTransactionId,
-      totalAmount: totalPrice,
+      walletUsed,
+      externalPaymentAmount: remainingAmount,
+      totalAmount: finalAmount,
     };
   });

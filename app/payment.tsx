@@ -368,6 +368,14 @@ export default function PaymentScreen() {
       Alert.alert('Error', 'Please log in to complete payment');
       return;
     }
+    const finalPrice = appliedCoupon ? Number(appliedCoupon.finalPrice ?? 0) : parseFloat(price) || 0;
+    const balance = user?.walletBalance || 0;
+    const walletUsedAmt = useWallet ? Math.min(balance, finalPrice) : 0;
+    const amountToCharge = Math.max(0, finalPrice - walletUsedAmt);
+    if (amountToCharge <= 0) {
+      Alert.alert('Error', 'No payment amount due for this order.');
+      return;
+    }
     const method = getWalletMethod();
     if (!method) return;
 
@@ -375,9 +383,6 @@ export default function PaymentScreen() {
     setPaymentProcessing(true);
     setStatusMessage(method === 'apple_pay' ? 'Starting Apple Pay…' : 'Starting Google Pay…');
     try {
-      // Display amount for the wallet sheet; the backend authoritatively
-      // recomputes and charges the correct package price.
-      const amountToCharge = parseFloat(price) || 0;
       const walletResult = await requestWalletPayment({
         amount: amountToCharge,
         currency: 'JOD',
@@ -400,6 +405,8 @@ export default function PaymentScreen() {
         duration: parseInt(duration) as any,
         paymentMethod: method,
         paymentToken: walletResult.paymentToken,
+        useWallet,
+        couponCode: appliedCoupon?.coupon?.code || undefined,
         currency: 'JOD',
       });
 
@@ -424,7 +431,18 @@ export default function PaymentScreen() {
     } finally {
       setWalletProcessing(false);
     }
-  }, [effectiveUserId, tier, duration, price, payWithWalletMutation, subscriptionQuery, navigateHomeAfterPayment]);
+  }, [
+    effectiveUserId,
+    tier,
+    duration,
+    price,
+    useWallet,
+    appliedCoupon,
+    user?.walletBalance,
+    payWithWalletMutation,
+    subscriptionQuery,
+    navigateHomeAfterPayment,
+  ]);
 
   const formatCardNumber = (text: string) => {
     const cleaned = text.replace(/\s/g, '');
@@ -1129,7 +1147,7 @@ export default function PaymentScreen() {
             )}
           </View>
 
-          {walletAvailable && !appliedCoupon && !useWallet && cardAmount > 0 && (
+          {walletAvailable && !appliedCoupon?.isFree && cardAmount > 0 && (
             <View style={styles.walletPaySection}>
               <TouchableOpacity
                 style={[styles.walletPayButton, (walletProcessing || paymentProcessing) && styles.walletPayButtonDisabled]}
