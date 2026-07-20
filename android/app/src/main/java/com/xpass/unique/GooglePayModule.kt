@@ -103,7 +103,12 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
         }
         paymentPromise = promise
         try {
-            val gateway = if (config.hasKey("gateway")) config.getString("gateway") else null
+            val gatewayRaw = if (config.hasKey("gateway")) config.getString("gateway") else null
+            val gateway = when {
+                gatewayRaw.isNullOrBlank() -> "mpgs"
+                gatewayRaw.equals("mastercard", ignoreCase = true) -> "mpgs"
+                else -> gatewayRaw
+            }
             val gatewayMerchantId =
                 if (config.hasKey("gatewayMerchantId")) config.getString("gatewayMerchantId") else null
             val merchantName = if (config.hasKey("merchantName")) config.getString("merchantName") else "Xpass"
@@ -121,7 +126,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
                     .put(
                         "parameters",
                         JSONObject()
-                            .put("gateway", gateway ?: "mastercard")
+                            .put("gateway", gateway)
                             .put("gatewayMerchantId", gatewayMerchantId ?: "")
                     )
             )
@@ -193,7 +198,12 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
             }
             AutoResolveHelper.RESULT_ERROR -> {
                 val status = AutoResolveHelper.getStatusFromIntent(data)
-                promise.reject("GPAY_ERROR", "Google Pay error: ${status?.statusCode}")
+                val code = status?.statusCode
+                val message = when (code) {
+                    6 -> "Google Pay merchant is not configured for this app. Ensure your MPGS merchant is linked in Google Pay Console."
+                    else -> "Google Pay error (code $code)"
+                }
+                promise.reject("GPAY_ERROR", message)
             }
             else -> {
                 promise.reject("GPAY_ERROR", "Google Pay failed with resultCode $resultCode")

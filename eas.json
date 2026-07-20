@@ -14,7 +14,7 @@
         "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com",
         "EXPO_PUBLIC_APPLE_MERCHANT_ID": "merchant.com.xpass.app",
         "EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID": "BCR2DN5T22RLHU35",
-        "EXPO_PUBLIC_WALLET_GATEWAY": "mastercard",
+        "EXPO_PUBLIC_WALLET_GATEWAY": "mpgs",
         "EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID": "9589667361EP",
         "EXPO_PUBLIC_WALLET_COUNTRY": "JO"
       }
@@ -29,7 +29,7 @@
         "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com",
         "EXPO_PUBLIC_APPLE_MERCHANT_ID": "merchant.com.xpass.app",
         "EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID": "BCR2DN5T22RLHU35",
-        "EXPO_PUBLIC_WALLET_GATEWAY": "mastercard",
+        "EXPO_PUBLIC_WALLET_GATEWAY": "mpgs",
         "EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID": "9589667361EP",
         "EXPO_PUBLIC_WALLET_COUNTRY": "JO"
       }
@@ -40,7 +40,7 @@
         "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com",
         "EXPO_PUBLIC_APPLE_MERCHANT_ID": "merchant.com.xpass.app",
         "EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID": "BCR2DN5T22RLHU35",
-        "EXPO_PUBLIC_WALLET_GATEWAY": "mastercard",
+        "EXPO_PUBLIC_WALLET_GATEWAY": "mpgs",
         "EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID": "9589667361EP",
         "EXPO_PUBLIC_WALLET_COUNTRY": "JO"
       }
@@ -52,7 +52,7 @@
         "EXPO_PUBLIC_RORK_API_BASE_URL": "https://xpass-b66g.onrender.com",
         "EXPO_PUBLIC_APPLE_MERCHANT_ID": "merchant.com.xpass.app",
         "EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID": "BCR2DN5T22RLHU35",
-        "EXPO_PUBLIC_WALLET_GATEWAY": "mastercard",
+        "EXPO_PUBLIC_WALLET_GATEWAY": "mpgs",
         "EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID": "9589667361EP",
         "EXPO_PUBLIC_WALLET_COUNTRY": "JO"
       },

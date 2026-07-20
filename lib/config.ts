@@ -65,8 +65,8 @@ export const config = {
     appleMerchantId: env.EXPO_PUBLIC_APPLE_MERCHANT_ID || '',
     // Google Pay production merchant id (Google Pay Business Console)
     googleMerchantId: env.EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID || 'BCR2DN5T22RLHU35',
-    // MPGS gateway tokenization parameters (Google Pay gateway name is "mastercard")
-    gateway: env.EXPO_PUBLIC_WALLET_GATEWAY || 'mastercard',
+    // MPGS Google Pay tokenization gateway name is "mpgs" (NOT "mastercard").
+    gateway: env.EXPO_PUBLIC_WALLET_GATEWAY || 'mpgs',
     gatewayMerchantId: env.EXPO_PUBLIC_WALLET_GATEWAY_MERCHANT_ID || '9589667361EP',
     allowedNetworks: ['VISA', 'MASTERCARD'] as string[],
     country: env.EXPO_PUBLIC_WALLET_COUNTRY || 'JO',

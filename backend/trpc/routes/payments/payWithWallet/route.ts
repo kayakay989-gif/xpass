@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { protectedProcedure } from '@/backend/trpc/create-context';
 import { TRPCError } from '@trpc/server';
-import { computeAmount, payWithDeviceToken, MastercardGatewayError } from '@/backend/lib/mastercard';
+import { computeAmount, MastercardGatewayError } from '@/backend/lib/mastercard';
+import { chargeWalletToken, extractGatewayUserMessage } from '@/backend/lib/wallet-charge';
 import { Subscription } from '@/types';
 import {
   firestorePayments,
@@ -117,7 +118,7 @@ export default protectedProcedure
       }
 
       try {
-        gatewayResponse = await payWithDeviceToken({
+        gatewayResponse = await chargeWalletToken({
           orderId,
           paymentTransactionId,
           deviceToken: input.paymentToken,
@@ -126,16 +127,29 @@ export default protectedProcedure
           currency,
           reference: orderId,
         });
-      } catch (err) {
+      } catch (err: any) {
         if (err instanceof MastercardGatewayError) {
-          console.error('[PayWithWallet] Gateway error', { orderId, status: err.status });
+          console.error('[PayWithWallet] Gateway error', { orderId, status: err.status, raw: err.raw });
+          const detail = extractGatewayUserMessage(err.raw);
           return {
             success: false,
             error: {
               type: err.isNetworkError ? 'network' : 'payment_declined',
-              message: err.isNetworkError
-                ? 'Payment service is temporarily unavailable. Please try again.'
-                : 'Your bank declined the payment. Try another method or contact your bank.',
+              message:
+                detail ||
+                (err.isNetworkError
+                  ? 'Payment service is temporarily unavailable. Please try again.'
+                  : 'Your bank declined the payment. Try another method or contact your bank.'),
+            },
+          };
+        }
+        if (err?.message?.includes('APPLE_PAY_PRIVATE_KEY') || err?.message?.includes('Apple Pay token')) {
+          console.error('[PayWithWallet] Apple Pay processing error', err);
+          return {
+            success: false,
+            error: {
+              type: 'payment_declined',
+              message: 'Apple Pay could not be processed. Please try card payment or contact support.',
             },
           };
         }

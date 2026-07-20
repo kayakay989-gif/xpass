@@ -2,7 +2,7 @@
   "expo": {
     "name": "Xpass",
     "slug": "xpass-subscription-app",
-    "version": "1.0.16",
+    "version": "1.0.17",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -22,9 +22,8 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "55",
+      "buildNumber": "63",
       "entitlements": {
-        "aps-environment": "production",
         "com.apple.developer.in-app-payments": [
           "merchant.com.xpass.app"
         ]
@@ -62,7 +61,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 39,
+      "versionCode": 40,
       "config": {},
       "intentFilters": [
         {
@@ -214,19 +213,14 @@
           }
         }
       ],
-      [
-        "expo-notifications",
-        {
-          "color": "#DC143C"
-        }
-      ],
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
       "./plugins/withIosNonModularHeadersFix.js",
       "./plugins/withAndroidSplashAaptFix",
       "./plugins/withCopyGoogleServices",
       "./plugins/withAndroidRemovePortraitOrientation",
-      "./plugins/withApplePay"
+      "./plugins/withApplePay",
+      "./plugins/withGooglePay"
     ],
     "experiments": {
       "typedRoutes": true

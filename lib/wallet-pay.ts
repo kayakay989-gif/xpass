@@ -107,7 +107,10 @@ export async function requestWalletPayment(
       const result = await mod.requestPayment({
         merchantName: config.wallet.merchantName,
         merchantId: config.wallet.googleMerchantId,
-        gateway: config.wallet.gateway,
+        gateway:
+          config.wallet.gateway.toLowerCase() === 'mastercard'
+            ? 'mpgs'
+            : config.wallet.gateway,
         gatewayMerchantId: config.wallet.gatewayMerchantId,
         allowedNetworks: config.wallet.allowedNetworks,
         currency: req.currency,
