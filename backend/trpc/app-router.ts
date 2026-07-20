@@ -13,6 +13,7 @@ import usersGet from "./routes/users/get/route";
 import usersUpdateWallet from "./routes/users/updateWallet/route";
 import usersNotifyWelcome from "./routes/users/notifyWelcome/route";
 import usersApplyReferralCode from "./routes/users/applyReferralCode/route";
+import usersGetReferralStats from "./routes/users/getReferralStats/route";
 import usersCompleteProfile from "./routes/users/completeProfile/route";
 import paymentsInitiate3ds from "./routes/payments/initiate3ds/route";
 import paymentsAuthenticate3ds from "./routes/payments/authenticate3ds/route";
