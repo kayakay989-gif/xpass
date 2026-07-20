@@ -19,7 +19,14 @@ export async function applyDailyMissedCheckInCreditDeduction(runDate: Date = new
   for (const subscription of activeSubscriptions) {
     if (!subscription.userId || !subscription.id) continue;
     if (subscription.endDate && subscription.endDate < new Date()) continue;
-    if (subscription.visitsUsed >= subscription.maxVisitsPerMonth) continue;
+
+    if (subscription.visitsUsed >= subscription.maxVisitsPerMonth) {
+      await firestoreSubscriptions.update(subscription.id, {
+        isActive: false,
+        status: 'passes_exhausted',
+      });
+      continue;
+    }
 
     const hasCheckIn = await firestoreCheckIns.hasCheckInOnDate(subscription.userId, targetDate);
     if (hasCheckIn) continue;
@@ -43,10 +50,17 @@ export async function applyDailyMissedCheckInCreditDeduction(runDate: Date = new
       const currentMax = Number(currentData.maxVisitsPerMonth || 30);
       if (currentVisits >= currentMax) return;
 
-      tx.update(currentSubRef, {
-        visitsUsed: Math.min(currentMax, currentVisits + 1),
+      const nextVisitsUsed = Math.min(currentMax, currentVisits + 1);
+      const update: Record<string, unknown> = {
+        visitsUsed: nextVisitsUsed,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      };
+      if (nextVisitsUsed >= currentMax) {
+        update.isActive = false;
+        update.status = 'passes_exhausted';
+      }
+
+      tx.update(currentSubRef, update);
       tx.set(deductionRef, {
         subscriptionId: subscription.id,
         userId: subscription.userId,

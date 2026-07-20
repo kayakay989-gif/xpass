@@ -7,6 +7,7 @@ import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
 import { agentLog } from '@/lib/agent-debug-log';
 import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 export default function MySubscriptionScreen() {
   const router = useRouter();
@@ -61,7 +62,7 @@ export default function MySubscriptionScreen() {
     );
   }
 
-  if (!subscription) {
+  if (!subscription || !isSubscriptionActiveForMember(subscription)) {
     return (
       <>
         <Stack.Screen options={{ headerShown: false }} />

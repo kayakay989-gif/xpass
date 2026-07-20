@@ -7,6 +7,7 @@ import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referra
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 export default protectedProcedure
   .input(
@@ -38,13 +39,8 @@ export default protectedProcedure
 
     // Check if user already has an active subscription
     const existingSubscription = await firestoreSubscriptions.getByUserId(input.userId);
-    if (existingSubscription) {
-      const endDate = existingSubscription.endDate ? new Date(existingSubscription.endDate) : null;
-      const now = new Date();
-      // Check if subscription is still active (isActive AND endDate > now)
-      if (existingSubscription.isActive && endDate && endDate.getTime() > now.getTime()) {
-        throw new Error('You already have an active subscription');
-      }
+    if (existingSubscription && isSubscriptionActiveForMember(existingSubscription)) {
+      throw new Error('You already have an active subscription');
     }
 
     const currency = input.currency || 'JOD';

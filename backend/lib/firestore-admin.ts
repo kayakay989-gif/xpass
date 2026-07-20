@@ -413,7 +413,12 @@ export const firestoreCheckIns = {
    */
   async createWithSubscriptionUpdate(
     checkIn: CheckIn,
-    subscriptionUpdate: { subscriptionId: string; visitsUsed: number; lastCheckInDate: Date }
+    subscriptionUpdate: {
+      subscriptionId: string;
+      visitsUsed: number;
+      lastCheckInDate: Date;
+      maxVisitsPerMonth?: number;
+    }
   ): Promise<void> {
     const normalizedGymId = checkIn.gymId.trim();
     const checkInRef = adminDb.collection('checkIns').doc(checkIn.id);
@@ -429,6 +434,10 @@ export const firestoreCheckIns = {
     batch.update(subRef, {
       visitsUsed: subscriptionUpdate.visitsUsed,
       lastCheckInDate: admin.firestore.Timestamp.fromDate(subscriptionUpdate.lastCheckInDate),
+      ...(subscriptionUpdate.maxVisitsPerMonth != null &&
+      subscriptionUpdate.visitsUsed >= subscriptionUpdate.maxVisitsPerMonth
+        ? { isActive: false, status: 'passes_exhausted' }
+        : {}),
     });
     await batch.commit();
   },

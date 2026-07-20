@@ -81,10 +81,10 @@ export default protectedProcedure
 
     // Check monthly visit limit
     if (subscription.visitsUsed >= subscription.maxVisitsPerMonth) {
-      console.error('[CheckIn] Monthly visit limit reached:', { used: subscription.visitsUsed, max: subscription.maxVisitsPerMonth });
+      console.error('[CheckIn] Pass limit reached:', { used: subscription.visitsUsed, max: subscription.maxVisitsPerMonth });
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'Monthly visit limit reached. Your limit resets next month.',
+        message: 'Your pass limit has been reached. Please subscribe again to continue checking in.',
       });
     }
 
@@ -148,6 +148,7 @@ export default protectedProcedure
         subscriptionId: subscription.id,
         visitsUsed: subscription.visitsUsed + 1,
         lastCheckInDate: checkInTimestamp,
+        maxVisitsPerMonth: subscription.maxVisitsPerMonth,
       });
     } catch (error: any) {
       logCheckInSync({

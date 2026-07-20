@@ -15,6 +15,7 @@ import { payWithToken, payWithCard, payWithAuthentication, initiateAuthenticatio
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 
 /**
  * Unified checkout endpoint for all payment methods
@@ -143,15 +144,11 @@ export default protectedProcedure
 
     // 3. Check for existing active subscription
     const existingSubscription = await firestoreSubscriptions.getByUserId(input.userId);
-    if (existingSubscription) {
-      const endDate = existingSubscription.endDate ? new Date(existingSubscription.endDate) : null;
-      const now = new Date();
-      if (existingSubscription.isActive && endDate && endDate.getTime() > now.getTime()) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'You already have an active subscription',
-        });
-      }
+    if (existingSubscription && isSubscriptionActiveForMember(existingSubscription)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You already have an active subscription',
+      });
     }
 
     // 4. Get user wallet balance and calculate wallet usage

@@ -1,12 +1,28 @@
 /**
- * Member-facing "has an active plan" — same rules as subscription packages UI:
- * unexpired end date and not explicitly inactive (`isActive !== false`).
- * Also honors `status` when the backend marks a row active (aligns with web/admin).
+ * Member-facing "has an active plan" — unexpired end date, not explicitly inactive,
+ * and at least one pass remaining. Also honors `status` when the backend marks a row active.
  */
 function parseEndDate(sub: { endDate?: unknown }): Date | null {
   if (sub.endDate == null) return null;
   const d = new Date(sub.endDate as string | number | Date);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function getRemainingPasses(subscription: {
+  visitsUsed?: number | null;
+  maxVisitsPerMonth?: number | null;
+} | null | undefined): number {
+  if (!subscription) return 0;
+  const max = subscription.maxVisitsPerMonth ?? 0;
+  const used = subscription.visitsUsed ?? 0;
+  return Math.max(0, max - used);
+}
+
+export function hasRemainingPasses(subscription: {
+  visitsUsed?: number | null;
+  maxVisitsPerMonth?: number | null;
+} | null | undefined): boolean {
+  return getRemainingPasses(subscription) > 0;
 }
 
 export function isSubscriptionActiveForMember(
@@ -15,6 +31,8 @@ export function isSubscriptionActiveForMember(
     isActive?: boolean | null;
     status?: string | null;
     paymentStatus?: string | null;
+    visitsUsed?: number | null;
+    maxVisitsPerMonth?: number | null;
   } | null | undefined
 ): boolean {
   if (!subscription) return false;
@@ -42,7 +60,13 @@ export function isSubscriptionActiveForMember(
   const cancelled =
     status === 'cancelled' ||
     status === 'refunded' ||
-    status === 'expired';
+    status === 'expired' ||
+    status === 'passes_exhausted';
+
+  // No passes left — treat as ended so the member can resubscribe.
+  if (!hasRemainingPasses(subscription)) {
+    return false;
+  }
 
   // Unexpired window: treat as active unless explicitly cancelled/refunded.
   if (endValid) {
@@ -53,8 +77,8 @@ export function isSubscriptionActiveForMember(
   }
 
   // Fallback: backend marked paid/active but endDate missing or parsing failed (legacy rows).
-  if (statusOk && subscription.isActive !== false) return true;
-  if (paidOk && subscription.isActive !== false) return true;
+  if (statusOk && subscription.isActive !== false && hasRemainingPasses(subscription)) return true;
+  if (paidOk && subscription.isActive !== false && hasRemainingPasses(subscription)) return true;
 
   return false;
 }

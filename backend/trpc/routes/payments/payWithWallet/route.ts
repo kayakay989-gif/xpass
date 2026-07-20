@@ -13,6 +13,7 @@ import {
 import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
+import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 
 /**
@@ -49,12 +50,8 @@ export default protectedProcedure
     }
 
     const existing = await firestoreSubscriptions.getByUserId(input.userId);
-    if (existing) {
-      const endDate = existing.endDate ? new Date(existing.endDate) : null;
-      const now = new Date();
-      if (existing.isActive && endDate && endDate.getTime() > now.getTime()) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'You already have an active subscription' });
-      }
+    if (existing && isSubscriptionActiveForMember(existing)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'You already have an active subscription' });
     }
 
     const { amount: originalAmount, monthlyPrice } = computeAmount({
