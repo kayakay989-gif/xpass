@@ -20,6 +20,8 @@ export interface User {
   email: string;
   phone?: string;
   age?: number;
+  profileComplete?: boolean;
+  authProvider?: string;
   photoUrl?: string;
   password?: string;
   googleId?: string;

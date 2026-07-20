@@ -90,6 +90,7 @@ export const firestoreUsers = {
         name: data.name || '',
         email: data.email || '',
         phone: data.phone || '',
+        age: typeof data.age === 'number' ? data.age : undefined,
         referralCode: data.referralCode || '',
         referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
         walletBalance: data.walletBalance || 0,

@@ -8,6 +8,8 @@ import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { isComingSoonTier } from '@/lib/coming-soon-tiers';
+import { isMemberProfileComplete } from '@/lib/profile-validation';
 
 export default protectedProcedure
   .input(
@@ -35,6 +37,14 @@ export default protectedProcedure
     const currentUser = await firestoreUsers.getById(input.userId);
     if (!currentUser) {
       throw new Error('User not found');
+    }
+
+    if (isComingSoonTier(input.tier)) {
+      throw new Error('This package is coming soon');
+    }
+
+    if (!isMemberProfileComplete(currentUser, currentUser.email)) {
+      throw new Error('Please complete your profile (name, age, and email) before subscribing');
     }
 
     // Check if user already has an active subscription

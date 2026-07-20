@@ -13,6 +13,8 @@ import {
 import { runReferralRewardAfterSubscriptionSuccess } from '@/backend/lib/referrals';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
+import { isComingSoonTier } from '@/lib/coming-soon-tiers';
+import { isMemberProfileComplete } from '@/lib/profile-validation';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 
@@ -47,6 +49,17 @@ export default protectedProcedure
     const user = await firestoreUsers.getById(input.userId);
     if (!user) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    if (isComingSoonTier(input.tier)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'This package is coming soon' });
+    }
+
+    if (!isMemberProfileComplete(user, user.email)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Please complete your profile (name, age, and email) before subscribing',
+      });
     }
 
     const existing = await firestoreSubscriptions.getByUserId(input.userId);

@@ -15,6 +15,7 @@ import { WebView } from 'react-native-webview';
 import { config } from '@/lib/config';
 import Toast, { ToastType } from '@/components/Toast';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { isComingSoonTier } from '@/lib/coming-soon-tiers';
 import { paramFirst } from '@/lib/expo-router-params';
 import { agentLog } from '@/lib/agent-debug-log';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
@@ -959,6 +960,25 @@ export default function PaymentScreen() {
           onPress={() => router.back()}
         >
           <Text style={{ color: Colors.white, fontWeight: '600' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (isComingSoonTier(String(tier))) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F9FAFB', paddingTop: insets.top, padding: 24, justifyContent: 'center' }}>
+        <Text style={{ fontSize: 17, fontWeight: '600', color: Colors.text, marginBottom: 8 }}>
+          Coming Soon
+        </Text>
+        <Text style={{ fontSize: 15, color: Colors.textSecondary, marginBottom: 20 }}>
+          This package is not available yet. Please choose Silver or Gold.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: Colors.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}
+          onPress={() => router.replace('/(tabs)/subscription')}
+        >
+          <Text style={{ color: Colors.white, fontWeight: '600' }}>View Plans</Text>
         </TouchableOpacity>
       </View>
     );

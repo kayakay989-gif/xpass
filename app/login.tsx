@@ -25,6 +25,10 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trpc } from '@/lib/trpc';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
+import {
+  isValidMemberAge,
+  MIN_MEMBER_AGE,
+} from '@/lib/profile-validation';
 import { agentLog } from '@/lib/agent-debug-log';
 import Colors from '@/constants/colors';
 import { useAuth, PENDING_REFERRAL_STORAGE_KEY } from '@/contexts/AuthContext';
@@ -297,8 +301,8 @@ export default function LoginScreen() {
       newErrors.age = 'Age is required';
     } else {
       const ageNum = parseInt(age, 10);
-      if (isNaN(ageNum) || ageNum < 1 || ageNum > 150) {
-        newErrors.age = 'Please enter a valid age (1-150)';
+      if (isNaN(ageNum) || !isValidMemberAge(ageNum)) {
+        newErrors.age = `Please enter a valid age (${MIN_MEMBER_AGE}+)`;
       }
     }
 
@@ -353,8 +357,8 @@ export default function LoginScreen() {
       return;
     }
 
-    if (!trimmedAge || isNaN(ageNum) || ageNum < 1 || ageNum > 150) {
-      setErrors({ age: 'Age is required' });
+    if (!trimmedAge || isNaN(ageNum) || !isValidMemberAge(ageNum)) {
+      setErrors({ age: `Age is required (minimum ${MIN_MEMBER_AGE})` });
       setToast({
         visible: true,
         message: 'Please enter a valid age',

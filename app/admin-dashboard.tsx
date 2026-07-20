@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightImages } from '@/lib/firestore';
+import { formatDisplayUserName } from '@/lib/profile-validation';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app } from '@/lib/firebase';
 import {
@@ -2299,7 +2300,7 @@ export default function AdminDashboardScreen() {
                       <Users size={24} color="#DC2626" />
                     </View>
                     <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{user.name || 'No name'}</Text>
+                      <Text style={styles.userName}>{formatDisplayUserName(user)}</Text>
                       <Text style={styles.userEmail}>{user.email || 'No email'}</Text>
                       {user.phone && (
                         <Text style={styles.userPhone}>{user.phone}</Text>
@@ -4161,7 +4162,7 @@ export default function AdminDashboardScreen() {
             {selectedSubscriber && (
               <ScrollView style={styles.checkInDetailBody} showsVerticalScrollIndicator={false}>
                 <Text style={styles.checkInDetailLabel}>Name</Text>
-                <Text style={styles.checkInDetailValue}>{selectedSubscriber.name || 'N/A'}</Text>
+                <Text style={styles.checkInDetailValue}>{formatDisplayUserName(selectedSubscriber)}</Text>
 
                 <Text style={styles.checkInDetailLabel}>Email</Text>
                 <Text style={styles.checkInDetailValue}>{selectedSubscriber.email || 'N/A'}</Text>

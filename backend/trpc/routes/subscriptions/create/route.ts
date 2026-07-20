@@ -8,6 +8,8 @@ import { randomUUID } from 'crypto';
 import { firestoreUsers } from '@/backend/lib/firestore-admin';
 import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { isComingSoonTier } from '@/lib/coming-soon-tiers';
+import { isMemberProfileComplete } from '@/lib/profile-validation';
 
 export default protectedProcedure
   .input(z.object({
@@ -18,6 +20,15 @@ export default protectedProcedure
   .mutation(async ({ input, ctx }) => {
     if (ctx.user?.uid !== input.userId) {
       throw new Error('Unauthorized');
+    }
+
+    if (isComingSoonTier(input.tier)) {
+      throw new Error('This package is coming soon');
+    }
+
+    const profileUser = await firestoreUsers.getById(input.userId);
+    if (!profileUser || !isMemberProfileComplete(profileUser, profileUser.email)) {
+      throw new Error('Please complete your profile (name, age, and email) before subscribing');
     }
 
     // Check if user already has an active subscription

@@ -40,6 +40,16 @@ import * as SecureStore from 'expo-secure-store';
 import { nativeSignOut } from '@/lib/firebasePhoneNative';
 import { registerForPushNotificationsAsync, configurePushNotifications } from '@/lib/pushNotifications';
 import { trpc } from '@/lib/trpc';
+import {
+  isMemberProfileComplete,
+  isValidMemberAge,
+  isValidMemberEmail,
+  isValidMemberName,
+  looksLikeProviderReference,
+  MIN_MEMBER_AGE,
+  normalizeMemberName,
+  resolveMemberDisplayName,
+} from '@/lib/profile-validation';
 
 // Complete the auth session properly
 WebBrowser.maybeCompleteAuthSession();
@@ -71,6 +81,9 @@ function firestoreDataToUser(id: string, data: any): User {
     name: data.name || '',
     email: data.email || '',
     phone: data.phone || '',
+    age: typeof data.age === 'number' ? data.age : undefined,
+    profileComplete: data.profileComplete === true,
+    authProvider: typeof data.authProvider === 'string' ? data.authProvider : undefined,
     photoUrl: typeof data.photoUrl === 'string' ? data.photoUrl : '',
     referralCode: data.referralCode || generateReferralCode(),
     referredBy: typeof data.referredBy === 'string' ? data.referredBy : '',
@@ -285,6 +298,42 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     [mergeReferralCodeIntoUserDoc]
   );
 
+  const persistOAuthProfileFields = useCallback(
+    async (uid: string, firebaseAuthUser: FirebaseUser, preferredName?: string) => {
+      const userDocRef = doc(db, 'users', uid);
+      const userDoc = await getDoc(userDocRef);
+      const existing = userDoc.data() || {};
+      const patch: Record<string, unknown> = {};
+
+      const candidateName = normalizeMemberName(preferredName || firebaseAuthUser.displayName || '');
+      const existingName = normalizeMemberName(String(existing.name || ''));
+      if (candidateName && isValidMemberName(candidateName)) {
+        if (!existingName || !isValidMemberName(existingName) || looksLikeProviderReference(existingName)) {
+          patch.name = candidateName;
+        }
+      }
+
+      const candidateEmail = (firebaseAuthUser.email || existing.email || '').trim().toLowerCase();
+      if (candidateEmail && isValidMemberEmail(candidateEmail) && !existing.email) {
+        patch.email = candidateEmail;
+      }
+
+      const providerId = firebaseAuthUser.providerData?.[0]?.providerId;
+      if (providerId && !existing.authProvider) {
+        patch.authProvider = providerId.includes('google')
+          ? 'google'
+          : providerId.includes('apple')
+            ? 'apple'
+            : providerId;
+      }
+
+      if (Object.keys(patch).length > 0) {
+        await setDoc(userDocRef, patch, { merge: true });
+      }
+    },
+    []
+  );
+
   const ensureUserProfileExists = useCallback(async (
     uid: string,
     email: string,
@@ -342,6 +391,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       // Only include optional fields if they have values
       if (newUser.age !== undefined && newUser.age !== null) {
         userData.age = newUser.age;
+        userData.profileComplete = isValidMemberAge(newUser.age);
       }
       if (newUser.referredBy) {
         userData.referredBy = String(newUser.referredBy).trim();
@@ -473,7 +523,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           // No existing user found - create new user profile
           const newUser: User = {
             id: uid,
-            name: currentAuthUser.displayName || '',
+            name: resolveMemberDisplayName(undefined, currentAuthUser.displayName),
             email: currentAuthUser.email || '',
             phone: currentAuthUser.phoneNumber || '',
             referralCode: generateReferralCode(),
@@ -791,6 +841,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       if (!name || !name.trim()) {
         throw new Error('Name is required');
+      }
+      if (age == null || !isValidMemberAge(age)) {
+        throw new Error(`Age is required and must be at least ${MIN_MEMBER_AGE}`);
       }
       
       normalizedEmail = (email || '').trim().toLowerCase();
@@ -1171,6 +1224,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       console.log('[AuthContext] Apple login successful:', userCredential.user.uid);
       if (userCredential.user) {
+        await persistOAuthProfileFields(userCredential.user.uid, userCredential.user, nameFromApple);
         await loadUserProfile(userCredential.user.uid, userCredential.user);
         if (extra?.isNewUser) {
           void notifyWelcomeMut.mutateAsync().catch((e) =>
@@ -1195,7 +1249,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error(error?.message || 'Apple sign-in failed.');
     }
-  }, [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut, markInteractiveAuth]);
+  }, [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut, markInteractiveAuth, persistOAuthProfileFields]);
 
   const signInWithGoogleIdToken = useCallback(
     async (idToken: string, options?: { referralCode?: string }): Promise<void> => {
@@ -1219,6 +1273,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           );
         }
         if (userCredential.user) {
+          await persistOAuthProfileFields(userCredential.user.uid, userCredential.user);
           await loadUserProfile(userCredential.user.uid, userCredential.user);
           if (extra?.isNewUser) {
             void notifyWelcomeMut.mutateAsync().catch((e) =>
@@ -1234,7 +1289,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         throw new Error(error?.message || 'Google sign-in failed.');
       }
     },
-    [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut, markInteractiveAuth]
+    [loadUserProfile, mergeReferralCodeIntoUserDoc, notifyWelcomeMut, markInteractiveAuth, persistOAuthProfileFields]
   );
 
   /** Web only (Firebase popup). On native use sign-in screen + Google.useAuthRequest. */
@@ -1250,6 +1305,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[AuthContext] Google login successful (web):', result.user.uid);
       const extra = getAdditionalUserInfo(result);
       if (result.user) {
+        await persistOAuthProfileFields(result.user.uid, result.user);
         await loadUserProfile(result.user.uid);
         if (extra?.isNewUser) {
           void notifyWelcomeMut.mutateAsync().catch((e) =>
@@ -1269,7 +1325,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error(errorMessage);
     }
-  }, [loadUserProfile, notifyWelcomeMut, markInteractiveAuth]);
+  }, [loadUserProfile, notifyWelcomeMut, markInteractiveAuth, persistOAuthProfileFields]);
 
   // Legacy login method (for backward compatibility)
   const login = useCallback(async (newUserId: string): Promise<void> => {
@@ -1313,7 +1369,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [firebaseUser, user]);
 
   const updateProfileData = useCallback(
-    async (updates: { name?: string; phone?: string; email?: string; photoUrl?: string; phoneVerified?: boolean; phoneVerifiedAt?: Date }): Promise<void> => {
+    async (updates: { name?: string; phone?: string; email?: string; age?: number; photoUrl?: string; phoneVerified?: boolean; phoneVerifiedAt?: Date }): Promise<void> => {
       if (!firebaseUser) throw new Error('No authenticated user');
       const userRef = doc(db, 'users', firebaseUser.uid);
 
@@ -1335,6 +1391,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       
       if (typeof updates.email === 'string') updatePayload.email = updates.email;
+      if (typeof updates.age === 'number' && isValidMemberAge(updates.age)) {
+        updatePayload.age = updates.age;
+        updatePayload.profileComplete = true;
+      }
       if (typeof updates.photoUrl === 'string') updatePayload.photoUrl = updates.photoUrl;
       if (typeof updates.phoneVerified === 'boolean') updatePayload.phoneVerified = updates.phoneVerified;
       if (updates.phoneVerifiedAt instanceof Date) updatePayload.phoneVerifiedAt = serverTimestamp();
@@ -1372,7 +1432,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         };
       });
     },
-    [firebaseUser]
+    [firebaseUser, user]
+  );
+
+  const refreshUserProfile = useCallback(async (): Promise<void> => {
+    if (!firebaseUser) return;
+    await loadUserProfile(firebaseUser.uid, firebaseUser);
+  }, [firebaseUser, loadUserProfile]);
+
+  const isProfileComplete = useMemo(
+    () =>
+      isAdmin ||
+      isGuest ||
+      !firebaseUser ||
+      isMemberProfileComplete(user, firebaseUser.email, firebaseUser.displayName),
+    [firebaseUser, isAdmin, isGuest, user]
   );
 
   const continueAsGuest = useCallback(async () => {
@@ -1399,6 +1473,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       confirmPasswordReset: confirmPasswordResetWithCode,
       updateWalletBalance,
       updateProfileData,
+      refreshUserProfile,
+      isProfileComplete,
       continueAsGuest,
       firebaseUser, // Expose Firebase user for advanced use cases
       isAdmin,
@@ -1425,6 +1501,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     confirmPasswordResetWithCode,
     updateWalletBalance,
     updateProfileData,
+    refreshUserProfile,
+    isProfileComplete,
     continueAsGuest,
     isAdmin,
     isCheckingAdmin,

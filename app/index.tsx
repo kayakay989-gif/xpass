@@ -6,11 +6,10 @@ import Colors from '@/constants/colors';
 
 /**
  * Root route: after restore session + prefs, send users to the right place.
- * (Previously this always sent everyone to /splash, so a persisted Firebase user still saw the marketing splash every cold start.)
  */
 export default function Index() {
   const router = useRouter();
-  const { bootstrapNavigationReady, firebaseUser, isGuest, isAdmin } = useAuth();
+  const { bootstrapNavigationReady, firebaseUser, isGuest, isAdmin, isProfileComplete } = useAuth();
 
   useLayoutEffect(() => {
     if (!bootstrapNavigationReady) return;
@@ -33,6 +32,16 @@ export default function Index() {
   }
 
   if (firebaseUser && !isGuest) {
+    if (!isAdmin && user && !isProfileComplete) {
+      return <Redirect href="/profile-complete" />;
+    }
+    if (!isAdmin && !user) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.white }}>
+          <ActivityIndicator size="large" color="#DC143C" />
+        </View>
+      );
+    }
     return <Redirect href={(isAdmin ? '/admin-dashboard' : '/(tabs)/home') as never} />;
   }
 

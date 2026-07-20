@@ -10,7 +10,14 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const navigation = useNavigation();
-  const { isGuest, firebaseUser, isLoading: isLoadingAuth, bootstrapNavigationReady } = useAuth();
+  const { isGuest, firebaseUser, isLoading: isLoadingAuth, bootstrapNavigationReady, isProfileComplete, isAdmin, user } = useAuth();
+
+  useEffect(() => {
+    if (!bootstrapNavigationReady || isLoadingAuth || isGuest || !firebaseUser || isAdmin || !user) return;
+    if (!isProfileComplete) {
+      router.replace('/profile-complete');
+    }
+  }, [bootstrapNavigationReady, firebaseUser, isAdmin, isGuest, isLoadingAuth, isProfileComplete, router, user]);
 
   // Android: never pop to splash/login behind the tab stack for signed-in members (no in-tab stack to pop).
   useEffect(() => {

@@ -116,10 +116,7 @@ export default function QRScanScreen() {
     }, [isGuest, refreshSubscription])
   );
 
-  const hasQrAccess =
-    Platform.OS === 'ios'
-      ? isSubscriptionActiveForMember(subscription)
-      : !!subscription;
+  const hasQrAccess = isSubscriptionActiveForMember(subscription);
 
   if (isResolvingSubscription) {
     return (

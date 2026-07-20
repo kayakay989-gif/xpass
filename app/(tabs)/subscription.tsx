@@ -9,6 +9,8 @@ import { ChevronLeft, User as UserIcon } from 'lucide-react-native';
 import { TIER_COLORS } from '@/constants/tier-colors';
 import { normalizeSubscriptionTier } from '@/lib/subscription-tier';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { isComingSoonTier } from '@/lib/coming-soon-tiers';
+import { formatDisplayUserName } from '@/lib/profile-validation';
 import { agentLog } from '@/lib/agent-debug-log';
 import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
 
@@ -178,19 +180,34 @@ export default function SubscriptionScreen() {
 
   // Get button label and action based on subscription status
   const getPackageButtonInfo = (tier: Package['tier']) => {
+    if (isComingSoonTier(tier)) {
+      return {
+        label: 'Coming Soon',
+        disabled: true,
+        action: null,
+      };
+    }
+
     const currentTier = normalizeSubscriptionTier(subscription?.tier);
+    const activeDuration = subscription?.duration;
     const isActive = isSubscriptionActiveForMember(subscription);
 
-    // If user has this tier active
-    if (isActive && currentTier === tier) {
+    if (isActive && currentTier === tier && activeDuration === selectedDuration) {
       return {
         label: 'Active',
         disabled: true,
         action: null,
       };
     }
-    
-    // If user has a different tier active - show "Not available until current package expires"
+
+    if (isActive && currentTier === tier && activeDuration !== selectedDuration) {
+      return {
+        label: 'Not Available',
+        disabled: true,
+        action: null,
+      };
+    }
+
     if (isActive && currentTier && currentTier !== tier) {
       return {
         label: 'Not available until current package expires',
@@ -198,8 +215,7 @@ export default function SubscriptionScreen() {
         action: null,
       };
     }
-    
-    // No active subscription - show Select Package (guests go to login; members go to payment)
+
     return {
       label: 'Select Package',
       disabled: false,
@@ -210,13 +226,11 @@ export default function SubscriptionScreen() {
         }
         const totalPrice = getTotalPrice(tier);
         console.log('[Subscription] Selected package:', { tier, duration: selectedDuration, totalPrice });
-        // #region agent log
         agentLog('H5', 'subscription.tsx:selectPackage', 'navigate_payment', {
           tier,
           duration: selectedDuration,
           totalPrice,
         });
-        // #endregion
         const q = new URLSearchParams({
           tier: String(tier),
           duration: String(selectedDuration),
@@ -255,7 +269,7 @@ export default function SubscriptionScreen() {
             Hello{' '}
             {isGuest
               ? 'Guest'
-              : user?.name?.split(' ')[0] || firebaseUser?.displayName?.split(' ')[0] || 'User'}
+              : formatDisplayUserName(user, firebaseUser?.displayName).split(' ')[0]}
           </Text>
           <View style={styles.iconsContainer}>
             <TouchableOpacity 
@@ -280,6 +294,9 @@ export default function SubscriptionScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Xpass Packages</Text>
+        <Text style={styles.visitNotice}>
+          Membership includes one visit per day for the remainder of your chosen subscription package.
+        </Text>
 
         <View style={styles.durationsContainer}>
           {DURATIONS.map((duration) => (
@@ -432,7 +449,15 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: Colors.primary,
     textAlign: 'center',
+    marginBottom: 10,
+  },
+  visitNotice: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.textSecondary,
+    textAlign: 'center',
     marginBottom: 20,
+    paddingHorizontal: 4,
   },
   durationsContainer: {
     flexDirection: 'row',

@@ -16,6 +16,8 @@ import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { getTotalPassesForDuration } from '@/backend/lib/pricing';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { isComingSoonTier } from '@/lib/coming-soon-tiers';
+import { isMemberProfileComplete } from '@/lib/profile-validation';
 
 /**
  * Unified checkout endpoint for all payment methods
@@ -55,6 +57,18 @@ export default protectedProcedure
     // #endregion
     if (ctx.user?.uid !== input.userId) {
       throw new TRPCError({ code: 'UNAUTHORIZED' });
+    }
+
+    if (isComingSoonTier(input.tier)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'This package is coming soon' });
+    }
+
+    const profileUser = await firestoreUsers.getById(input.userId);
+    if (!profileUser || !isMemberProfileComplete(profileUser, profileUser.email)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Please complete your profile (name, age, and email) before subscribing',
+      });
     }
 
     const currency = input.currency || 'JOD';
