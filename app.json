@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "63",
+      "buildNumber": "64",
       "entitlements": {
         "com.apple.developer.in-app-payments": [
           "merchant.com.xpass.app"
@@ -61,7 +61,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 40,
+      "versionCode": 41,
       "config": {},
       "intentFilters": [
         {
