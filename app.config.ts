@@ -52,6 +52,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
     name: config.name ?? 'Xpass',
+    plugins: [
+      ...(Array.isArray(config.plugins) ? config.plugins : []).filter((entry) => {
+        const name = Array.isArray(entry) ? entry[0] : entry;
+        return name !== 'expo-notifications';
+      }),
+      './plugins/withStripApsEntitlement.js',
+    ],
     scheme: uniqueArray(
       [
         ...(Array.isArray(config.scheme) ? config.scheme : []),

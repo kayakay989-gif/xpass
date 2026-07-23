@@ -20,6 +20,7 @@ import { paramFirst } from '@/lib/expo-router-params';
 import { agentLog } from '@/lib/agent-debug-log';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
 import { isWalletPayAvailable, requestWalletPayment, getWalletMethod } from '@/lib/wallet-pay';
+import { WalletPayButton } from '@/components/WalletPayButton';
 
 type ThreeDsCallbackMessage = {
   type: string;
@@ -1167,23 +1168,14 @@ export default function PaymentScreen() {
             )}
           </View>
 
-          {walletAvailable && !appliedCoupon?.isFree && cardAmount > 0 && (
+          {walletAvailable && !appliedCoupon?.isFree && cardAmount > 0 && getWalletMethod() && (
             <View style={styles.walletPaySection}>
-              <TouchableOpacity
-                style={[styles.walletPayButton, (walletProcessing || paymentProcessing) && styles.walletPayButtonDisabled]}
+              <WalletPayButton
+                method={getWalletMethod()!}
                 onPress={handleWalletPayment}
                 disabled={walletProcessing || paymentProcessing}
-                activeOpacity={0.8}
-                testID="wallet-pay-button"
-              >
-                {walletProcessing ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.walletPayButtonText}>
-                    {getWalletMethod() === 'apple_pay' ? 'Pay with Apple Pay' : 'Pay with Google Pay'}
-                  </Text>
-                )}
-              </TouchableOpacity>
+                loading={walletProcessing}
+              />
               <View style={styles.walletDividerRow}>
                 <View style={styles.walletDividerLine} />
                 <Text style={styles.walletDividerText}>or pay with card</Text>
@@ -2287,21 +2279,6 @@ const styles = StyleSheet.create({
   },
   walletPaySection: {
     marginBottom: 16,
-  },
-  walletPayButton: {
-    backgroundColor: Colors.black,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  walletPayButtonDisabled: {
-    opacity: 0.6,
-  },
-  walletPayButtonText: {
-    color: Colors.white,
-    fontSize: 16,
-    fontWeight: '700' as const,
   },
   walletDividerRow: {
     flexDirection: 'row',
