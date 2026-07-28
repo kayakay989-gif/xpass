@@ -1,5 +1,6 @@
 import { User, Subscription, Gym, CheckIn } from '@/types';
 import { MOCK_GYMS } from '@/mocks/gyms';
+import { isSameAmmanCalendarDay } from '@/lib/jordan-time';
 
 type InMemoryStore = {
   users: User[];
@@ -216,15 +217,11 @@ export const db = {
 
     async getTodayCheckIn(userId: string, gymId?: string): Promise<CheckIn | null> {
       const checkIns = await this.getByUserId(userId);
-      
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      const todayCheckIn = checkIns.find(ci => {
-        const ciDate = new Date(ci.timestamp);
-        ciDate.setHours(0, 0, 0, 0);
+      const now = new Date();
+
+      const todayCheckIn = checkIns.find((ci) => {
         const matchesGym = gymId ? ci.gymId === gymId : true;
-        return matchesGym && ciDate.getTime() === today.getTime();
+        return matchesGym && isSameAmmanCalendarDay(new Date(ci.timestamp), now);
       });
 
       return todayCheckIn || null;

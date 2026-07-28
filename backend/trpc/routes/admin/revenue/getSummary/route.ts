@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { adminProcedure } from "@/backend/trpc/create-context";
 import { firestoreSubscriptions, firestoreUsers } from "@/backend/lib/firestore-admin";
+import { isExpiredInAmman, startOfAmmanDay, endOfAmmanDay, ammanYearMonth, startOfAmmanMonth, endOfAmmanMonth, addAmmanCalendarDays } from "@/lib/jordan-time";
 
 type RevenueRange =
   | "THIS_MONTH"
@@ -15,44 +16,44 @@ const getRangeDates = (
   customStart?: Date | null,
   customEnd?: Date | null
 ): { start: Date | null; end: Date | null } => {
-  const now = new Date();
-  const startOfMonth = (year: number, monthIndex: number) => {
-    return new Date(year, monthIndex, 1, 0, 0, 0, 0);
-  };
-  const endOfMonth = (year: number, monthIndex: number) => {
-    return new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
-  };
-
-  const year = now.getFullYear();
-  const month = now.getMonth();
+  const { year, month } = ammanYearMonth(new Date());
 
   switch (range) {
     case "THIS_MONTH":
       return {
-        start: startOfMonth(year, month),
-        end: endOfMonth(year, month),
+        start: startOfAmmanMonth(year, month),
+        end: endOfAmmanMonth(year, month),
       };
     case "LAST_MONTH": {
-      const lastMonthDate = new Date(year, month - 1, 1);
-      const y = lastMonthDate.getFullYear();
-      const m = lastMonthDate.getMonth();
+      const prevYmd = addAmmanCalendarDays(`${year}-${String(month).padStart(2, '0')}-01`, -1);
+      const [y, m] = prevYmd.split('-').map(Number);
       return {
-        start: startOfMonth(y, m),
-        end: endOfMonth(y, m),
+        start: startOfAmmanMonth(y, m),
+        end: endOfAmmanMonth(y, m),
       };
     }
     case "LAST_3_MONTHS": {
-      const startDate = new Date(year, month - 2, 1);
+      let startYear = year;
+      let startMonth = month - 2;
+      while (startMonth < 1) {
+        startMonth += 12;
+        startYear -= 1;
+      }
       return {
-        start: startOfMonth(startDate.getFullYear(), startDate.getMonth()),
-        end: endOfMonth(year, month),
+        start: startOfAmmanMonth(startYear, startMonth),
+        end: endOfAmmanMonth(year, month),
       };
     }
     case "LAST_12_MONTHS": {
-      const startDate = new Date(year, month - 11, 1);
+      let startYear = year;
+      let startMonth = month - 11;
+      while (startMonth < 1) {
+        startMonth += 12;
+        startYear -= 1;
+      }
       return {
-        start: startOfMonth(startDate.getFullYear(), startDate.getMonth()),
-        end: endOfMonth(year, month),
+        start: startOfAmmanMonth(startYear, startMonth),
+        end: endOfAmmanMonth(year, month),
       };
     }
     case "ALL_TIME":
@@ -61,12 +62,7 @@ const getRangeDates = (
       if (!customStart || !customEnd) {
         return { start: null, end: null };
       }
-      // Normalize to full days
-      const s = new Date(customStart);
-      s.setHours(0, 0, 0, 0);
-      const e = new Date(customEnd);
-      e.setHours(23, 59, 59, 999);
-      return { start: s, end: e };
+      return { start: startOfAmmanDay(customStart), end: endOfAmmanDay(customEnd) };
     default:
       return { start: null, end: null };
   }
@@ -169,7 +165,7 @@ export default adminProcedure
         return status === "active" || isActiveFlag;
       }
       const end = sub.endDate instanceof Date ? sub.endDate : new Date(sub.endDate);
-      const notExpired = end.getTime() >= now.getTime();
+      const notExpired = !isExpiredInAmman(end, now);
       return notExpired && (status === "active" || isActiveFlag);
     }).length;
 

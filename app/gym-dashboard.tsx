@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { ChevronRight, CreditCard, Filter, Home, User as UserIcon } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { paramFirst } from '@/lib/expo-router-params';
+import { isSameAmmanCalendarDay } from '@/lib/jordan-time';
 import { trpc } from '@/lib/trpc';
 
 export default function GymDashboardScreen() {
@@ -172,13 +173,10 @@ export default function GymDashboardScreen() {
   );
 
   const todayCheckIns = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return checkIns.filter((ci: any) => {
-      const ciDate = new Date(ci.timestamp);
-      ciDate.setHours(0, 0, 0, 0);
-      return ciDate.getTime() === today.getTime();
-    });
+    const now = new Date();
+    return checkIns.filter((ci: any) =>
+      isSameAmmanCalendarDay(new Date(ci.timestamp), now)
+    );
   }, [checkIns]);
 
   const sortedAllCheckIns = useMemo(() => {

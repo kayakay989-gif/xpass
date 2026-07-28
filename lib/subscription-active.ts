@@ -1,6 +1,9 @@
+import { isExpiredInAmman } from '@/lib/jordan-time';
+
 /**
  * Member-facing "has an active plan" — unexpired end date, not explicitly inactive,
  * and at least one pass remaining. Also honors `status` when the backend marks a row active.
+ * Expiry follows Jordan (Asia/Amman) calendar days.
  */
 function parseEndDate(sub: { endDate?: unknown }): Date | null {
   if (sub.endDate == null) return null;
@@ -38,13 +41,13 @@ export function isSubscriptionActiveForMember(
   if (!subscription) return false;
 
   const endDate = parseEndDate(subscription);
-  const nowMs = Date.now();
+  const now = new Date();
 
-  if (endDate !== null && endDate.getTime() <= nowMs) {
+  if (endDate !== null && isExpiredInAmman(endDate, now)) {
     return false;
   }
 
-  const endValid = endDate !== null && endDate.getTime() > nowMs;
+  const endValid = endDate !== null && !isExpiredInAmman(endDate, now);
 
   const status =
     typeof subscription.status === 'string' ? subscription.status.trim().toLowerCase() : '';

@@ -6,6 +6,7 @@ import {
   sanitizeGymOwnerUsernameInput,
   usernamesMatchForLogin,
 } from '@/lib/gym-owner-username';
+import { getAmmanDayRange, isExpiredInAmman, startOfAmmanDay, toAmmanDateString } from '@/lib/jordan-time';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -216,8 +217,8 @@ export const firestoreSubscriptions = {
     const now = Date.now();
     const candidates = all
       .filter((s) => {
-        const end = s.endDate ? new Date(s.endDate).getTime() : 0;
-        return Number.isFinite(end) && end > now && s.isActive !== false;
+        if (!s.endDate) return false;
+        return !isExpiredInAmman(s.endDate, new Date(now)) && s.isActive !== false;
       })
       .sort((a, b) => {
         const aT = a.endDate ? new Date(a.endDate).getTime() : 0;
@@ -454,10 +455,7 @@ export const firestoreCheckIns = {
   },
 
   async getTodayCheckIn(userId: string, gymId?: string): Promise<CheckIn | null> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { start: today, end: tomorrow } = getAmmanDayRange(new Date());
 
     // Query only by userId to avoid composite index requirements,
     // then filter today's check-ins in memory.
@@ -495,10 +493,8 @@ export const firestoreCheckIns = {
   },
 
   async hasCheckInOnDate(userId: string, targetDate: Date): Promise<boolean> {
-    const start = new Date(targetDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
+    const start = startOfAmmanDay(toAmmanDateString(targetDate));
+    const end = getAmmanDayRange(start).end;
 
     const snapshot = await adminDb
       .collection('checkIns')

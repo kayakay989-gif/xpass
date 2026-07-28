@@ -1,8 +1,9 @@
 import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useRouter, Stack } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ammanCalendarDaysRemaining } from '@/lib/jordan-time';
 import { ChevronRight, Lock, CreditCard, Bell, Gift, Globe, FileText, Shield, Edit, User as UserIcon, ChevronLeft, LogOut } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import Colors from '@/constants/colors';
@@ -79,12 +80,8 @@ export default function ProfileScreen() {
   }
 
   const getRemainingDays = () => {
-    if (!subscription) return 0;
-    const now = new Date();
-    const end = new Date(subscription.endDate);
-    const diffTime = end.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return Math.max(0, diffDays);
+    if (!subscription?.endDate) return 0;
+    return ammanCalendarDaysRemaining(new Date(subscription.endDate));
   };
 
   const showAlert = (title: string, message: string) => {

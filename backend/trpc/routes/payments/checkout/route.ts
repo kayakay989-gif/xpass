@@ -18,6 +18,7 @@ import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { isComingSoonTier } from '@/lib/coming-soon-tiers';
 import { isMemberProfileComplete } from '@/lib/profile-validation';
+import { computeSubscriptionEndDate } from '@/lib/jordan-time';
 
 /**
  * Unified checkout endpoint for all payment methods
@@ -655,8 +656,7 @@ export default protectedProcedure
     if (paymentSuccess) {
       // Create subscription first
       const startDate = new Date();
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + input.duration);
+      const endDate = computeSubscriptionEndDate(startDate, input.duration);
 
       const subscription: Subscription = {
         id: `sub-${Date.now()}`,

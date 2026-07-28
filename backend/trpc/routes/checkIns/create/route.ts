@@ -5,6 +5,7 @@ import { firestoreSubscriptions, firestoreCheckIns, firestoreGyms } from '@/back
 import { logCheckInSync } from '@/backend/lib/check-in-sync-log';
 import { CheckIn, SubscriptionTier } from '@/types';
 import { randomUUID } from 'crypto';
+import { isExpiredInAmman } from '@/lib/jordan-time';
 
 // Tier hierarchy: silver=1, gold=2, diamond=3, elite=4
 const TIER_LEVELS: Record<SubscriptionTier, number> = {
@@ -71,7 +72,7 @@ export default protectedProcedure
     }
 
     // Check if subscription has expired
-    if (subscription.endDate < new Date()) {
+    if (subscription.endDate && isExpiredInAmman(subscription.endDate)) {
       console.error('[CheckIn] Subscription expired:', subscription.endDate);
       throw new TRPCError({
         code: 'BAD_REQUEST',

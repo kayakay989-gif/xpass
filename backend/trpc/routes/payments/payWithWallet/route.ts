@@ -17,6 +17,7 @@ import { getTotalPassesForDuration } from '@/backend/lib/pricing';
 import { isComingSoonTier } from '@/lib/coming-soon-tiers';
 import { isMemberProfileComplete } from '@/lib/profile-validation';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { computeSubscriptionEndDate } from '@/lib/jordan-time';
 import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 
 /**
@@ -168,8 +169,7 @@ export default protectedProcedure
     }
 
     const startDate = new Date();
-    const endDate = new Date();
-    endDate.setMonth(endDate.getMonth() + input.duration);
+    const endDate = computeSubscriptionEndDate(startDate, input.duration);
 
     const subscription: Subscription = {
       id: `sub-${Date.now()}`,

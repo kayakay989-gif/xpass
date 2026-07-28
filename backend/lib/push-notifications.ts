@@ -1,5 +1,6 @@
 import { adminDb } from '@/backend/lib/firebase-admin';
 import { Subscription } from '@/types';
+import { formatDateAmman } from '@/lib/jordan-time';
 
 /**
  * Minimal, additive server-side push delivery via the Expo Push API.
@@ -9,7 +10,6 @@ import { Subscription } from '@/types';
  */
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
-const JORDAN_TZ = 'Asia/Amman';
 
 type NotificationCategory = 'subscriptionUpdates' | 'checkInReminders' | 'promotionalOffers';
 
@@ -78,15 +78,6 @@ export async function sendPushToUser(
     console.warn('[Push] sendPushToUser error', e);
     return false;
   }
-}
-
-function formatDateAmman(date: Date): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: JORDAN_TZ,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(date);
 }
 
 /** Push confirming a newly activated subscription. Best-effort. */

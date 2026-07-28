@@ -8,6 +8,7 @@ import Colors from '@/constants/colors';
 import { agentLog } from '@/lib/agent-debug-log';
 import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
+import { formatDateAmman } from '@/lib/jordan-time';
 
 export default function MySubscriptionScreen() {
   const router = useRouter();
@@ -117,10 +118,10 @@ export default function MySubscriptionScreen() {
   };
 
   const getExpiryDate = () => {
-    return new Date(subscription.endDate).toLocaleDateString('en-US', {
+    return formatDateAmman(new Date(subscription.endDate), {
       month: 'short',
       day: 'numeric',
-      year: 'numeric'
+      year: 'numeric',
     });
   };
 

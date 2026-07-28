@@ -16,6 +16,14 @@ import {
 import { Stack, useRouter } from 'expo-router';
 import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightImages } from '@/lib/firestore';
 import { formatDisplayUserName } from '@/lib/profile-validation';
+import {
+  ammanCalendarDaysRemaining,
+  endOfAmmanDay,
+  isExpiredInAmman,
+  isSameAmmanCalendarDay,
+  startOfAmmanDay,
+  toAmmanDateString,
+} from '@/lib/jordan-time';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { app } from '@/lib/firebase';
 import {
@@ -691,7 +699,7 @@ export default function AdminDashboardScreen() {
     const activeSubscribers = enriched.filter((sub: any) => {
       if (!sub.isActive) return false;
       if (!sub.endDate) return true;
-      return sub.endDate.getTime() >= now.getTime();
+      return sub.endDate && !isExpiredInAmman(sub.endDate, now);
     }).length;
 
     const isPaid = (sub: any) => {
@@ -762,14 +770,10 @@ export default function AdminDashboardScreen() {
         break;
       case 'CUSTOM':
         if (revenueStartDate) {
-          const s = new Date(revenueStartDate);
-          s.setHours(0, 0, 0, 0);
-          rangeStart = s;
+          rangeStart = startOfAmmanDay(revenueStartDate);
         }
         if (revenueEndDate) {
-          const e = new Date(revenueEndDate);
-          e.setHours(23, 59, 59, 999);
-          rangeEnd = e;
+          rangeEnd = endOfAmmanDay(revenueEndDate);
         }
         break;
       default:
@@ -889,13 +893,9 @@ export default function AdminDashboardScreen() {
       setSubscriptions(subscriptionsData);
 
       // Calculate stats
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayCheckIns = checkInsData.filter((ci: any) => {
-        const ciDate = new Date(ci.timestamp);
-        ciDate.setHours(0, 0, 0, 0);
-        return ciDate.getTime() === today.getTime();
-      });
+      const todayCheckIns = checkInsData.filter((ci: any) =>
+        isSameAmmanCalendarDay(new Date(ci.timestamp), new Date())
+      );
 
       const activeSubs = subscriptionsData.filter((sub: any) => sub.isActive);
 
@@ -978,16 +978,13 @@ export default function AdminDashboardScreen() {
 
   // Add stats to gyms including payout calculations
   const gymsWithStats = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
     
     return gyms.map((gym: any) => {
       const gymCheckIns = checkIns.filter((ci: any) => ci.gymId === gym.id);
-      const todayCheckIns = gymCheckIns.filter((ci: any) => {
-        const ciDate = new Date(ci.timestamp);
-        ciDate.setHours(0, 0, 0, 0);
-        return ciDate.getTime() === today.getTime();
-      });
+      const todayCheckIns = gymCheckIns.filter((ci: any) =>
+        isSameAmmanCalendarDay(new Date(ci.timestamp), now)
+      );
       
       // Calculate total payout: sum of payoutAmount from all check-ins
       const totalPayout = gymCheckIns.reduce((sum: number, ci: any) => {
@@ -1030,7 +1027,7 @@ export default function AdminDashboardScreen() {
 
       const statusActive = subscription.isActive === true;
       const endDate = subscription.endDate ? new Date(subscription.endDate) : null;
-      const notExpired = endDate ? endDate.getTime() >= now.getTime() : false;
+      const notExpired = endDate ? !isExpiredInAmman(endDate, now) : false;
 
       return statusActive && notExpired;
     };
@@ -1044,7 +1041,7 @@ export default function AdminDashboardScreen() {
 
       const statusActive = subscription.isActive === true;
       const endDate = subscription.endDate ? new Date(subscription.endDate) : null;
-      const expired = endDate ? endDate.getTime() < now.getTime() : false;
+      const expired = endDate ? isExpiredInAmman(endDate, now) : false;
 
       // Inactive if subscription is not active or already expired
       return !statusActive || expired;
@@ -1083,15 +1080,8 @@ export default function AdminDashboardScreen() {
 
     // Date range filter - filter by selected start/end dates (inclusive)
     if (checkInsStartDateFilter || checkInsEndDateFilter) {
-      const start = checkInsStartDateFilter ? new Date(checkInsStartDateFilter) : null;
-      const end = checkInsEndDateFilter ? new Date(checkInsEndDateFilter) : null;
-
-      if (start) {
-        start.setHours(0, 0, 0, 0);
-      }
-      if (end) {
-        end.setHours(23, 59, 59, 999);
-      }
+      const start = checkInsStartDateFilter ? startOfAmmanDay(checkInsStartDateFilter) : null;
+      const end = checkInsEndDateFilter ? endOfAmmanDay(checkInsEndDateFilter) : null;
 
       result = result.filter((ci: any) => {
         const ciDate = new Date(ci.timestamp);
@@ -2283,9 +2273,9 @@ export default function AdminDashboardScreen() {
             {filteredUsers.map((user: any) => {
               const subscription = user.subscription;
               const now = new Date();
-              const isExpired = subscription && new Date(subscription.endDate) < now;
+              const isExpired = subscription && isExpiredInAmman(new Date(subscription.endDate), now);
               const daysRemaining = subscription
-                ? Math.ceil((new Date(subscription.endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                ? ammanCalendarDaysRemaining(new Date(subscription.endDate), now)
                 : null;
 
               return (
@@ -2599,13 +2589,10 @@ export default function AdminDashboardScreen() {
             
             {/* Today's Check-ins Summary */}
             {(() => {
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              const todayCheckIns = enrichedCheckIns.filter((ci: any) => {
-                const ciDate = new Date(ci.timestamp);
-                ciDate.setHours(0, 0, 0, 0);
-                return ciDate.getTime() === today.getTime();
-              });
+              const now = new Date();
+              const todayCheckIns = enrichedCheckIns.filter((ci: any) =>
+                isSameAmmanCalendarDay(new Date(ci.timestamp), now)
+              );
 
               if (todayCheckIns.length > 0) {
                 return (
@@ -2738,14 +2725,8 @@ export default function AdminDashboardScreen() {
             </Text>
 
             {filteredCheckIns.map((checkIn: any) => {
-              const checkInDate = new Date(checkIn.timestamp);
               const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              const isToday = (() => {
-                const ciDate = new Date(checkIn.timestamp);
-                ciDate.setHours(0, 0, 0, 0);
-                return ciDate.getTime() === today.getTime();
-              })();
+              const isToday = isSameAmmanCalendarDay(new Date(checkIn.timestamp), today);
 
               return (
                 <TouchableOpacity
@@ -4193,17 +4174,15 @@ export default function AdminDashboardScreen() {
                     <Text
                       style={[
                         styles.checkInDetailValue,
-                        new Date(selectedSubscriber.subscription.endDate) < new Date()
+                        isExpiredInAmman(new Date(selectedSubscriber.subscription.endDate))
                           ? { color: '#DC2626' }
                           : { color: '#059669' },
                       ]}
                     >
-                      {new Date(selectedSubscriber.subscription.endDate) < new Date()
+                      {isExpiredInAmman(new Date(selectedSubscriber.subscription.endDate))
                         ? 'Expired'
-                        : `${Math.ceil(
-                            (new Date(selectedSubscriber.subscription.endDate).getTime() -
-                              new Date().getTime()) /
-                              (1000 * 60 * 60 * 24)
+                        : `${ammanCalendarDaysRemaining(
+                            new Date(selectedSubscriber.subscription.endDate)
                           )} days remaining`}
                     </Text>
 

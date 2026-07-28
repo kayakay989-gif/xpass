@@ -24,7 +24,7 @@ export function calculateSubscriptionPrice(
 /**
  * Total passes allocated for a subscription, scaled by purchased duration.
  * 1 pass per day: 1 month = 30, 3 months = 90, and a full year (12 months) = 365.
- * Deduction rules (1 pass/day or per check-in, midnight expiry) are unchanged;
+ * Deduction rules (1 pass/day or per check-in, midnight Asia/Amman expiry) are unchanged;
  * this only controls the total allocation pool (the denominator shown as X/total).
  */
 export function getTotalPassesForDuration(duration: SubscriptionDuration): number {

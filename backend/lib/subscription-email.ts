@@ -1,5 +1,6 @@
 import { Subscription } from '@/types';
 import { sendResendHtmlEmail } from '@/backend/lib/resend-email';
+import { formatDateAmman } from '@/lib/jordan-time';
 
 type SubscriptionEmailInput = {
   toEmail: string;
@@ -10,23 +11,6 @@ type SubscriptionEmailInput = {
   paidAmount?: number | null;
   currency?: string | null;
 };
-
-/**
- * Format subscription dates in the Jordan business timezone so the email shows the
- * exact same calendar date the app shows (the app/expiry logic use Asia/Amman).
- * Without a fixed timeZone this runs in the server's timezone (UTC on Render),
- * which can shift the displayed day by one vs. what the user sees in-app.
- */
-const JORDAN_TZ = 'Asia/Amman';
-
-function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: JORDAN_TZ,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(date);
-}
 
 function formatAmount(amount: number, currency: string): string {
   return `${amount.toFixed(2)} ${currency.toUpperCase()}`;
@@ -73,8 +57,8 @@ export async function sendSubscriptionSuccessEmail(input: SubscriptionEmailInput
             <table role="presentation" width="100%" style="border-collapse:collapse;font-size:14px;">
               <tr><td style="padding:6px 0;color:#475569;">Package</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#0f172a;">${tier}</td></tr>
               <tr><td style="padding:6px 0;color:#475569;">Duration</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#0f172a;">${durationText}</td></tr>
-              <tr><td style="padding:6px 0;color:#475569;">Start date</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#0f172a;">${formatDate(input.subscription.startDate)}</td></tr>
-              <tr><td style="padding:6px 0;color:#475569;">Expiry date</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#0f172a;">${formatDate(input.subscription.endDate)}</td></tr>
+              <tr><td style="padding:6px 0;color:#475569;">Start date</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#0f172a;">${formatDateAmman(input.subscription.startDate)}</td></tr>
+              <tr><td style="padding:6px 0;color:#475569;">Expiry date</td><td style="padding:6px 0;text-align:right;font-weight:600;color:#0f172a;">${formatDateAmman(input.subscription.endDate)}</td></tr>
             </table>
           </div>
 

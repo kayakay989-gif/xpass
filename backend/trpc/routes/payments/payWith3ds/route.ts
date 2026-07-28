@@ -10,6 +10,7 @@ import { notifySubscriptionActivated } from '@/backend/lib/push-notifications';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { isComingSoonTier } from '@/lib/coming-soon-tiers';
 import { isMemberProfileComplete } from '@/lib/profile-validation';
+import { computeSubscriptionEndDate } from '@/lib/jordan-time';
 
 export default protectedProcedure
   .input(
@@ -122,8 +123,7 @@ export default protectedProcedure
     if (isFree || isFullWalletPayment) {
       // No payment required - create subscription directly
       const startDate = new Date();
-      const endDate = new Date();
-      endDate.setMonth(endDate.getMonth() + input.duration);
+      const endDate = computeSubscriptionEndDate(startDate, input.duration);
 
       const subscription: Subscription = {
         id: `sub-${Date.now()}`,
@@ -311,8 +311,7 @@ export default protectedProcedure
     }
 
     const startDate = new Date();
-    const endDate = new Date();
-    endDate.setMonth(endDate.getMonth() + input.duration);
+    const endDate = computeSubscriptionEndDate(startDate, input.duration);
 
     const subscription: Subscription = {
       id: `sub-${Date.now()}`,

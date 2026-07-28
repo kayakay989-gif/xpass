@@ -4,6 +4,11 @@ import { firestoreSubscriptions, firestoreUsers } from '@/backend/lib/firestore-
 import { Subscription } from '@/types';
 import { sendResendHtmlEmail } from '@/backend/lib/resend-email';
 import { notifySubscriptionExpiringSoon } from '@/backend/lib/push-notifications';
+import {
+  ammanCalendarDaysBetween,
+  formatDateAmman,
+  toAmmanDateString,
+} from '@/lib/jordan-time';
 
 function escapeHtml(value: string): string {
   return value
@@ -12,31 +17,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-}
-
-/** Jordan local calendar day (YYYY-MM-DD). Expiry logic follows midnight Asia/Amman, not UTC. */
-const JORDAN_TZ = 'Asia/Amman';
-
-function ammanCalendarDateString(d: Date): string {
-  return d.toLocaleDateString('en-CA', { timeZone: JORDAN_TZ });
-}
-
-/** Whole calendar days from Jordan “today” to Jordan end date (same as UTC-date math on YYYY-MM-DD). */
-function ammanCalendarDaysFromTodayToEnd(todayYmd: string, endYmd: string): number {
-  const parse = (s: string) => {
-    const [y, m, d] = s.split('-').map(Number);
-    return Date.UTC(y, m - 1, d);
-  };
-  return Math.round((parse(endYmd) - parse(todayYmd)) / (24 * 60 * 60 * 1000));
-}
-
-function formatDateAmman(date: Date): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: JORDAN_TZ,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  }).format(date);
 }
 
 async function sendExpiryReminderEmail(input: {
@@ -124,7 +104,7 @@ export async function runSubscriptionExpiryEmailJob(): Promise<{
   }
 
   const now = new Date();
-  const todayAmman = ammanCalendarDateString(now);
+  const todayAmman = toAmmanDateString(now);
   let remindersSent = 0;
   let expiredSent = 0;
   let skipped = 0;
@@ -143,9 +123,9 @@ export async function runSubscriptionExpiryEmailJob(): Promise<{
     }
 
     const endDate = sub.endDate instanceof Date ? sub.endDate : new Date(sub.endDate);
-    const endAmman = ammanCalendarDateString(endDate);
+    const endAmman = toAmmanDateString(endDate);
     /** Jordan calendar days from today (Amman) to subscription end day (Amman): 3 = reminder window. */
-    const diffDays = ammanCalendarDaysFromTodayToEnd(todayAmman, endAmman);
+    const diffDays = ammanCalendarDaysBetween(todayAmman, endAmman);
 
     // 3 calendar days before expiry — only for currently active memberships
     if (sub.isActive && diffDays === 3 && !raw.expiryReminderEmailSentAt) {

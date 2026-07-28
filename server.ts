@@ -13,6 +13,7 @@ if (fs.existsSync('.env.local')) {
 import app from './backend/hono';
 import { applyDailyMissedCheckInCreditDeduction } from './backend/lib/credits';
 import { runSubscriptionExpiryEmailJob } from './backend/lib/subscription-expiry-emails';
+import { ammanDayKey } from './lib/jordan-time';
 
 const port = Number(process.env.PORT || 3000);
 
@@ -28,7 +29,7 @@ serve({
 let lastCreditsRunDayKey = '';
 const maybeRunDailyCreditsJob = async () => {
   const now = new Date();
-  const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  const dayKey = ammanDayKey(now);
   if (lastCreditsRunDayKey === dayKey) return;
   try {
     await applyDailyMissedCheckInCreditDeduction(now);

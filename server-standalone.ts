@@ -23,6 +23,7 @@ const { serve } = require('@hono/node-server');
 const app = require('./backend/hono').default;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { applyDailyMissedCheckInCreditDeduction } = require('./backend/lib/credits');
+const { ammanDayKey } = require('./lib/jordan-time');
 
 const port = Number(process.env.PORT || 3000);
 
@@ -38,7 +39,7 @@ serve({
 let lastCreditsRunDayKey = '';
 const maybeRunDailyCreditsJob = async () => {
   const now = new Date();
-  const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  const dayKey = ammanDayKey(now);
   if (lastCreditsRunDayKey === dayKey) return;
   try {
     await applyDailyMissedCheckInCreditDeduction(now);

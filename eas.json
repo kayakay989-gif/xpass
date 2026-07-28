@@ -66,10 +66,7 @@
       "ios": {
         "ascAppId": "6760907449",
         "bundleIdentifier": "com.xpass.app",
-        "appleTeamId": "PA266475ZW",
-        "ascApiKeyPath": "./AuthKey_CADG3C6255.p8",
-        "ascApiKeyId": "CADG3C6255",
-        "ascApiKeyIssuerId": "f508c5d0-a1b3-4aac-b661-3abb4886744d"
+        "appleTeamId": "PA266475ZW"
       }
     }
   }

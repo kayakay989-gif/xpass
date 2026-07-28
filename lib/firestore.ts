@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { User, Subscription, Gym, CheckIn, GymOwner, SpotlightImage, Coupon, Payout, WalletTransaction, ReferralTransaction } from '@/types';
+import { getAmmanDayRange } from '@/lib/jordan-time';
 
 // Helper to convert Firestore Timestamp to Date
 const timestampToDate = (timestamp: any): Date => {
@@ -364,10 +365,7 @@ export const firestoreCheckIns = {
   },
 
   async getTodayCheckIn(userId: string, gymId?: string): Promise<CheckIn | null> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { start: today, end: tomorrow } = getAmmanDayRange(new Date());
 
     const q = query(
       checkInsCollection,

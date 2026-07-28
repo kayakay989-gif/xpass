@@ -10,6 +10,7 @@ import { sendSubscriptionSuccessEmail } from '@/backend/lib/subscription-email';
 import { isSubscriptionActiveForMember } from '@/lib/subscription-active';
 import { isComingSoonTier } from '@/lib/coming-soon-tiers';
 import { isMemberProfileComplete } from '@/lib/profile-validation';
+import { computeSubscriptionEndDate } from '@/lib/jordan-time';
 
 export default protectedProcedure
   .input(z.object({
@@ -39,8 +40,7 @@ export default protectedProcedure
 
     const { monthlyPrice, totalPrice } = calculateSubscriptionPrice(input.tier, input.duration);
     const startDate = new Date();
-    const endDate = new Date();
-    endDate.setMonth(endDate.getMonth() + input.duration);
+    const endDate = computeSubscriptionEndDate(startDate, input.duration);
 
     const subscription: Subscription = {
       id: randomUUID(),

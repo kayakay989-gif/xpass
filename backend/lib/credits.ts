@@ -1,24 +1,20 @@
 import admin from 'firebase-admin';
 import { adminDb } from '@/backend/lib/firebase-admin';
 import { firestoreCheckIns, firestoreSubscriptions } from '@/backend/lib/firestore-admin';
-
-function dayKey(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
+import {
+  ammanDayKey,
+  getPreviousAmmanDayStart,
+  isExpiredInAmman,
+} from '@/lib/jordan-time';
 
 export async function applyDailyMissedCheckInCreditDeduction(runDate: Date = new Date()): Promise<void> {
-  // Apply deduction for the previous calendar day.
-  const targetDate = new Date(runDate);
-  targetDate.setDate(targetDate.getDate() - 1);
-  targetDate.setHours(0, 0, 0, 0);
+  // Apply deduction for the previous Jordan calendar day.
+  const targetDate = getPreviousAmmanDayStart(runDate);
 
   const activeSubscriptions = await firestoreSubscriptions.getAllActive();
   for (const subscription of activeSubscriptions) {
     if (!subscription.userId || !subscription.id) continue;
-    if (subscription.endDate && subscription.endDate < new Date()) continue;
+    if (subscription.endDate && isExpiredInAmman(subscription.endDate, runDate)) continue;
 
     if (subscription.visitsUsed >= subscription.maxVisitsPerMonth) {
       await firestoreSubscriptions.update(subscription.id, {
@@ -31,7 +27,7 @@ export async function applyDailyMissedCheckInCreditDeduction(runDate: Date = new
     const hasCheckIn = await firestoreCheckIns.hasCheckInOnDate(subscription.userId, targetDate);
     if (hasCheckIn) continue;
 
-    const deductionId = `${subscription.id}-${dayKey(targetDate)}`;
+    const deductionId = `${subscription.id}-${ammanDayKey(targetDate)}`;
     const deductionRef = adminDb.collection('creditDeductions').doc(deductionId);
     const deductionSnap = await deductionRef.get();
     if (deductionSnap.exists) continue;
@@ -64,7 +60,7 @@ export async function applyDailyMissedCheckInCreditDeduction(runDate: Date = new
       tx.set(deductionRef, {
         subscriptionId: subscription.id,
         userId: subscription.userId,
-        date: dayKey(targetDate),
+        date: ammanDayKey(targetDate),
         reason: 'no_checkin_daily_deduction',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
