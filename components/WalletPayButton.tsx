@@ -8,7 +8,7 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { GooglePayMark } from '@/components/GooglePayMark';
+import { GooglePayButton } from '@/components/GooglePayButton';
 import type { WalletMethod } from '@/lib/wallet-pay';
 
 type Props = {
@@ -23,9 +23,9 @@ type Props = {
 const BUTTON_HEIGHT = 48;
 
 /**
- * Brand-compliant wallet checkout button.
- * Google Pay: dark pill, "Pay with" + official G Pay mark (pay button type).
- * Apple Pay: black button with  Pay (iOS only).
+ * Wallet checkout button.
+ * Android Google Pay uses the official PayButton API (Google brand requirement).
+ * iOS uses the standard Apple Pay styled button.
  */
 export function WalletPayButton({
   method,
@@ -35,12 +35,22 @@ export function WalletPayButton({
   style,
   testID = 'wallet-pay-button',
 }: Props) {
-  const isGoogle = method === 'google_pay';
+  if (method === 'google_pay' && Platform.OS === 'android') {
+    return (
+      <GooglePayButton
+        onPress={onPress}
+        disabled={disabled}
+        loading={loading}
+        style={style}
+        testID={testID}
+      />
+    );
+  }
 
   return (
     <TouchableOpacity
       style={[
-        isGoogle ? styles.googleButton : styles.appleButton,
+        styles.appleButton,
         (disabled || loading) && styles.disabled,
         style,
       ]}
@@ -49,15 +59,10 @@ export function WalletPayButton({
       activeOpacity={0.85}
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={isGoogle ? 'Pay with Google Pay' : 'Pay with Apple Pay'}
+      accessibilityLabel="Pay with Apple Pay"
     >
       {loading ? (
         <ActivityIndicator color="#FFFFFF" />
-      ) : isGoogle ? (
-        <View style={styles.googleContent}>
-          <Text style={styles.googlePrefix}>Pay with</Text>
-          <GooglePayMark height={22} variant="dark" />
-        </View>
       ) : (
         <Text style={styles.appleLabel}>
           {Platform.OS === 'ios' ? '\uF8FF' : ''} Pay
@@ -68,15 +73,6 @@ export function WalletPayButton({
 }
 
 const styles = StyleSheet.create({
-  googleButton: {
-    minHeight: BUTTON_HEIGHT,
-    borderRadius: BUTTON_HEIGHT / 2,
-    backgroundColor: '#000000',
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 4,
-  },
   appleButton: {
     minHeight: BUTTON_HEIGHT,
     borderRadius: 8,
@@ -84,20 +80,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 4,
-  },
-  googleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  googlePrefix: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '500',
-    letterSpacing: 0.1,
-    includeFontPadding: false,
+    marginVertical: 8,
   },
   appleLabel: {
     color: '#FFFFFF',

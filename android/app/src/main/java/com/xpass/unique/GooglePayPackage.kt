@@ -10,5 +10,5 @@ class GooglePayPackage : ReactPackage {
         listOf(GooglePayModule(reactContext))
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
-        emptyList()
+        listOf(GooglePayButtonManager(reactContext))
 }

@@ -199,9 +199,22 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
             AutoResolveHelper.RESULT_ERROR -> {
                 val status = AutoResolveHelper.getStatusFromIntent(data)
                 val code = status?.statusCode
+                val detail = status?.statusMessage?.takeIf { it.isNotBlank() }
                 val message = when (code) {
+                    WalletConstants.ERROR_CODE_MERCHANT_ACCOUNT_ERROR -> buildString {
+                        append(
+                            "Google Pay merchant account is not configured for this app build. "
+                        )
+                        append(
+                            "In Google Pay & Wallet Console, register package com.xpass.unique with the Play/App signing SHA-1 fingerprint and ensure production access is approved."
+                        )
+                        if (detail != null) append(" ($detail)")
+                    }
                     6 -> "Google Pay merchant is not configured for this app. Ensure your MPGS merchant is linked in Google Pay Console."
-                    else -> "Google Pay error (code $code)"
+                    else -> buildString {
+                        append("Google Pay error (code $code)")
+                        if (detail != null) append(": $detail")
+                    }
                 }
                 promise.reject("GPAY_ERROR", message)
             }
