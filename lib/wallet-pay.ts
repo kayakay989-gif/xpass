@@ -59,7 +59,7 @@ export async function isWalletPayAvailable(): Promise<boolean> {
     if (Platform.OS === 'android') {
       const mod = googleModule();
       if (!mod || typeof mod.isReadyToPay !== 'function') return false;
-      if (!config.wallet.gatewayMerchantId) return false;
+      if (!config.wallet.googleMerchantId || !config.wallet.gatewayMerchantId) return false;
       return await mod.isReadyToPay();
     }
     return false;

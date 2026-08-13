@@ -1,49 +1,95 @@
-import { ConfigPlugin, withAppBuildGradle } from 'expo/config-plugins';
+import {
+  ConfigPlugin,
+  withAppBuildGradle,
+  withAndroidManifest,
+  withDangerousMod,
+} from 'expo/config-plugins';
+import fs from 'fs';
+import path from 'path';
 
 /**
- * Expo config plugin to add Google Pay SDK dependency for Android
- * Adds Google Pay SDK dependency to app/build.gradle
- * 
- * Note: The native module (GooglePayModule.kt) must be manually registered in MainApplication.kt
- * after running `expo prebuild`. See GOOGLE_PAY_SETUP.md for details.
+ * Expo config plugin for Google Pay on Android (see withGooglePay.js for runtime).
  */
 const withGooglePay: ConfigPlugin = (config) => {
-  // Only apply to Android builds, skip for web
   if (!config.android) {
     return config;
   }
 
-  // Add Google Pay dependency to app/build.gradle
-  config = withAppBuildGradle(config, (config) => {
-    const buildGradle = config.modResults.contents;
+  config = withAppBuildGradle(config, (cfg) => {
+    let contents = cfg.modResults.contents;
 
-    // Check if Google Pay dependency already exists
-    if (buildGradle.includes('play-services-wallet')) {
-      return config;
-    }
-
-    // Find dependencies block and add Google Pay SDK
-    const dependenciesRegex = /dependencies\s*\{([^}]*)\}/;
-    const dependenciesMatch = buildGradle.match(dependenciesRegex);
-
-    if (dependenciesMatch) {
-      // Add Google Pay dependency before the closing brace
-      const newDependenciesBlock = dependenciesMatch[0].replace(
-        /(\s*)\}/,
-        `$1    implementation 'com.google.android.gms:play-services-wallet:19.5.0'\n$1}`
+    if (!contents.includes('GOOGLE_PAY_ENVIRONMENT')) {
+      contents = contents.replace(
+        /(buildConfigField\s+"String",\s+"REACT_NATIVE_RELEASE_LEVEL"[^\n]*\n)/,
+        `$1        def googlePayEnv = findProperty('GOOGLE_PAY_ENVIRONMENT') ?: 'PRODUCTION'\n        buildConfigField "String", "GOOGLE_PAY_ENVIRONMENT", "\\"\${googlePayEnv}\\""\n`
       );
-      config.modResults.contents = buildGradle.replace(dependenciesRegex, newDependenciesBlock);
-    } else {
-      // Add dependencies block if it doesn't exist
-      const dependenciesBlock = `
-dependencies {
-    implementation 'com.google.android.gms:play-services-wallet:19.5.0'
-}`;
-      config.modResults.contents = buildGradle + dependenciesBlock;
     }
 
-    return config;
+    if (!contents.includes('play-services-wallet')) {
+      const dependenciesRegex = /dependencies\s*\{([^}]*)\}/;
+      const dependenciesMatch = contents.match(dependenciesRegex);
+      if (dependenciesMatch) {
+        const newBlock = dependenciesMatch[0].replace(
+          /(\s*)\}/,
+          `$1    implementation 'com.google.android.gms:play-services-wallet:19.5.0'\n$1}`
+        );
+        contents = contents.replace(dependenciesRegex, newBlock);
+      }
+    }
+
+    cfg.modResults.contents = contents;
+    return cfg;
   });
+
+  config = withAndroidManifest(config, (cfg) => {
+    const application = cfg.modResults.manifest.application?.[0];
+    if (!application) return cfg;
+
+    application['meta-data'] = application['meta-data'] || [];
+    const hasWallet = application['meta-data'].some(
+      (entry: { $?: Record<string, string> }) =>
+        entry.$?.['android:name'] === 'com.google.android.gms.wallet.api.enabled'
+    );
+    if (!hasWallet) {
+      application['meta-data'].push({
+        $: {
+          'android:name': 'com.google.android.gms.wallet.api.enabled',
+          'android:value': 'true',
+        },
+      });
+    }
+    return cfg;
+  });
+
+  config = withDangerousMod(config, [
+    'android',
+    async (cfg) => {
+      const packageName = cfg.android?.package || 'com.xpass.unique';
+      const packagePath = packageName.replace(/\./g, path.sep);
+      const mainAppPath = path.join(
+        cfg.modRequest.platformProjectRoot,
+        'app',
+        'src',
+        'main',
+        'java',
+        packagePath,
+        'MainApplication.kt'
+      );
+
+      if (fs.existsSync(mainAppPath)) {
+        let contents = fs.readFileSync(mainAppPath, 'utf8');
+        if (!contents.includes('GooglePayPackage()')) {
+          contents = contents.replace(
+            /PackageList\(this\)\.packages\.apply\s*\{/,
+            `PackageList(this).packages.apply {
+              add(GooglePayPackage())`
+          );
+          fs.writeFileSync(mainAppPath, contents);
+        }
+      }
+      return cfg;
+    },
+  ]);
 
   return config;
 };

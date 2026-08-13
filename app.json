@@ -46,6 +46,7 @@
           "NSAllowsArbitraryLoadsInWebContent": true
         },
         "CFBundleAllowMixedLocalizations": true,
+        "CFBundleDisplayName": "Xpass",
         "CFBundleLocalizations": [
           "en"
         ],
@@ -61,7 +62,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 42,
+      "versionCode": 44,
       "config": {},
       "intentFilters": [
         {

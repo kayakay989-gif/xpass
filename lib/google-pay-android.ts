@@ -61,11 +61,14 @@ export async function requestGooglePayPaymentAndroid(
   }
 
   try {
+    const gateway =
+      config.gateway.toLowerCase() === 'mastercard' ? 'mpgs' : config.gateway;
+
     // Create payment data request
     const paymentDataRequest = {
       merchantName: config.merchantName,
       merchantId: config.merchantId,
-      gateway: config.gateway,
+      gateway,
       gatewayMerchantId: config.gatewayMerchantId,
       allowedNetworks: config.allowedNetworks,
       currency: config.currency,
@@ -76,8 +79,14 @@ export async function requestGooglePayPaymentAndroid(
     // Request payment
     const paymentData = await GooglePayModule.requestPayment(paymentDataRequest);
 
-    // Extract token
-    const paymentToken = paymentData?.paymentMethodData?.tokenizationData?.token;
+    if (paymentData?.canceled) {
+      return { success: false, error: 'Payment canceled' };
+    }
+
+    // Native module returns { paymentToken }; keep fallback for older shapes.
+    const paymentToken =
+      paymentData?.paymentToken ??
+      paymentData?.paymentMethodData?.tokenizationData?.token;
 
     if (!paymentToken) {
       return { success: false, error: 'Failed to extract payment token from Google Pay response' };

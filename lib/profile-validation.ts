@@ -65,3 +65,14 @@ export function formatDisplayUserName(
   if (emailLocal && !looksLikeProviderReference(emailLocal)) return emailLocal;
   return 'Member';
 }
+
+/** Firestore `photoUrl` first, then optional Firebase Auth / OAuth photo fallback. */
+export function resolveUserPhotoUrl(
+  user?: { photoUrl?: string | null } | null,
+  fallbackPhotoUrl?: string | null
+): string {
+  const stored = typeof user?.photoUrl === 'string' ? user.photoUrl.trim() : '';
+  if (stored) return stored;
+  const fallback = typeof fallbackPhotoUrl === 'string' ? fallbackPhotoUrl.trim() : '';
+  return fallback;
+}

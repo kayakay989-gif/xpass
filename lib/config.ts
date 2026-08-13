@@ -74,7 +74,7 @@ export const config = {
 
   // App Configuration
   app: {
-    name: "Xpass Subscription App",
+    name: 'Xpass',
     version: "1.0.0",
     environment: dev ? "development" : "production",
     // Set a remote URL for the splash background image to enable the new design.

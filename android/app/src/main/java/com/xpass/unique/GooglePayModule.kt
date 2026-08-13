@@ -37,8 +37,13 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
 
     override fun getName(): String = "GooglePayModule"
 
-    // Production environment. Requires an approved Google Pay Business Console merchant.
-    private fun environment(): Int = WalletConstants.ENVIRONMENT_PRODUCTION
+    /** PRODUCTION after Google Pay Console approval; TEST only for local sandbox. */
+    private fun environment(): Int =
+        if (BuildConfig.GOOGLE_PAY_ENVIRONMENT.equals("TEST", ignoreCase = true)) {
+            WalletConstants.ENVIRONMENT_TEST
+        } else {
+            WalletConstants.ENVIRONMENT_PRODUCTION
+        }
 
     private fun paymentsClient(activity: Activity): PaymentsClient {
         val options = Wallet.WalletOptions.Builder()

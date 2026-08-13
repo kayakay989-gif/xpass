@@ -365,9 +365,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       
       console.log('[AuthContext] Creating new user profile document');
+      const normalizedName = resolveMemberDisplayName(name, '');
       const newUser: User = {
         id: uid,
-        name: name.trim(),
+        name: normalizedName,
         email: email.toLowerCase(),
         phone: phone || '',
         age: age && !isNaN(age) && age > 0 ? age : undefined,
@@ -436,7 +437,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         await ensureUserProfileExists(
           uid,
           currentAuthUser.email || '',
-          currentAuthUser.displayName || '',
+          resolveMemberDisplayName(undefined, currentAuthUser.displayName),
           currentAuthUser.phoneNumber || '',
           undefined,
           generateReferralCode(),

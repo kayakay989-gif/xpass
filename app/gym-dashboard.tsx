@@ -348,7 +348,9 @@ export default function GymDashboardScreen() {
                 {ci.userPhotoUrl ? (
                   <Image source={{ uri: ci.userPhotoUrl }} style={styles.avatar} />
                 ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]} />
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <UserIcon size={20} color="#9CA3AF" />
+                  </View>
                 )}
                 <View style={styles.checkinInfo}>
                   <Text style={styles.checkinName}>{ci.userName}</Text>
@@ -1011,7 +1013,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   avatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F3F4F6' },
-  avatarPlaceholder: { backgroundColor: '#E5E7EB' },
+  avatarPlaceholder: { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
   checkinInfo: { flex: 1 },
   checkinName: { fontSize: 15, fontWeight: '800' as const, color: '#111827' },
   checkinSub: { marginTop: 2, fontSize: 12, fontWeight: '600' as const, color: '#6B7280' },

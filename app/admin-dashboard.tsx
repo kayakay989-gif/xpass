@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { firestoreUsers, firestoreSubscriptions, firestoreCheckIns, firestoreSpotlightImages } from '@/lib/firestore';
-import { formatDisplayUserName } from '@/lib/profile-validation';
+import { formatDisplayUserName, resolveUserPhotoUrl } from '@/lib/profile-validation';
 import {
   ammanCalendarDaysRemaining,
   endOfAmmanDay,
@@ -47,6 +47,7 @@ import {
   Edit,
   Trash2,
   ArrowLeft,
+  Eye,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GymCategory, SubscriptionTier } from '@/types';
@@ -56,13 +57,64 @@ import * as Clipboard from 'expo-clipboard';
 import GymLocationPicker from '@/components/GymLocationPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
-import { FIXED_CITIES } from '@/constants/cities';
+import { FIXED_CITIES, getCityDefaultCoordinates } from '@/constants/cities';
 import { trpc } from '@/lib/trpc';
 import { TIER_COLORS as SHARED_TIER_COLORS } from '@/constants/tier-colors';
 import DatePicker from '@/components/DatePicker';
 import { buildGymOwnerUsername, buildGymOwnerDefaultPassword } from '@/lib/gym-owner-username';
 
 type TabType = 'overview' | 'users' | 'gyms' | 'checkins' | 'payouts' | 'revenue' | 'spotlight';
+
+type RevenuePaymentRow = {
+  id: string;
+  userId?: string;
+  subscriberName: string;
+  subscriberEmail: string;
+  tier: string;
+  duration: number;
+  amount: number;
+  currency: string;
+  paymentSource: string;
+  couponCode?: string | null;
+  createdAt: string | null;
+};
+
+const formatTierLabel = (tier?: string | null): string => {
+  const value = (tier || '').trim().toLowerCase();
+  if (!value) return 'Unknown';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+const formatDurationLabel = (months?: number | null): string => {
+  if (!months || months <= 0) return '—';
+  return months === 1 ? '1 month' : `${months} months`;
+};
+
+const formatPaymentSourceLabel = (method?: string | null): string => {
+  switch ((method || '').toLowerCase()) {
+    case 'apple_pay':
+      return 'Apple Pay';
+    case 'google_pay':
+      return 'Google Pay';
+    case 'coupon':
+      return 'Coupon';
+    case 'wallet':
+      return 'Wallet balance';
+    case 'card':
+      return 'Card';
+    default:
+      return 'Subscription';
+  }
+};
+
+const formatRevenueDate = (isoDate?: string | null): string => {
+  if (!isoDate) return '—';
+  return new Date(isoDate).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+};
 
 // Use shared tier colors for consistency
 const TIER_COLORS = {
@@ -552,6 +604,7 @@ function CouponsManagementSection({ onClose }: { onClose: () => void }) {
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
+  const trpcUtils = trpc.useUtils();
   const { isLoading: isAuthLoading, isCheckingAdmin, isAdmin, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showCouponsView, setShowCouponsView] = useState<boolean>(false);
@@ -609,6 +662,7 @@ export default function AdminDashboardScreen() {
   const createGymOwnerMutation = trpc.admin.createGymOwner.useMutation();
   const resetGymOwnerPasswordMutation = trpc.admin.resetGymOwnerPassword.useMutation();
   const [isUploadingGymImages, setIsUploadingGymImages] = useState(false);
+  const [gymImagePreviewUrl, setGymImagePreviewUrl] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [createdGymData, setCreatedGymData] = useState<{
     gymId: string;
@@ -638,9 +692,21 @@ export default function AdminDashboardScreen() {
   // Revenue analytics filters
   const [revenueRange, setRevenueRange] = useState<
     'THIS_MONTH' | 'LAST_MONTH' | 'LAST_3_MONTHS' | 'LAST_12_MONTHS' | 'ALL_TIME' | 'CUSTOM'
-  >('THIS_MONTH');
+  >('ALL_TIME');
   const [revenueStartDate, setRevenueStartDate] = useState<Date | null>(null);
   const [revenueEndDate, setRevenueEndDate] = useState<Date | null>(null);
+
+  const revenueQuery = trpc.admin.revenue.getSummary.useQuery(
+    {
+      range: revenueRange,
+      startDate: revenueStartDate ? revenueStartDate.toISOString() : null,
+      endDate: revenueEndDate ? revenueEndDate.toISOString() : null,
+    },
+    {
+      enabled: activeTab === 'revenue' || activeTab === 'overview',
+      refetchOnMount: true,
+    }
+  );
 
   // Admin payouts (pending / paid)
   const payoutsQuery = trpc.admin.payouts.getAll.useQuery(undefined, {
@@ -657,7 +723,13 @@ export default function AdminDashboardScreen() {
   const pendingPayouts = payoutsQuery.data?.pending || [];
   const paidPayouts = payoutsQuery.data?.paid || [];
 
-  // Revenue analytics derived from already-loaded subscriptions data
+  const usersById = useMemo(() => {
+    const map = new Map<string, any>();
+    users.forEach((user) => map.set(user.id, user));
+    return map;
+  }, [users]);
+
+  // Revenue analytics derived from already-loaded subscriptions data (fallback when API unavailable)
   const revenueMetrics = useMemo(() => {
     if (!subscriptions || subscriptions.length === 0) {
       return {
@@ -665,8 +737,9 @@ export default function AdminDashboardScreen() {
         lastMonthRevenue: 0,
         allTimeRevenue: 0,
         activeSubscribers: 0,
+        rangeTotalRevenue: 0,
         byMonth: [] as { monthKey: string; label: string; amount: number }[],
-        payments: [] as any[],
+        payments: [] as RevenuePaymentRow[],
       };
     }
 
@@ -806,32 +879,71 @@ export default function AdminDashboardScreen() {
       })
       .sort((a, b) => (a.monthKey < b.monthKey ? -1 : 1));
 
-    // Details table payments
-    const payments = inRange
+    const payments: RevenuePaymentRow[] = inRange
       .slice()
       .sort(
         (a: any, b: any) =>
           (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime()
       )
-      .map((sub: any) => ({
-        id: sub.id,
-        userId: sub.userId,
-        tier: sub.tier,
-        duration: sub.duration,
-        amount: sub.totalPrice || 0,
-        currency: 'JOD',
-        createdAt: sub.createdAt ? sub.createdAt.toISOString() : null,
-      }));
+      .map((sub: any) => {
+        const user = usersById.get(sub.userId);
+        return {
+          id: sub.id,
+          userId: sub.userId,
+          subscriberName: user
+            ? formatDisplayUserName(user, user.authDisplayName)
+            : 'Unknown subscriber',
+          subscriberEmail: user?.email || '',
+          tier: sub.tier || '',
+          duration: sub.duration || 0,
+          amount: sub.totalPrice || 0,
+          currency: 'JOD',
+          paymentSource: formatPaymentSourceLabel(sub.paymentMethod),
+          couponCode: sub.couponCode ?? null,
+          createdAt: sub.createdAt ? sub.createdAt.toISOString() : null,
+        };
+      });
+
+    const rangeTotalRevenue = payments.reduce(
+      (sum, payment) => sum + (payment.amount || 0),
+      0
+    );
 
     return {
       thisMonthRevenue,
       lastMonthRevenue,
       allTimeRevenue,
       activeSubscribers,
+      rangeTotalRevenue,
       byMonth,
       payments,
     };
-  }, [subscriptions, revenueRange, revenueStartDate, revenueEndDate]);
+  }, [subscriptions, revenueRange, revenueStartDate, revenueEndDate, usersById]);
+
+  const revenueDisplay = useMemo(() => {
+    const apiData = revenueQuery.data;
+    if (apiData?.range) {
+      return {
+        thisMonthRevenue: apiData.summaryCards.thisMonthRevenue,
+        lastMonthRevenue: apiData.summaryCards.lastMonthRevenue,
+        allTimeRevenue: apiData.summaryCards.allTimeRevenue,
+        activeSubscribers: apiData.summaryCards.activeSubscribers,
+        rangeTotalRevenue: apiData.range.totalRevenue,
+        byMonth: apiData.range.byMonth,
+        payments: apiData.range.payments as RevenuePaymentRow[],
+        paymentCount: apiData.range.paymentCount ?? apiData.range.payments.length,
+        isLoading: revenueQuery.isLoading,
+        isError: revenueQuery.isError,
+      };
+    }
+
+    return {
+      ...revenueMetrics,
+      paymentCount: revenueMetrics.payments.length,
+      isLoading: revenueQuery.isLoading,
+      isError: revenueQuery.isError,
+    };
+  }, [revenueQuery.data, revenueQuery.isLoading, revenueQuery.isError, revenueMetrics]);
 
   const formatPayoutMonth = (monthKey: string): string => {
     const [year, month] = monthKey.split('-').map(Number);
@@ -872,22 +984,15 @@ export default function AdminDashboardScreen() {
       // Load all data in parallel
       const [gymsData, usersData, checkInsData, subscriptionsData] = await Promise.all([
         firestoreGyms.getAll(),
-        firestoreUsers.getAll(),
+        trpcUtils.admin.getAllUsers.fetch(),
         firestoreCheckIns.getAll(),
         firestoreSubscriptions.getAll(),
       ]);
 
       setGyms(gymsData);
       
-      // Enrich users with subscription data
-      const usersWithSubs = usersData.map((user: any) => {
-        const subscription = subscriptionsData.find((sub: any) => sub.userId === user.id && sub.isActive);
-        return {
-          ...user,
-          subscription,
-        };
-      });
-      setUsers(usersWithSubs);
+      // Users already include active subscription from admin.getAllUsers
+      setUsers(usersData);
       
       setCheckIns(checkInsData);
       setSubscriptions(subscriptionsData);
@@ -966,8 +1071,11 @@ export default function AdminDashboardScreen() {
       
       return {
         ...checkIn,
-        userName: user?.name || 'Unknown',
+        userName: user
+          ? formatDisplayUserName(user, user.authDisplayName)
+          : 'Unknown',
         userEmail: user?.email || '',
+        userPhotoUrl: user ? resolveUserPhotoUrl(user) : '',
         gymName: gym?.name || 'Unknown Gym',
         tier: user?.subscription?.tier || 'none',
       };
@@ -1007,18 +1115,20 @@ export default function AdminDashboardScreen() {
 
     const now = new Date();
 
-    // Base search filter (by name or email)
+    // Base search filter (by name, email, or phone)
     let result = !searchQuery
       ? users
-      : users.filter(
-          (u: any) =>
-            (u.name || '')
-              .toLowerCase()
-              .includes(searchQuery.toLowerCase()) ||
-            (u.email || '')
-              .toLowerCase()
-              .includes(searchQuery.toLowerCase())
-        );
+      : users.filter((u: any) => {
+          const q = searchQuery.toLowerCase();
+          const displayName = formatDisplayUserName(u, u.authDisplayName).toLowerCase();
+          return (
+            displayName.includes(q) ||
+            (u.name || '').toLowerCase().includes(q) ||
+            (u.email || '').toLowerCase().includes(q) ||
+            (u.phone || '').toLowerCase().includes(q) ||
+            (u.signInProviderLabel || '').toLowerCase().includes(q)
+          );
+        });
 
     // Helper: determine if a user currently has an active subscription
     const isActiveSubscriber = (user: any) => {
@@ -1418,9 +1528,11 @@ export default function AdminDashboardScreen() {
         openDays: Array.isArray(newGym.openDays) && newGym.openDays.length > 0
           ? newGym.openDays
           : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-        imageUrl:
-          gymData.imageUrl ||
-          'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
+        imageUrl: gymData.imageUrl
+          ? gymData.imageUrl
+          : isEditing
+          ? ''
+          : 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
         allowedTiers: gymData.allowedTiers || defaultAllowedTiers,
         membershipModel: newGym.membershipModel || 'pay_per_visit',
         pricePerVisit: pricePerVisit,
@@ -1528,6 +1640,8 @@ export default function AdminDashboardScreen() {
   };
 
   const openMapModal = async () => {
+    const cityFallback = getCityDefaultCoordinates(newGym.city || 'Amman');
+
     // Try to get user's current location first
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -1538,19 +1652,17 @@ export default function AdminDashboardScreen() {
           });
         },
         () => {
-          // Fallback to existing location or default
+          // Fallback to existing location or selected city center
           if (newGym.latitude && newGym.longitude) {
             const lat = parseFloat(newGym.latitude);
             const lng = parseFloat(newGym.longitude);
             if (!isNaN(lat) && !isNaN(lng)) {
               setTempLocation({ latitude: lat, longitude: lng });
             } else {
-              // Default to Amman, Jordan
-              setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+              setTempLocation(cityFallback);
             }
           } else {
-            // Default to Amman, Jordan
-            setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+            setTempLocation(cityFallback);
           }
         },
         { timeout: 3000, enableHighAccuracy: true }
@@ -1563,10 +1675,10 @@ export default function AdminDashboardScreen() {
         if (!isNaN(lat) && !isNaN(lng)) {
           setTempLocation({ latitude: lat, longitude: lng });
         } else {
-          setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+          setTempLocation(cityFallback);
         }
       } else {
-        setTempLocation({ latitude: 31.963158, longitude: 35.930359 });
+        setTempLocation(cityFallback);
       }
     }
     setIsMapModalVisible(true);
@@ -1627,101 +1739,212 @@ export default function AdminDashboardScreen() {
     setIsMapModalVisible(false);
   };
 
+  const deleteFirebaseStorageUrl = async (imageUrl: string) => {
+    if (!imageUrl?.includes('firebasestorage')) return;
+    try {
+      const storage = getStorage(app);
+      const encodedPath = imageUrl.match(/\/o\/(.+?)(\?|$)/)?.[1];
+      const objectRef = encodedPath
+        ? ref(storage, decodeURIComponent(encodedPath))
+        : ref(storage, imageUrl);
+      await deleteObject(objectRef);
+    } catch (error) {
+      console.warn('[Admin] Could not delete image from storage:', error);
+    }
+  };
+
+  const persistGymMediaIfEditing = async (updates: {
+    imageUrl?: string;
+    gymImages?: string[];
+  }) => {
+    if (!editingGymId) return;
+    try {
+      const patch: Record<string, unknown> = {};
+      if (updates.imageUrl !== undefined) patch.imageUrl = updates.imageUrl;
+      if (updates.gymImages !== undefined) patch.gymImages = updates.gymImages;
+      await firestoreGyms.update(editingGymId, patch as any);
+      setGyms((prev) =>
+        prev.map((g) => (g.id === editingGymId ? { ...g, ...patch } : g))
+      );
+    } catch (error) {
+      console.error('[Admin] Failed to persist gym media:', error);
+      Alert.alert('Error', 'Could not save image changes. Use Save Changes to retry.');
+    }
+  };
+
+  const pickGalleryFiles = async (multiple: boolean): Promise<File[] | null> => {
+    if (Platform.OS !== 'web') return null;
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = multiple;
+      input.style.display = 'none';
+
+      const handleChange = (e: Event) => {
+        const target = e.target as HTMLInputElement;
+        const list = target.files;
+        input.removeEventListener('change', handleChange);
+        document.body.removeChild(input);
+        resolve(list && list.length > 0 ? Array.from(list) : null);
+      };
+
+      input.addEventListener('change', handleChange);
+      document.body.appendChild(input);
+      input.click();
+    });
+  };
+
+  const uploadGalleryUrls = async (multiple: boolean): Promise<string[]> => {
+    const storage = getStorage(app);
+    const newUrls: string[] = [];
+
+    if (Platform.OS === 'web') {
+      const files = await pickGalleryFiles(multiple);
+      if (!files?.length) return [];
+
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        const timestamp = Date.now();
+        const idSeed = `${timestamp}-${file.name}-${index}`;
+        const objectId = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          idSeed
+        );
+        const objectRef = ref(storage, `gymImages/${objectId}.jpg`);
+        await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
+        newUrls.push(await getDownloadURL(objectRef));
+      }
+      return newUrls;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please grant access to your photo library.');
+      return [];
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      allowsMultipleSelection: multiple,
+      quality: 0.8,
+    } as any);
+
+    if (result.canceled || !result.assets?.length) return [];
+
+    for (let index = 0; index < result.assets.length; index++) {
+      const uri = result.assets[index]?.uri;
+      if (!uri) continue;
+      const timestamp = Date.now();
+      const objectId = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        `${timestamp}-gym-image-${index}`
+      );
+      const objectRef = ref(storage, `gymImages/${objectId}.jpg`);
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' });
+      newUrls.push(await getDownloadURL(objectRef));
+    }
+
+    return newUrls;
+  };
+
+  const handleDeleteGymLogo = async () => {
+    const logoUrl = newGym.imageUrl?.trim();
+    if (!logoUrl || logoUrl.startsWith('blob:')) {
+      setNewGym((prev) => ({ ...prev, imageUrl: '' }));
+      return;
+    }
+
+    const confirmed = await confirmAction(
+      'Remove Logo',
+      editingGymId
+        ? 'Remove this gym logo? The change saves immediately.'
+        : 'Remove this gym logo? It will be deleted when you save the gym.'
+    );
+    if (!confirmed) return;
+
+    await deleteFirebaseStorageUrl(logoUrl);
+    setNewGym((prev) => ({ ...prev, imageUrl: '' }));
+    await persistGymMediaIfEditing({ imageUrl: '' });
+  };
+
+  const handleDeleteGymImage = async (imageUrl: string) => {
+    const confirmed = await confirmAction(
+      'Delete Image',
+      editingGymId
+        ? 'Remove this gallery image? The change saves immediately.'
+        : 'Remove this gallery image? It will be deleted when you save the gym.'
+    );
+    if (!confirmed) return;
+
+    await deleteFirebaseStorageUrl(imageUrl);
+    const nextImages = (newGym.gymImages || []).filter((url) => url !== imageUrl);
+    setNewGym((prev) => ({
+      ...prev,
+      gymImages: nextImages,
+    }));
+    await persistGymMediaIfEditing({ gymImages: nextImages });
+  };
+
+  const handleReplaceGymImage = async (index: number) => {
+    if (isUploadingGymImages) return;
+    const oldUrl = newGym.gymImages?.[index];
+    if (!oldUrl) return;
+
+    setIsUploadingGymImages(true);
+    try {
+      const uploaded = await uploadGalleryUrls(false);
+      const newUrl = uploaded[0];
+      if (!newUrl) return;
+
+      const nextImages = [...(newGym.gymImages || [])];
+      nextImages[index] = newUrl;
+      setNewGym((prev) => ({ ...prev, gymImages: nextImages }));
+      await deleteFirebaseStorageUrl(oldUrl);
+      await persistGymMediaIfEditing({ gymImages: nextImages });
+    } catch (error: any) {
+      console.error('[Admin] Error replacing gym image:', error);
+      Alert.alert('Error', error?.message || 'Failed to replace image.');
+    } finally {
+      setIsUploadingGymImages(false);
+    }
+  };
+
+  const handleSetGalleryImageAsLogo = async (imageUrl: string) => {
+    const previousLogo = newGym.imageUrl?.trim();
+    let nextGallery = [...(newGym.gymImages || [])];
+    if (
+      previousLogo &&
+      previousLogo !== imageUrl &&
+      previousLogo.includes('firebasestorage') &&
+      !nextGallery.includes(previousLogo)
+    ) {
+      nextGallery = [previousLogo, ...nextGallery];
+    }
+    setNewGym((prev) => ({ ...prev, imageUrl, gymImages: nextGallery }));
+    await persistGymMediaIfEditing({ imageUrl, gymImages: nextGallery });
+  };
+
   const handleUploadGymImages = async () => {
     if (isUploadingGymImages) return;
     setIsUploadingGymImages(true);
 
     try {
-      const storage = getStorage(app);
-      const newUrls: string[] = [];
-
-      if (Platform.OS === 'web') {
-        const files = await new Promise<FileList | null>((resolve) => {
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.accept = 'image/*';
-          input.multiple = true;
-          input.style.display = 'none';
-
-          const handleChange = (e: Event) => {
-            const target = e.target as HTMLInputElement;
-            const list = target.files;
-            input.removeEventListener('change', handleChange);
-            document.body.removeChild(input);
-            resolve(list && list.length > 0 ? list : null);
-          };
-
-          input.addEventListener('change', handleChange);
-          document.body.appendChild(input);
-          input.click();
-        });
-
-        if (!files) {
-          setIsUploadingGymImages(false);
-          return;
-        }
-
-        const fileArray = Array.from(files);
-        for (let index = 0; index < fileArray.length; index++) {
-          const file = fileArray[index];
-          const timestamp = Date.now();
-          const idSeed = `${timestamp}-${file.name}-${index}`;
-          const objectId = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            idSeed
-          );
-          const objectRef = ref(storage, `gymImages/${objectId}.jpg`);
-          await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
-          const url = await getDownloadURL(objectRef);
-          newUrls.push(url);
-        }
-      } else {
-        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permission.granted) {
-          Alert.alert('Permission needed', 'Please grant access to your photo library.');
-          setIsUploadingGymImages(false);
-          return;
-        }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: false,
-          allowsMultipleSelection: true,
-          quality: 0.8,
-        } as any);
-
-        if (result.canceled || !result.assets?.length) {
-          setIsUploadingGymImages(false);
-          return;
-        }
-
-        for (let index = 0; index < result.assets.length; index++) {
-          const asset = result.assets[index];
-          const uri = asset.uri;
-          if (!uri) continue;
-          const timestamp = Date.now();
-          const objectId = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            `${timestamp}-gym-image-${index}`
-          );
-          const objectRef = ref(storage, `gymImages/${objectId}.jpg`);
-          const response = await fetch(uri);
-          const blob = await response.blob();
-          await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' });
-          const url = await getDownloadURL(objectRef);
-          newUrls.push(url);
-        }
-      }
+      const newUrls = await uploadGalleryUrls(true);
 
       if (newUrls.length === 0) {
-        setIsUploadingGymImages(false);
         return;
       }
 
+      const nextImages = [...(newGym.gymImages || []), ...newUrls];
       setNewGym((prev) => ({
         ...prev,
-        gymImages: [...(prev.gymImages || []), ...newUrls],
+        gymImages: nextImages,
       }));
+      await persistGymMediaIfEditing({ gymImages: nextImages });
     } catch (error: any) {
       console.error('[Admin] Error uploading gym images:', error);
       Alert.alert('Error', error?.message || 'Failed to upload images. Please try again.');
@@ -1769,8 +1992,12 @@ export default function AdminDashboardScreen() {
         const objectRef = ref(storage, `gymLogos/${logoId}.jpg`);
         await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' });
         const url = await getDownloadURL(objectRef);
-
+        const previousLogo = newGym.imageUrl?.trim();
+        if (previousLogo && previousLogo !== url) {
+          await deleteFirebaseStorageUrl(previousLogo);
+        }
         setNewGym((prev) => ({ ...prev, imageUrl: url }));
+        await persistGymMediaIfEditing({ imageUrl: url });
       } else {
         // Native: use ImagePicker, then upload selected image
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1798,8 +2025,12 @@ export default function AdminDashboardScreen() {
         const objectRef = ref(storage, `gymLogos/${logoId}.jpg`);
         await uploadBytes(objectRef, blob, { contentType: blob.type || 'image/jpeg' });
         const url = await getDownloadURL(objectRef);
-
+        const previousLogo = newGym.imageUrl?.trim();
+        if (previousLogo && previousLogo !== url) {
+          await deleteFirebaseStorageUrl(previousLogo);
+        }
         setNewGym((prev) => ({ ...prev, imageUrl: url }));
+        await persistGymMediaIfEditing({ imageUrl: url });
       }
     } catch (error: any) {
       console.error('[Admin] Error uploading gym logo:', error);
@@ -2163,11 +2394,14 @@ export default function AdminDashboardScreen() {
               <TouchableOpacity
                 style={styles.statCardMinimal}
                 activeOpacity={0.85}
-                onPress={() => setActiveTab('revenue')}
+                onPress={() => {
+                  setRevenueRange('ALL_TIME');
+                  setActiveTab('revenue');
+                }}
               >
                 <Text style={styles.statLabelMinimal}>Revenue This Month</Text>
                 <Text style={styles.statValueMinimal}>
-                  {`JOD ${revenueMetrics.thisMonthRevenue.toFixed(0)}`}
+                  {`JOD ${revenueDisplay.thisMonthRevenue.toFixed(0)}`}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -2277,6 +2511,7 @@ export default function AdminDashboardScreen() {
               const daysRemaining = subscription
                 ? ammanCalendarDaysRemaining(new Date(subscription.endDate), now)
                 : null;
+              const profilePhotoUrl = resolveUserPhotoUrl(user);
 
               return (
                 <TouchableOpacity
@@ -2286,12 +2521,23 @@ export default function AdminDashboardScreen() {
                   activeOpacity={0.7}
                 >
                   <View style={styles.userHeader}>
-                    <View style={styles.userIcon}>
-                      <Users size={24} color="#DC2626" />
-                    </View>
+                    {profilePhotoUrl ? (
+                      <Image source={{ uri: profilePhotoUrl }} style={styles.userAvatar} />
+                    ) : (
+                      <View style={[styles.userAvatar, styles.userAvatarPlaceholder]}>
+                        <Users size={24} color="#DC2626" />
+                      </View>
+                    )}
                     <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{formatDisplayUserName(user)}</Text>
+                      <Text style={styles.userName}>
+                        {formatDisplayUserName(user, user.authDisplayName)}
+                      </Text>
                       <Text style={styles.userEmail}>{user.email || 'No email'}</Text>
+                      {user.signInProviderLabel ? (
+                        <Text style={styles.userProvider}>
+                          Signed up with {user.signInProviderLabel}
+                        </Text>
+                      ) : null}
                       {user.phone && (
                         <Text style={styles.userPhone}>{user.phone}</Text>
                       )}
@@ -2418,6 +2664,22 @@ export default function AdminDashboardScreen() {
                           </View>
                         ))}
                       </View>
+                      {Array.isArray(gym.gymImages) && gym.gymImages.length > 0 ? (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          style={styles.gymGalleryStrip}
+                          contentContainerStyle={styles.gymGalleryStripContent}
+                        >
+                          {gym.gymImages.map((url: string, idx: number) => (
+                            <Image
+                              key={`${gym.id}-gallery-${idx}`}
+                              source={{ uri: url }}
+                              style={styles.gymGalleryStripThumb}
+                            />
+                          ))}
+                        </ScrollView>
+                      ) : null}
                     </View>
 
                     <TouchableOpacity
@@ -2612,6 +2874,7 @@ export default function AdminDashboardScreen() {
                       <>
                         {todayCheckIns.slice(0, 5).map((checkIn: any) => {
                           const checkInDate = new Date(checkIn.timestamp);
+                          const checkInPhotoUrl = checkIn.userPhotoUrl || '';
                           return (
                             <TouchableOpacity
                               key={checkIn.id}
@@ -2620,6 +2883,13 @@ export default function AdminDashboardScreen() {
                               onPress={() => setSelectedCheckIn(checkIn)}
                             >
                               <View style={styles.checkInHeader}>
+                                {checkInPhotoUrl ? (
+                                  <Image source={{ uri: checkInPhotoUrl }} style={styles.checkInAvatar} />
+                                ) : (
+                                  <View style={[styles.checkInAvatar, styles.userAvatarPlaceholder]}>
+                                    <Users size={18} color="#9CA3AF" />
+                                  </View>
+                                )}
                                 <View
                                   style={[
                                     styles.tierBadge,
@@ -2726,7 +2996,9 @@ export default function AdminDashboardScreen() {
 
             {filteredCheckIns.map((checkIn: any) => {
               const today = new Date();
-              const isToday = isSameAmmanCalendarDay(new Date(checkIn.timestamp), today);
+              const checkInDate = new Date(checkIn.timestamp);
+              const isToday = isSameAmmanCalendarDay(checkInDate, today);
+              const checkInPhotoUrl = checkIn.userPhotoUrl || '';
 
               return (
                 <TouchableOpacity
@@ -2736,6 +3008,13 @@ export default function AdminDashboardScreen() {
                   onPress={() => setSelectedCheckIn(checkIn)}
                 >
                   <View style={styles.checkInHeader}>
+                    {checkInPhotoUrl ? (
+                      <Image source={{ uri: checkInPhotoUrl }} style={styles.checkInAvatar} />
+                    ) : (
+                      <View style={[styles.checkInAvatar, styles.userAvatarPlaceholder]}>
+                        <Users size={18} color="#9CA3AF" />
+                      </View>
+                    )}
                     <View
                       style={[
                         styles.tierBadge,
@@ -2913,6 +3192,9 @@ export default function AdminDashboardScreen() {
         {activeTab === 'revenue' && (
           <View style={styles.content}>
             <Text style={styles.pageTitle}>Revenue</Text>
+            <Text style={styles.spotlightDescription}>
+              Subscription payments with subscriber, plan, duration, and amount.
+            </Text>
 
             <View style={styles.revenueFilterRow}>
               {[
@@ -2969,25 +3251,25 @@ export default function AdminDashboardScreen() {
               <View style={styles.statCardMinimal}>
                 <Text style={styles.statLabelMinimal}>This Month</Text>
                 <Text style={styles.statValueMinimal}>
-                  {`JOD ${revenueMetrics.thisMonthRevenue.toFixed(0)}`}
+                  {`JOD ${revenueDisplay.thisMonthRevenue.toFixed(0)}`}
                 </Text>
               </View>
               <View style={styles.statCardMinimal}>
                 <Text style={styles.statLabelMinimal}>Last Month</Text>
                 <Text style={styles.statValueMinimal}>
-                  {`JOD ${revenueMetrics.lastMonthRevenue.toFixed(0)}`}
+                  {`JOD ${revenueDisplay.lastMonthRevenue.toFixed(0)}`}
                 </Text>
               </View>
               <View style={styles.statCardMinimal}>
                 <Text style={styles.statLabelMinimal}>All Time Revenue</Text>
                 <Text style={styles.statValueMinimal}>
-                  {`JOD ${revenueMetrics.allTimeRevenue.toFixed(0)}`}
+                  {`JOD ${revenueDisplay.allTimeRevenue.toFixed(0)}`}
                 </Text>
               </View>
               <View style={styles.statCardMinimal}>
                 <Text style={styles.statLabelMinimal}>Active Subscribers</Text>
                 <Text style={styles.statValueMinimal}>
-                  {revenueMetrics.activeSubscribers}
+                  {revenueDisplay.activeSubscribers}
                 </Text>
               </View>
             </View>
@@ -2995,13 +3277,15 @@ export default function AdminDashboardScreen() {
             {/* Simple revenue chart */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Revenue Trend</Text>
-              {revenueMetrics.byMonth.length === 0 ? (
+              {revenueDisplay.isLoading ? (
+                <ActivityIndicator color="#E31E24" style={{ marginTop: 12 }} />
+              ) : revenueDisplay.byMonth.length === 0 ? (
                 <Text style={styles.emptyStateText}>No revenue data for this period.</Text>
               ) : (
                 <View style={{ marginTop: 12 }}>
-                  {revenueMetrics.byMonth.map((m) => {
+                  {revenueDisplay.byMonth.map((m) => {
                     const maxAmount = Math.max(
-                      ...revenueMetrics.byMonth.map((x) => x.amount || 0),
+                      ...revenueDisplay.byMonth.map((x) => x.amount || 0),
                     );
                     const widthPercent =
                       maxAmount > 0 ? Math.max(5, (m.amount / maxAmount) * 100) : 0;
@@ -3028,46 +3312,75 @@ export default function AdminDashboardScreen() {
               )}
             </View>
 
-            {/* Revenue table */}
+            {/* Revenue breakdown table */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Revenue Details</Text>
+              <View style={styles.revenueDetailsHeader}>
+                <Text style={styles.sectionTitle}>Revenue Breakdown</Text>
+                <Text style={styles.revenueDetailsSummary}>
+                  {`${revenueDisplay.paymentCount} payment${revenueDisplay.paymentCount === 1 ? '' : 's'} · JOD ${revenueDisplay.rangeTotalRevenue.toFixed(2)} total`}
+                </Text>
+              </View>
 
-              {revenueMetrics.payments.length === 0 ? (
+              {revenueDisplay.isLoading ? (
+                <ActivityIndicator color="#E31E24" style={{ marginTop: 16 }} />
+              ) : revenueDisplay.payments.length === 0 ? (
                 <Text style={styles.emptyStateText}>No payments found for this period.</Text>
               ) : (
-                revenueMetrics.payments.map((p) => {
-                  const user = users.find((u: any) => u.id === p.userId);
-                  const date = p.createdAt
-                    ? new Date(p.createdAt).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })
-                    : '-';
-                  const plan = `${(p.tier || '').toString().toUpperCase()} ${p.duration || ''}mo`;
-                  return (
-                    <View key={p.id} style={styles.revenueRow}>
-                      <View style={{ flex: 1.4 }}>
-                        <Text style={styles.revenueRowPrimary}>{date}</Text>
+                <>
+                  <View style={styles.revenueTableHeader}>
+                    <Text style={[styles.revenueTableHeaderText, { flex: 1.2 }]}>Date</Text>
+                    <Text style={[styles.revenueTableHeaderText, { flex: 2.2 }]}>Subscriber</Text>
+                    <Text style={[styles.revenueTableHeaderText, { flex: 1.6 }]}>Plan</Text>
+                    <Text style={[styles.revenueTableHeaderText, { flex: 1.2, textAlign: 'right' }]}>Amount</Text>
+                  </View>
+
+                  {revenueDisplay.payments.map((payment) => {
+                    const tierKey = (payment.tier || 'none').toLowerCase() as keyof typeof TIER_COLORS;
+                    const tierColor = TIER_COLORS[tierKey] || TIER_COLORS.none;
+                    return (
+                      <View key={payment.id} style={styles.revenueBreakdownCard}>
+                        <View style={styles.revenueBreakdownTopRow}>
+                          <Text style={styles.revenueBreakdownDate}>
+                            {formatRevenueDate(payment.createdAt)}
+                          </Text>
+                          <Text style={styles.revenueBreakdownAmount}>
+                            {`JOD ${(payment.amount || 0).toFixed(2)}`}
+                          </Text>
+                        </View>
+
+                        <Text style={styles.revenueBreakdownName}>{payment.subscriberName}</Text>
+                        {payment.subscriberEmail ? (
+                          <Text style={styles.revenueBreakdownEmail}>{payment.subscriberEmail}</Text>
+                        ) : null}
+
+                        <View style={styles.revenueBreakdownMetaRow}>
+                          <View
+                            style={[
+                              styles.revenueTierBadge,
+                              { backgroundColor: `${tierColor}22`, borderColor: tierColor },
+                            ]}
+                          >
+                            <Text style={[styles.revenueTierBadgeText, { color: tierColor }]}>
+                              {formatTierLabel(payment.tier)}
+                            </Text>
+                          </View>
+                          <Text style={styles.revenueBreakdownMetaText}>
+                            {formatDurationLabel(payment.duration)}
+                          </Text>
+                          <Text style={styles.revenueBreakdownMetaText}>
+                            {payment.paymentSource}
+                          </Text>
+                        </View>
+
+                        {payment.couponCode ? (
+                          <Text style={styles.revenueBreakdownCoupon}>
+                            {`Coupon: ${payment.couponCode}`}
+                          </Text>
+                        ) : null}
                       </View>
-                      <View style={{ flex: 2 }}>
-                        <Text style={styles.revenueRowPrimary}>{user?.name || 'Unknown'}</Text>
-                        <Text style={styles.revenueRowSecondary}>{user?.email || ''}</Text>
-                      </View>
-                      <View style={{ flex: 1.8 }}>
-                        <Text style={styles.revenueRowPrimary}>{plan}</Text>
-                      </View>
-                      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                        <Text style={styles.revenueRowPrimary}>
-                          {`JOD ${(p.amount || 0).toFixed(0)}`}
-                        </Text>
-                        <Text style={styles.revenueRowSecondary}>
-                          {p.paymentMethod === 'coupon' ? 'Coupon' : 'Card'}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })
+                    );
+                  })}
+                </>
               )}
             </View>
           </View>
@@ -3778,29 +4091,94 @@ export default function AdminDashboardScreen() {
                   />
                   <TouchableOpacity
                     style={styles.logoRemoveButton}
-                    onPress={() => setNewGym((prev) => ({ ...prev, imageUrl: '' }))}
+                    onPress={handleDeleteGymLogo}
+                    accessibilityLabel="Delete gym logo"
                   >
-                    <X size={14} color="#FFFFFF" />
+                    <Trash2 size={14} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
               ) : (
-                <Text style={styles.locationSummaryMuted}>No logo selected</Text>
+                <Text style={styles.locationSummaryMuted}>No logo uploaded</Text>
               )}
 
+              <Text style={[styles.label, { marginTop: 16 }]}>Facility & Gallery Images</Text>
+              <Text style={styles.helperText}>
+                Photos shown on the gym details page (facilities, equipment, interior, etc.)
+              </Text>
               <TouchableOpacity
-                style={[styles.uploadButton, { marginTop: 8 }]}
+                style={styles.uploadButton}
                 onPress={handleUploadGymImages}
                 disabled={isUploadingGymImages}
               >
                 <ImageIcon size={20} color="#fff" />
                 <Text style={styles.uploadButtonText}>
-                  {isUploadingGymImages ? 'Uploading Images...' : 'Upload Images'}
+                  {isUploadingGymImages ? 'Uploading Images...' : 'Add Gallery Images'}
                 </Text>
               </TouchableOpacity>
-              {Array.isArray(newGym.gymImages) && newGym.gymImages.length > 0 && (
-                <Text style={styles.locationSummaryMuted}>
-                  {newGym.gymImages.length} image{newGym.gymImages.length === 1 ? '' : 's'} uploaded
-                </Text>
+              {Array.isArray(newGym.gymImages) && newGym.gymImages.length > 0 ? (
+                <View style={styles.gymImagesList}>
+                  {newGym.gymImages.map((imageUrl, index) => (
+                    <View key={`${imageUrl}-${index}`} style={styles.gymImageRowCard}>
+                      <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={() => setGymImagePreviewUrl(imageUrl)}
+                      >
+                        <Image
+                          source={{ uri: imageUrl }}
+                          style={styles.gymImageRowPreview}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                      <View style={styles.gymImageRowInfo}>
+                        <Text style={styles.gymImageRowTitle}>Gallery image {index + 1}</Text>
+                        {newGym.imageUrl === imageUrl ? (
+                          <Text style={styles.gymImageRowBadge}>Current logo</Text>
+                        ) : null}
+                        <View style={styles.gymImageRowActions}>
+                          <TouchableOpacity
+                            style={styles.gymImageActionButton}
+                            onPress={() => setGymImagePreviewUrl(imageUrl)}
+                          >
+                            <Eye size={14} color="#374151" />
+                            <Text style={styles.gymImageActionText}>View</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.gymImageActionButton}
+                            onPress={() => void handleReplaceGymImage(index)}
+                            disabled={isUploadingGymImages}
+                          >
+                            <Edit size={14} color="#2563EB" />
+                            <Text style={[styles.gymImageActionText, { color: '#2563EB' }]}>
+                              Replace
+                            </Text>
+                          </TouchableOpacity>
+                          {newGym.imageUrl !== imageUrl ? (
+                            <TouchableOpacity
+                              style={styles.gymImageActionButton}
+                              onPress={() => void handleSetGalleryImageAsLogo(imageUrl)}
+                            >
+                              <ImageIcon size={14} color="#9333EA" />
+                              <Text style={[styles.gymImageActionText, { color: '#9333EA' }]}>
+                                Set logo
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          <TouchableOpacity
+                            style={styles.gymImageActionButtonDanger}
+                            onPress={() => void handleDeleteGymImage(imageUrl)}
+                          >
+                            <Trash2 size={14} color="#DC2626" />
+                            <Text style={[styles.gymImageActionText, { color: '#DC2626' }]}>
+                              Delete
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.locationSummaryMuted}>No gallery images uploaded</Text>
               )}
 
               <Text style={styles.label}>Owner Email *</Text>
@@ -4077,6 +4455,32 @@ export default function AdminDashboardScreen() {
         </View>
       </Modal>
 
+      {/* Gym image preview modal */}
+      <Modal
+        visible={!!gymImagePreviewUrl}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setGymImagePreviewUrl(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.gymImagePreviewModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Gallery Image</Text>
+              <TouchableOpacity onPress={() => setGymImagePreviewUrl(null)}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            {gymImagePreviewUrl ? (
+              <Image
+                source={{ uri: gymImagePreviewUrl }}
+                style={styles.gymImagePreviewFull}
+                resizeMode="contain"
+              />
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* Check-in details modal */}
       <Modal
         visible={!!selectedCheckIn}
@@ -4094,6 +4498,17 @@ export default function AdminDashboardScreen() {
             </View>
             {selectedCheckIn && (
               <View style={styles.checkInDetailBody}>
+                {selectedCheckIn.userPhotoUrl ? (
+                  <Image
+                    source={{ uri: selectedCheckIn.userPhotoUrl }}
+                    style={styles.subscriberDetailAvatar}
+                  />
+                ) : (
+                  <View style={[styles.subscriberDetailAvatar, styles.userAvatarPlaceholder]}>
+                    <Users size={32} color="#9CA3AF" />
+                  </View>
+                )}
+
                 <Text style={styles.checkInDetailLabel}>User name</Text>
                 <Text style={styles.checkInDetailValue}>{selectedCheckIn.userName || 'N/A'}</Text>
 
@@ -4142,8 +4557,26 @@ export default function AdminDashboardScreen() {
             </View>
             {selectedSubscriber && (
               <ScrollView style={styles.checkInDetailBody} showsVerticalScrollIndicator={false}>
+                {resolveUserPhotoUrl(selectedSubscriber) ? (
+                  <Image
+                    source={{ uri: resolveUserPhotoUrl(selectedSubscriber) }}
+                    style={styles.subscriberDetailAvatar}
+                  />
+                ) : (
+                  <View style={[styles.subscriberDetailAvatar, styles.userAvatarPlaceholder]}>
+                    <Users size={32} color="#9CA3AF" />
+                  </View>
+                )}
+
                 <Text style={styles.checkInDetailLabel}>Name</Text>
-                <Text style={styles.checkInDetailValue}>{formatDisplayUserName(selectedSubscriber)}</Text>
+                <Text style={styles.checkInDetailValue}>
+                  {formatDisplayUserName(selectedSubscriber, selectedSubscriber.authDisplayName)}
+                </Text>
+
+                <Text style={styles.checkInDetailLabel}>Sign-in method</Text>
+                <Text style={styles.checkInDetailValue}>
+                  {selectedSubscriber.signInProviderLabel || selectedSubscriber.authProvider || 'N/A'}
+                </Text>
 
                 <Text style={styles.checkInDetailLabel}>Email</Text>
                 <Text style={styles.checkInDetailValue}>{selectedSubscriber.email || 'N/A'}</Text>
@@ -4276,7 +4709,14 @@ export default function AdminDashboardScreen() {
                     key={city}
                     style={[styles.cityOption, isSelected && styles.cityOptionSelected]}
                     onPress={() => {
-                      setNewGym({ ...newGym, city });
+                      const coords = getCityDefaultCoordinates(city);
+                      setNewGym({
+                        ...newGym,
+                        city,
+                        latitude: coords.latitude.toString(),
+                        longitude: coords.longitude.toString(),
+                      });
+                      setTempLocation(coords);
                       setIsCityModalVisible(false);
                     }}
                   >
@@ -4980,6 +5420,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
   },
+  userAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  userAvatarPlaceholder: {
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#FEE2E2',
+  },
+  checkInAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 10,
+    backgroundColor: '#F3F4F6',
+  },
+  subscriberDetailAvatar: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignSelf: 'center' as const,
+    marginBottom: 16,
+    backgroundColor: '#F3F4F6',
+  },
   userInfo: {
     flex: 1,
   },
@@ -4993,6 +5460,12 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 2,
     marginBottom: 6,
+  },
+  userProvider: {
+    fontSize: 12,
+    color: '#9333EA',
+    marginTop: 2,
+    fontWeight: '600' as const,
   },
   userPhone: {
     fontSize: 13,
@@ -5499,10 +5972,128 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#DC2626',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  gymImagesGrid: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 10,
+    marginTop: 12,
+  },
+  gymImagesList: {
+    marginTop: 12,
+    gap: 12,
+  },
+  gymImageRowCard: {
+    flexDirection: 'row' as const,
+    backgroundColor: '#fff',
     borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    overflow: 'hidden' as const,
+  },
+  gymImageRowPreview: {
+    width: 120,
+    height: 90,
+    backgroundColor: '#F3F4F6',
+  },
+  gymImageRowInfo: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'center' as const,
+  },
+  gymImageRowTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: '#111827',
+    marginBottom: 4,
+  },
+  gymImageRowBadge: {
+    fontSize: 12,
+    color: '#9333EA',
+    fontWeight: '600' as const,
+    marginBottom: 8,
+  },
+  gymImageRowActions: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+  },
+  gymImageActionButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  gymImageActionButtonDanger: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#FEE2E2',
+  },
+  gymImageActionText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#374151',
+  },
+  gymGalleryStrip: {
+    marginTop: 8,
+  },
+  gymGalleryStripContent: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  gymGalleryStripThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  gymImagePreviewModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '92%',
+    maxWidth: 720,
+    maxHeight: '85%',
+    overflow: 'hidden' as const,
+  },
+  gymImagePreviewFull: {
+    width: '100%',
+    height: 420,
+    backgroundColor: '#111827',
+  },
+  gymImageCard: {
+    width: 108,
+    height: 108,
+    borderRadius: 10,
+    overflow: 'hidden' as const,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  gymImagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  gymImageDeleteButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#DC2626',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
@@ -6188,6 +6779,91 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#6B7280',
     marginTop: 2,
+  },
+  revenueDetailsHeader: {
+    marginBottom: 12,
+  },
+  revenueDetailsSummary: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  revenueTableHeader: {
+    flexDirection: 'row' as const,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  revenueTableHeaderText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#6B7280',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.4,
+  },
+  revenueBreakdownCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    padding: 14,
+    marginBottom: 10,
+  },
+  revenueBreakdownTopRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: 8,
+  },
+  revenueBreakdownDate: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: '#374151',
+  },
+  revenueBreakdownAmount: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#111827',
+  },
+  revenueBreakdownName: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: '#111827',
+  },
+  revenueBreakdownEmail: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  revenueBreakdownMetaRow: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    marginTop: 10,
+  },
+  revenueTierBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  revenueTierBadgeText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+  },
+  revenueBreakdownMetaText: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '500' as const,
+  },
+  revenueBreakdownCoupon: {
+    fontSize: 11,
+    color: '#9333EA',
+    marginTop: 8,
+    fontWeight: '600' as const,
   },
   saveButton: {
     backgroundColor: '#111827',

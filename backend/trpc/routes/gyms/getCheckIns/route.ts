@@ -3,11 +3,13 @@ import { TRPCError } from '@trpc/server';
 import { gymOwnerOrAdminProcedure } from '@/backend/trpc/create-context';
 import { firestoreCheckIns, firestoreUsers, firestoreSubscriptions } from '@/backend/lib/firestore-admin';
 import { logCheckInSync } from '@/backend/lib/check-in-sync-log';
+import { getAuthPhotoUrls, resolveUserPhotoUrl } from '@/backend/lib/user-photo';
 import { CheckIn } from '@/types';
 
 type CheckInWithDetails = CheckIn & {
   userName: string;
   userEmail?: string;
+  userPhotoUrl?: string;
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
 };
 
@@ -57,16 +59,31 @@ export default gymOwnerOrAdminProcedure
       });
     }
 
+    const uniqueUserIds = [...new Set(filteredCheckIns.map((ci) => ci.userId))];
+    const usersById = new Map<string, Awaited<ReturnType<typeof firestoreUsers.getById>>>();
+    await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        const user = await firestoreUsers.getById(userId);
+        if (user) usersById.set(userId, user);
+      })
+    );
+
+    const missingPhotoUserIds = uniqueUserIds.filter(
+      (userId) => !resolveUserPhotoUrl(usersById.get(userId) || null)
+    );
+    const authPhotoUrls = await getAuthPhotoUrls(missingPhotoUserIds);
+
     const checkInsWithDetails: CheckInWithDetails[] = [];
     for (const ci of filteredCheckIns) {
       try {
-        const user = await firestoreUsers.getById(ci.userId);
+        const user = usersById.get(ci.userId);
         const subscription = await firestoreSubscriptions.getByUserId(ci.userId);
 
         checkInsWithDetails.push({
           ...ci,
           userName: user?.name || 'Unknown',
           userEmail: user?.email,
+          userPhotoUrl: resolveUserPhotoUrl(user, authPhotoUrls.get(ci.userId)),
           tier: subscription?.tier || 'silver',
         } as CheckInWithDetails);
       } catch (error: any) {
@@ -78,6 +95,7 @@ export default gymOwnerOrAdminProcedure
         checkInsWithDetails.push({
           ...ci,
           userName: 'Unknown',
+          userPhotoUrl: authPhotoUrls.get(ci.userId) || '',
           tier: 'silver',
         } as CheckInWithDetails);
       }

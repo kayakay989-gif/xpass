@@ -60,6 +60,9 @@ export async function requestGooglePayPaymentWeb(
   try {
     const googlePay = (window as any).google.payments.api;
 
+    const gateway =
+      config.gateway.toLowerCase() === 'mastercard' ? 'mpgs' : config.gateway;
+
     // Create payment data request
     const paymentDataRequest = {
       apiVersion: 2,
@@ -78,7 +81,7 @@ export async function requestGooglePayPaymentWeb(
           tokenizationSpecification: {
             type: 'PAYMENT_GATEWAY',
             parameters: {
-              gateway: config.gateway,
+              gateway,
               gatewayMerchantId: config.gatewayMerchantId,
             },
           },
@@ -134,10 +137,12 @@ export async function requestGooglePayPaymentAndroid(
     }
 
     // Create payment request config
+    const gateway =
+      config.gateway.toLowerCase() === 'mastercard' ? 'mpgs' : config.gateway;
     const paymentConfig = {
       merchantName: config.merchantName,
       merchantId: config.merchantId,
-      gateway: config.gateway,
+      gateway,
       gatewayMerchantId: config.gatewayMerchantId,
       allowedNetworks: config.allowedNetworks,
       currency: config.currency,
@@ -148,8 +153,14 @@ export async function requestGooglePayPaymentAndroid(
     // Request payment via native module
     const paymentData = await GooglePayModule.requestPayment(paymentConfig);
 
-    // Extract token from payment data
-    const paymentToken = paymentData?.paymentMethodData?.tokenizationData?.token;
+    if (paymentData?.canceled) {
+      return { success: false, error: 'Payment canceled' };
+    }
+
+    // Native module returns { paymentToken }; keep fallback for older shapes.
+    const paymentToken =
+      paymentData?.paymentToken ??
+      paymentData?.paymentMethodData?.tokenizationData?.token;
 
     if (!paymentToken) {
       return { success: false, error: 'Failed to extract payment token from Google Pay response' };
