@@ -8,12 +8,14 @@ import Colors from '@/constants/colors';
 import { SubscriptionTier } from '@/types';
 import { getGymTier, getTierBadgeColors, getTierLabel } from '@/lib/gym-tier';
 import { calculateDistance, formatDistance } from '@/lib/distance';
+import { CITY_FILTER_OPTIONS } from '@/constants/cities';
 
 export default function GymsScreen() {
   const router = useRouter();
   const { gymId } = useLocalSearchParams<{ gymId?: string }>();
   const { filteredGyms, selectedGymFilter, setSelectedGymFilter, refetchGyms, isLoading, gymsError } = useApp();
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedCity, setSelectedCity] = useState<string>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
@@ -77,6 +79,11 @@ export default function GymsScreen() {
     { label: 'Elite', value: 'elite' },
   ];
 
+  const cityFilters = CITY_FILTER_OPTIONS.map((city) => ({
+    label: city === 'all' ? 'All cities' : city,
+    value: city,
+  }));
+
   // Cache distances per gym during the session to avoid recalculating
   useEffect(() => {
     if (!userLocation || !filteredGyms || filteredGyms.length === 0) return;
@@ -112,10 +119,18 @@ export default function GymsScreen() {
     });
   }, [userLocation, filteredGyms]);
 
-  const displayedGyms = filteredGyms.filter(gym => 
-    gym.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    gym.address.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const displayedGyms = filteredGyms.filter((gym) => {
+    const query = searchQuery.toLowerCase();
+    const cityMatch =
+      selectedCity === 'all' ||
+      (typeof gym.city === 'string' && gym.city.trim().toLowerCase() === selectedCity.toLowerCase());
+    const textMatch =
+      !query ||
+      gym.name.toLowerCase().includes(query) ||
+      gym.address.toLowerCase().includes(query) ||
+      (typeof gym.city === 'string' && gym.city.toLowerCase().includes(query));
+    return cityMatch && textMatch;
+  });
 
   // If we have location and distances, sort gyms by distance (nearest first).
   // If permission is denied or location is unavailable, keep the original order.
@@ -151,11 +166,38 @@ export default function GymsScreen() {
           />
         </View>
 
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
+          contentContainerStyle={styles.filterContainer}
+        >
+          {cityFilters.map((filter) => (
+            <TouchableOpacity
+              key={`city-${filter.value}`}
+              style={[
+                styles.filterChip,
+                selectedCity === filter.value && styles.filterChipActive,
+              ]}
+              onPress={() => setSelectedCity(filter.value)}
+            >
+              <Text
+                style={[
+                  styles.filterText,
+                  selectedCity === filter.value && styles.filterTextActive,
+                ]}
+              >
+                {filter.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false}
           style={styles.filterScroll}
-          contentContainerStyle={styles.filterContainer}
+          contentContainerStyle={[styles.filterContainer, { paddingTop: 8 }]}
         >
           {filters.map((filter) => (
             <TouchableOpacity
@@ -257,7 +299,9 @@ export default function GymsScreen() {
               <View style={styles.locationRow}>
                 <MapPin size={14} color={Colors.textSecondary} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.locationText}>{gym.address}</Text>
+                  <Text style={styles.locationText}>
+                    {gym.city ? `${gym.city}${gym.address ? ` · ${gym.address}` : ''}` : gym.address}
+                  </Text>
                   {!!userLocation && !locationPermissionDenied && typeof gymDistances[gym.id] === 'number' && (
                     <Text style={styles.distanceText}>{formatDistance(gymDistances[gym.id] as number)} away</Text>
                   )}

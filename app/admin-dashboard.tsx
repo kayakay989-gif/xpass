@@ -57,7 +57,7 @@ import * as Clipboard from 'expo-clipboard';
 import GymLocationPicker from '@/components/GymLocationPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { firestoreGyms, firestoreGymOwners } from '@/lib/firestore';
-import { FIXED_CITIES, getCityDefaultCoordinates } from '@/constants/cities';
+import { CITY_FILTER_OPTIONS, FIXED_CITIES, getCityDefaultCoordinates } from '@/constants/cities';
 import { trpc } from '@/lib/trpc';
 import { TIER_COLORS as SHARED_TIER_COLORS } from '@/constants/tier-colors';
 import DatePicker from '@/components/DatePicker';
@@ -654,6 +654,7 @@ export default function AdminDashboardScreen() {
   });
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
   const [isCityModalVisible, setIsCityModalVisible] = useState(false);
+  const [gymCityFilter, setGymCityFilter] = useState<string>('all');
   const [tempLocation, setTempLocation] = useState({
     latitude: 31.963158,
     longitude: 35.930359,
@@ -1167,13 +1168,19 @@ export default function AdminDashboardScreen() {
   }, [users, searchQuery, userStatusFilter]);
 
   const filteredGyms = useMemo(() => {
-    if (!searchQuery) return gymsWithStats;
-    return gymsWithStats.filter(
-      (g: any) =>
-        g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        g.address.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [gymsWithStats, searchQuery]);
+    const query = searchQuery.toLowerCase();
+    return gymsWithStats.filter((g: any) => {
+      const city = typeof g.city === 'string' ? g.city.trim() : '';
+      const cityMatch =
+        gymCityFilter === 'all' || city.toLowerCase() === gymCityFilter.toLowerCase();
+      const textMatch =
+        !query ||
+        (g.name || '').toLowerCase().includes(query) ||
+        (g.address || '').toLowerCase().includes(query) ||
+        city.toLowerCase().includes(query);
+      return cityMatch && textMatch;
+    });
+  }, [gymsWithStats, searchQuery, gymCityFilter]);
 
   const filteredCheckIns = useMemo(() => {
     let result = enrichedCheckIns;
@@ -2612,6 +2619,34 @@ export default function AdminDashboardScreen() {
                 <Plus size={20} color="#fff" />
               </TouchableOpacity>
             </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 12 }}
+              contentContainerStyle={styles.userFilterRow}
+            >
+              {CITY_FILTER_OPTIONS.map((city) => {
+                const selected = gymCityFilter === city;
+                return (
+                  <TouchableOpacity
+                    key={`admin-city-${city}`}
+                    style={[styles.userFilterChip, selected && styles.userFilterChipActive]}
+                    activeOpacity={0.85}
+                    onPress={() => setGymCityFilter(city)}
+                  >
+                    <Text
+                      style={[
+                        styles.userFilterChipText,
+                        selected && styles.userFilterChipTextActive,
+                      ]}
+                    >
+                      {city === 'all' ? 'All cities' : city}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
             {isLoadingData && filteredGyms.length === 0 && (
               <View style={styles.loadingCard}>

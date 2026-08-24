@@ -464,7 +464,9 @@ export default function HomeScreen() {
                       <Text style={styles.gymDistance}>{formatDistance(gym.distance)}</Text>
                     )}
                   </View>
-                  <Text style={styles.gymAddress}>{gym.address}</Text>
+                  <Text style={styles.gymAddress}>
+                    {gym.city ? `${gym.city}${gym.address ? ` · ${gym.address}` : ''}` : gym.address}
+                  </Text>
                   <View style={styles.gymCategory}>
                     <Text style={styles.gymCategoryText}>
                       {getTierLabel(getGymTier(gym))}

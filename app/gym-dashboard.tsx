@@ -391,6 +391,7 @@ export default function GymDashboardScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.screenTitle}>{gym.name}</Text>
+          {!!gym.city && <Text style={styles.gymCitySubtitle}>{gym.city}</Text>}
 
           {checkInsLoadError ? (
             <View style={styles.checkInsErrorBanner}>
@@ -626,6 +627,7 @@ export default function GymDashboardScreen() {
             />
             <View style={{ flex: 1 }}>
               <Text style={styles.profileName}>{gym.name}</Text>
+              {!!gym.city && <Text style={styles.profileSub}>{gym.city}</Text>}
               <Text style={styles.profileSub}>{ownerEmail || '—'}</Text>
             </View>
           </View>
@@ -789,6 +791,7 @@ const styles = StyleSheet.create({
   },
 
   screenTitle: { fontSize: 20, fontWeight: '700' as const, color: '#111827', marginBottom: 14 },
+  gymCitySubtitle: { fontSize: 14, fontWeight: '600' as const, color: '#6B7280', marginTop: -10, marginBottom: 14 },
   statsRow: { flexDirection: 'row' as const, gap: 12, marginBottom: 16 },
   statCardMinimal: {
     flex: 1,
