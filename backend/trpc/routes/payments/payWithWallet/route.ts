@@ -3,6 +3,7 @@ import { protectedProcedure } from '@/backend/trpc/create-context';
 import { TRPCError } from '@trpc/server';
 import { computeAmount, MastercardGatewayError } from '@/backend/lib/mastercard';
 import { chargeWalletToken, extractGatewayUserMessage } from '@/backend/lib/wallet-charge';
+import { roundGatewayAmount } from '@/lib/money';
 import { Subscription } from '@/types';
 import {
   firestorePayments,
@@ -100,9 +101,11 @@ export default protectedProcedure
       couponId = coupon.id;
     }
 
+    finalAmount = roundGatewayAmount(finalAmount, currency);
+
     const walletBalance = user.walletBalance || 0;
     const walletUsed = input.useWallet ? Math.min(walletBalance, finalAmount) : 0;
-    const remainingAmount = Math.max(0, finalAmount - walletUsed);
+    const remainingAmount = roundGatewayAmount(Math.max(0, finalAmount - walletUsed), currency);
 
     if (input.useWallet && walletUsed > walletBalance) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Insufficient wallet balance' });

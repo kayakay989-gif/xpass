@@ -21,6 +21,9 @@ import { agentLog } from '@/lib/agent-debug-log';
 import { scheduleAuthNavigation } from '@/lib/schedule-navigation';
 import { isWalletPayAvailable, requestWalletPayment, getWalletMethod } from '@/lib/wallet-pay';
 import { WalletPayButton } from '@/components/WalletPayButton';
+import { calculateSubscriptionPrice } from '@/backend/lib/pricing';
+import { roundGatewayAmount } from '@/lib/money';
+import type { SubscriptionDuration, SubscriptionTier } from '@/types';
 
 type ThreeDsCallbackMessage = {
   type: string;
@@ -101,7 +104,16 @@ export default function PaymentScreen() {
   const [saveCard, setSaveCard] = useState<boolean>(false);
   // Apple Pay (iOS) / Google Pay (Android) — additive; hidden unless the native
   // wallet module reports availability, so the card flow is never affected.
-  const [walletAvailable, setWalletAvailable] = useState<boolean>(false);
+  const canonicalPackagePrice = useMemo(() => {
+    const t = String(tier || '').toLowerCase() as SubscriptionTier;
+    const d = parseInt(String(duration), 10) as SubscriptionDuration;
+    const computed = calculateSubscriptionPrice(t, d).totalPrice;
+    if (computed > 0) return computed;
+    return parseFloat(String(price)) || 0;
+  }, [tier, duration, price]);
+  const [walletAvailable, setWalletAvailable] = useState<boolean>(
+    Platform.OS === 'ios' && !!config.wallet.appleMerchantId
+  );
   const [walletProcessing, setWalletProcessing] = useState<boolean>(false);
   const [selectedSavedCardId, setSelectedSavedCardId] = useState<string | null>(null);
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -125,7 +137,7 @@ export default function PaymentScreen() {
   const validateCouponQuery = trpc.coupons.validate.useQuery(
     {
       code: couponCode.toUpperCase().trim(),
-      originalPrice: parseFloat(price) || 0,
+      originalPrice: canonicalPackagePrice,
     },
     {
       enabled: false, // Manual trigger
@@ -357,7 +369,9 @@ export default function PaymentScreen() {
         const available = await isWalletPayAvailable();
         if (!cancelled) setWalletAvailable(available);
       } catch {
-        if (!cancelled) setWalletAvailable(false);
+        if (!cancelled) {
+          setWalletAvailable(Platform.OS === 'ios' && !!config.wallet.appleMerchantId);
+        }
       }
     })();
     return () => {
@@ -370,10 +384,12 @@ export default function PaymentScreen() {
       Alert.alert('Error', 'Please log in to complete payment');
       return;
     }
-    const finalPrice = appliedCoupon ? Number(appliedCoupon.finalPrice ?? 0) : parseFloat(price) || 0;
+    const finalPrice = appliedCoupon
+      ? Number(appliedCoupon.finalPrice ?? 0)
+      : canonicalPackagePrice;
     const balance = user?.walletBalance || 0;
     const walletUsedAmt = useWallet ? Math.min(balance, finalPrice) : 0;
-    const amountToCharge = Math.max(0, finalPrice - walletUsedAmt);
+    const amountToCharge = roundGatewayAmount(Math.max(0, finalPrice - walletUsedAmt), 'JOD');
     if (amountToCharge <= 0) {
       Alert.alert('Error', 'No payment amount due for this order.');
       return;
@@ -437,7 +453,7 @@ export default function PaymentScreen() {
     effectiveUserId,
     tier,
     duration,
-    price,
+    canonicalPackagePrice,
     useWallet,
     appliedCoupon,
     user?.walletBalance,
@@ -925,9 +941,9 @@ export default function PaymentScreen() {
 
   const getFinalPrice = () => {
     if (appliedCoupon) {
-      return appliedCoupon.finalPrice;
+      return Number(appliedCoupon.finalPrice ?? 0);
     }
-    return parseFloat(price) || 0;
+    return canonicalPackagePrice;
   };
 
   // Calculate wallet usage
@@ -1033,7 +1049,7 @@ export default function PaymentScreen() {
             <Text style={styles.durationText}>{duration} Month{parseInt(duration) > 1 ? 's' : ''}</Text>
             <View style={styles.priceContainer}>
               <Text style={styles.priceLabel}>Total Amount</Text>
-              <Text style={styles.price}>{price} JOD</Text>
+              <Text style={styles.price}>{canonicalPackagePrice} JOD</Text>
             </View>
 
             {/* Coupon Section */}
@@ -1085,7 +1101,7 @@ export default function PaymentScreen() {
               <View style={styles.priceBreakdown}>
                 <View style={styles.priceRow}>
                   <Text style={styles.priceBreakdownLabel}>Original Price:</Text>
-                  <Text style={styles.priceBreakdownValue}>{price} JOD</Text>
+                  <Text style={styles.priceBreakdownValue}>{canonicalPackagePrice} JOD</Text>
                 </View>
                 <View style={styles.priceRow}>
                   <Text style={styles.priceBreakdownLabel}>

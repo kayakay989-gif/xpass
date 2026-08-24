@@ -92,9 +92,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       },
     },
-    extra: {
+      extra: {
       ...(typeof config.extra === 'object' && config.extra !== null ? config.extra : {}),
       rorkApiBaseUrl,
+      appleMerchantId:
+        process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID || 'merchant.com.xpass.app',
       googleIosClientId:
         // Prefer plist value so runtime always matches iOS app registration in Firebase/Google.
         googleIosClientIdFromPlist || (process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '').trim(),

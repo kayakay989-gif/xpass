@@ -20,6 +20,8 @@ import com.google.android.gms.wallet.Wallet
 import com.google.android.gms.wallet.WalletConstants
 import org.json.JSONArray
 import org.json.JSONObject
+import com.facebook.react.bridge.ReadableType
+import java.util.Locale
 
 /**
  * Native Google Pay module bridging the Google Pay API to React Native.
@@ -50,6 +52,21 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
             .setEnvironment(environment())
             .build()
         return Wallet.getPaymentsClient(activity, options)
+    }
+
+    private fun readTotalPrice(config: ReadableMap): String {
+        if (!config.hasKey("totalPrice") || config.isNull("totalPrice")) return "0.000"
+        val raw = try {
+            when (config.getType("totalPrice")) {
+                ReadableType.Number -> config.getDouble("totalPrice")
+                ReadableType.String -> config.getString("totalPrice")?.trim()?.toDoubleOrNull() ?: 0.0
+                else -> 0.0
+            }
+        } catch (_: Exception) {
+            0.0
+        }
+        // JOD uses 3 decimal places (fils). Sending 2 digits can make MPGS charge 10x too little.
+        return String.format(Locale.US, "%.3f", raw)
     }
 
     private fun allowedNetworksJson(allowedNetworks: ReadableArray?): JSONArray {
@@ -120,7 +137,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
             val merchantId = if (config.hasKey("merchantId")) config.getString("merchantId") else null
             val currency = if (config.hasKey("currency")) config.getString("currency") else "JOD"
             val country = if (config.hasKey("country")) config.getString("country") else "JO"
-            val totalPrice = if (config.hasKey("totalPrice")) config.getString("totalPrice") else "0"
+            val totalPrice = readTotalPrice(config)
             val allowedNetworks = if (config.hasKey("allowedNetworks")) config.getArray("allowedNetworks") else null
 
             val cardMethod = baseCardPaymentMethod(allowedNetworks)
@@ -149,8 +166,9 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
                 .put(
                     "transactionInfo",
                     JSONObject()
-                        .put("totalPrice", totalPrice ?: "0")
+                        .put("totalPrice", totalPrice)
                         .put("totalPriceStatus", "FINAL")
+                        .put("checkoutOption", "COMPLETE_IMMEDIATE_PURCHASE")
                         .put("currencyCode", currency ?: "JOD")
                         .put("countryCode", country ?: "JO")
                 )

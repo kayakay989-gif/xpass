@@ -65,7 +65,7 @@ export function WalletPayButton({
         <ActivityIndicator color="#FFFFFF" />
       ) : (
         <Text style={styles.appleLabel}>
-          {Platform.OS === 'ios' ? '\uF8FF' : ''} Pay
+          {Platform.OS === 'ios' ? '\uF8FF Pay with Apple Pay' : 'Pay with Apple Pay'}
         </Text>
       )}
     </TouchableOpacity>

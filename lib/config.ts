@@ -62,7 +62,9 @@ export const config = {
     // NOTE: this is NOT the App ID (com.xpass.app). It must be a Merchant ID
     // created under Apple Developer > Identifiers > Merchant IDs, with an
     // Apple Pay Payment Processing Certificate registered in the MPGS gateway.
-    appleMerchantId: env.EXPO_PUBLIC_APPLE_MERCHANT_ID || '',
+    appleMerchantId:
+      env.EXPO_PUBLIC_APPLE_MERCHANT_ID ||
+      'merchant.com.xpass.app',
     // Google Pay production merchant id (Google Pay Business Console)
     googleMerchantId: env.EXPO_PUBLIC_GOOGLE_PAY_MERCHANT_ID || 'BCR2DN5T22RLHU35',
     // MPGS Google Pay tokenization gateway name is "mpgs" (NOT "mastercard").

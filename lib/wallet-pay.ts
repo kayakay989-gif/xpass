@@ -1,5 +1,6 @@
 import { Platform, NativeModules } from 'react-native';
 import config from '@/lib/config';
+import { formatGatewayAmount } from '@/lib/money';
 
 /**
  * Unified Apple Pay (iOS) / Google Pay (Android) helper.
@@ -47,25 +48,30 @@ function googleModule(): any {
   return NativeModules?.GooglePayModule ?? null;
 }
 
-/** True only when the platform wallet is configured and ready to pay. */
+/** True when this platform should show its native wallet button. */
 export async function isWalletPayAvailable(): Promise<boolean> {
   try {
     if (Platform.OS === 'ios') {
-      const mod = appleModule();
-      if (!mod || typeof mod.canMakePayments !== 'function') return false;
-      if (!config.wallet.appleMerchantId) return false;
-      return await mod.canMakePayments();
+      // Always offer Apple Pay on iOS once the merchant id is known. Hiding the
+      // button behind canMakePayments() made it disappear on devices/wallets
+      // that still can complete a payment after the sheet opens.
+      return !!config.wallet.appleMerchantId;
     }
     if (Platform.OS === 'android') {
       const mod = googleModule();
       if (!mod || typeof mod.isReadyToPay !== 'function') return false;
       if (!config.wallet.googleMerchantId || !config.wallet.gatewayMerchantId) return false;
-      return await mod.isReadyToPay();
+      try {
+        const ready = await mod.isReadyToPay();
+        return ready !== false;
+      } catch {
+        return true;
+      }
     }
     return false;
   } catch (e) {
     console.warn('[WalletPay] availability check failed', e);
-    return false;
+    return Platform.OS === 'ios' && !!config.wallet.appleMerchantId;
   }
 }
 
@@ -76,7 +82,7 @@ export async function isWalletPayAvailable(): Promise<boolean> {
 export async function requestWalletPayment(
   req: WalletPaymentRequest
 ): Promise<WalletPaymentResult> {
-  const amountStr = Number.isFinite(req.amount) ? req.amount.toFixed(2) : String(req.amount);
+  const amountStr = formatGatewayAmount(req.amount, req.currency);
 
   try {
     if (Platform.OS === 'ios') {

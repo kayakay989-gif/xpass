@@ -33,7 +33,7 @@ class ApplePayModule: NSObject {
   private var authController: PKPaymentAuthorizationController?
 
   @objc static func requiresMainQueueSetup() -> Bool {
-    return false
+    return true
   }
 
   private func supportedNetworks() -> [PKPaymentNetwork] {
@@ -43,9 +43,7 @@ class ApplePayModule: NSObject {
   @objc(canMakePayments:rejecter:)
   func canMakePayments(_ resolve: @escaping RCTPromiseResolveBlock,
                        rejecter reject: @escaping RCTPromiseRejectBlock) {
-    let canPay = PKPaymentAuthorizationController.canMakePayments() &&
-                 PKPaymentAuthorizationController.canMakePayments(usingNetworks: supportedNetworks())
-    resolve(canPay)
+    resolve(PKPaymentAuthorizationController.canMakePayments())
   }
 
   @objc(requestPayment:resolver:rejecter:)
@@ -144,11 +142,8 @@ RCT_EXTERN_METHOD(requestPayment:(NSDictionary *)config
 `;
 
 const withApplePayEntitlement = (config) => {
-  const merchantId = process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID;
-  if (!merchantId) {
-    // No merchant id configured: skip entitlement to avoid breaking provisioning.
-    return config;
-  }
+  const merchantId =
+    process.env.EXPO_PUBLIC_APPLE_MERCHANT_ID || 'merchant.com.xpass.app';
   return withEntitlementsPlist(config, (cfg) => {
     cfg.modResults['com.apple.developer.in-app-payments'] = [merchantId];
     return cfg;

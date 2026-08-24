@@ -1,5 +1,6 @@
 import { SubscriptionDuration, SubscriptionTier } from '@/types';
 import { calculateSubscriptionPrice } from '@/backend/lib/pricing';
+import { formatGatewayAmount } from '@/lib/money';
 
 type BrowserDetails = {
   acceptHeaders?: string;
@@ -263,9 +264,7 @@ export async function payWithToken(params: {
     throw new Error('CVV is required for tokenized payment');
   }
 
-  const amountStr = Number.isFinite(amount)
-    ? amount.toFixed(2)
-    : String(amount);
+  const amountStr = formatGatewayAmount(amount, currency);
 
   const payload = {
     apiOperation: 'PAY',
@@ -314,7 +313,7 @@ export async function payWithDeviceToken(params: {
     throw new Error('Wallet payment token is required');
   }
 
-  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+  const amountStr = formatGatewayAmount(amount, currency);
 
   const payload = {
     apiOperation: 'PAY',
@@ -371,7 +370,7 @@ export async function payWithDecryptedApplePay(params: {
     throw new Error('Decrypted Apple Pay card data is incomplete');
   }
 
-  const amountStr = Number.isFinite(amount) ? amount.toFixed(2) : String(amount);
+  const amountStr = formatGatewayAmount(amount, currency);
 
   const payload = {
     apiOperation: 'PAY',
@@ -432,9 +431,7 @@ export async function payWithCard(params: {
     throw new Error('Card expiry missing');
   }
 
-  const amountStr = Number.isFinite(amount)
-    ? amount.toFixed(2)
-    : String(amount);
+  const amountStr = formatGatewayAmount(amount, currency);
 
   const payload = {
     apiOperation: 'PAY',
@@ -547,9 +544,7 @@ export async function authenticatePayer(params: {
     browserDetails = defaultBrowserDetails,
   } = params;
 
-  const amountStr = Number.isFinite(amount)
-    ? amount.toFixed(2)
-    : String(amount);
+  const amountStr = formatGatewayAmount(amount, currency);
 
   const payload = {
     apiOperation: 'AUTHENTICATE_PAYER',
@@ -617,9 +612,7 @@ export async function payWithAuthentication(params: {
     throw new Error('Card expiry missing for authenticated payment');
   }
 
-  const amountStr = Number.isFinite(amount)
-    ? amount.toFixed(2)
-    : String(amount);
+  const amountStr = formatGatewayAmount(amount, currency);
 
   const payload = {
     apiOperation: 'PAY',

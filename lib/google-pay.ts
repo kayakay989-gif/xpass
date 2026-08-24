@@ -4,6 +4,7 @@
  */
 
 import { Platform, NativeModules } from 'react-native';
+import { formatGatewayAmount } from '@/lib/money';
 
 export interface GooglePayConfig {
   merchantName: string;
@@ -89,7 +90,7 @@ export async function requestGooglePayPaymentWeb(
       ],
       transactionInfo: {
         totalPriceStatus: 'FINAL',
-        totalPrice: config.totalPrice.toFixed(2),
+        totalPrice: formatGatewayAmount(config.totalPrice, config.currency),
         currencyCode: config.currency,
         countryCode: config.country,
       },
@@ -147,7 +148,7 @@ export async function requestGooglePayPaymentAndroid(
       allowedNetworks: config.allowedNetworks,
       currency: config.currency,
       country: config.country,
-      totalPrice: config.totalPrice.toFixed(2),
+      totalPrice: formatGatewayAmount(config.totalPrice, config.currency),
     };
 
     // Request payment via native module
