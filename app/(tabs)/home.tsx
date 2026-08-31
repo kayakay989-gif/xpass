@@ -238,6 +238,12 @@ export default function HomeScreen() {
     longitudeDelta: 0.1,
   };
 
+  const { blockForMembershipLoad, timedOut } = useMembershipUiReady({
+    enabled: !isGuest && !!firebaseUser,
+    isPending: subscriptionQuery.isPending,
+    resetKey: firebaseUser?.uid ?? null,
+  });
+
   if (isLoadingAuth) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -247,11 +253,6 @@ export default function HomeScreen() {
     );
   }
 
-  const { blockForMembershipLoad, timedOut } = useMembershipUiReady({
-    enabled: !isGuest && !!firebaseUser,
-    isPending: subscriptionQuery.isPending,
-    resetKey: firebaseUser?.uid ?? null,
-  });
   const membershipUnresolved =
     !isGuest && !!firebaseUser && subscription == null && !subscriptionQuery.isSuccess && !subscriptionQuery.isError;
   const membershipPending = membershipUnresolved && (blockForMembershipLoad || timedOut);

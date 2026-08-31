@@ -445,6 +445,14 @@ export default function PaymentScreen() {
       console.error('[Payment] Wallet payment error:', error);
       setPaymentProcessing(false);
       setStatusMessage('');
+      const message = String(error?.message || error?.data?.message || '');
+      if (/already have an active subscription/i.test(message)) {
+        Alert.alert(
+          'Apple Pay is available',
+          'The Apple Pay sheet completed successfully. This account already has an active membership, so no new charge was created. New subscriptions are paid with Apple Pay from this same checkout screen.'
+        );
+        return;
+      }
       Alert.alert('Payment Failed', error?.message || 'Failed to process payment. Please try again.');
     } finally {
       setWalletProcessing(false);
@@ -1043,6 +1051,34 @@ export default function PaymentScreen() {
           contentContainerStyle={{ paddingBottom: 32 }}
           keyboardShouldPersistTaps="handled"
         >
+          {(Platform.OS === 'ios'
+            ? !!config.wallet.appleMerchantId
+            : walletAvailable && getWalletMethod() === 'google_pay') &&
+            !appliedCoupon?.isFree &&
+            cardAmount > 0 && (
+            <View style={styles.walletPaySection} testID="apple-pay-section" accessibilityLabel="Apple Pay">
+              <Text style={styles.walletPayTitle}>
+                {Platform.OS === 'ios' ? 'Apple Pay' : 'Google Pay'}
+              </Text>
+              <Text style={styles.walletPayHint}>
+                {Platform.OS === 'ios'
+                  ? 'Tap Pay with Apple Pay to complete this subscription with a Visa or Mastercard saved in Wallet. This works on iPhone and iPad.'
+                  : 'Tap Google Pay to complete this subscription with a saved Google Wallet card.'}
+              </Text>
+              <WalletPayButton
+                method={Platform.OS === 'ios' ? 'apple_pay' : 'google_pay'}
+                onPress={handleWalletPayment}
+                disabled={walletProcessing || paymentProcessing}
+                loading={walletProcessing}
+              />
+              <View style={styles.walletDividerRow}>
+                <View style={styles.walletDividerLine} />
+                <Text style={styles.walletDividerText}>or pay with card</Text>
+                <View style={styles.walletDividerLine} />
+              </View>
+            </View>
+          )}
+
           <View style={styles.summaryCard}>
             <CreditCard size={48} color={Colors.primary} style={styles.icon} />
             <Text style={styles.packageName}>{getTierName()}</Text>
@@ -1183,22 +1219,6 @@ export default function PaymentScreen() {
               </View>
             )}
           </View>
-
-          {walletAvailable && !appliedCoupon?.isFree && cardAmount > 0 && getWalletMethod() && (
-            <View style={styles.walletPaySection}>
-              <WalletPayButton
-                method={getWalletMethod()!}
-                onPress={handleWalletPayment}
-                disabled={walletProcessing || paymentProcessing}
-                loading={walletProcessing}
-              />
-              <View style={styles.walletDividerRow}>
-                <View style={styles.walletDividerLine} />
-                <Text style={styles.walletDividerText}>or pay with card</Text>
-                <View style={styles.walletDividerLine} />
-              </View>
-            </View>
-          )}
 
           {!appliedCoupon?.isFree && cardAmount > 0 && (
             <>
@@ -2295,6 +2315,23 @@ const styles = StyleSheet.create({
   },
   walletPaySection: {
     marginBottom: 16,
+    padding: 16,
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  walletPayTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: Colors.text,
+    marginBottom: 6,
+  },
+  walletPayHint: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginBottom: 8,
+    lineHeight: 18,
   },
   walletDividerRow: {
     flexDirection: 'row',

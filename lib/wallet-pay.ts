@@ -121,7 +121,8 @@ export async function requestWalletPayment(
         allowedNetworks: config.wallet.allowedNetworks,
         currency: req.currency,
         country: config.wallet.country,
-        totalPrice: amountStr,
+        // Google Pay sheet amount must be 2 decimals; MPGS charge stays 3-decimal JOD.
+        totalPrice: Number(req.amount).toFixed(2),
       });
       const token = result?.paymentMethodData?.tokenizationData?.token ?? result?.paymentToken;
       if (result?.canceled) return { success: false, canceled: true };

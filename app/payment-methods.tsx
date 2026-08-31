@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { CreditCard, Plus, Trash2, Apple } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -106,17 +106,8 @@ export default function PaymentMethodsScreen() {
     );
   };
 
-  const handleAddApplePay = async () => {
-    const newMethod: PaymentMethod = {
-      id: `pm_${Date.now()}`,
-      type: 'apple_pay',
-      isDefault: paymentMethods.length === 0,
-      createdAt: new Date(),
-    };
-
-    const updated = [...paymentMethods, newMethod];
-    await savePaymentMethods(updated);
-    Alert.alert('Success', 'Apple Pay added successfully');
+  const handleAddApplePay = () => {
+    router.push('/(tabs)/subscription');
   };
 
   const handleRemove = async (id: string) => {
@@ -231,13 +222,15 @@ export default function PaymentMethodsScreen() {
                   <Text style={styles.addButtonText}>Add Card</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.addButton, styles.applePayButton]}
-                  onPress={handleAddApplePay}
-                >
-                  <Apple size={20} color={Colors.white} />
-                  <Text style={styles.addButtonText}>Add Apple Pay</Text>
-                </TouchableOpacity>
+                {Platform.OS === 'ios' ? (
+                  <TouchableOpacity
+                    style={[styles.addButton, styles.applePayButton]}
+                    onPress={handleAddApplePay}
+                  >
+                    <Apple size={20} color={Colors.white} />
+                    <Text style={styles.addButtonText}>Pay with Apple Pay</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </>
           )}

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Xpass",
     "slug": "xpass-subscription-app",
-    "version": "1.0.18",
+    "version": "1.0.19",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "68",
+      "buildNumber": "73",
       "entitlements": {
         "com.apple.developer.in-app-payments": [
           "merchant.com.xpass.app"
@@ -62,7 +62,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.xpass.unique",
-      "versionCode": 46,
+      "versionCode": 48,
       "config": {},
       "intentFilters": [
         {

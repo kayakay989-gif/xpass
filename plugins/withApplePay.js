@@ -51,11 +51,11 @@ class ApplePayModule: NSObject {
                       resolver resolve: @escaping RCTPromiseResolveBlock,
                       rejecter reject: @escaping RCTPromiseRejectBlock) {
     let merchantId = (config["merchantIdentifier"] as? String) ?? ""
-    let merchantName = (config["merchantName"] as? String) ?? "Xpass"
+    let merchantName = (config["merchantName"] as? String) ?? "Xpass Jo"
     let countryCode = (config["countryCode"] as? String) ?? "JO"
     let currencyCode = (config["currencyCode"] as? String) ?? "JOD"
     let amountStr = (config["amount"] as? String) ?? "0"
-    let label = (config["label"] as? String) ?? merchantName
+    let label = (config["label"] as? String) ?? ""
 
     if merchantId.isEmpty {
       reject("NO_MERCHANT", "Apple Pay merchant identifier is not configured", nil)
@@ -70,9 +70,14 @@ class ApplePayModule: NSObject {
     request.supportedNetworks = supportedNetworks()
 
     let amount = NSDecimalNumber(string: amountStr.isEmpty ? "0" : amountStr)
-    request.paymentSummaryItems = [
-      PKPaymentSummaryItem(label: label, amount: amount)
-    ]
+    // Guideline 4.9: the last summary item is the total and MUST show the merchant name.
+    var summaryItems: [PKPaymentSummaryItem] = []
+    let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedLabel.isEmpty && trimmedLabel.caseInsensitiveCompare(merchantName) != .orderedSame {
+      summaryItems.append(PKPaymentSummaryItem(label: trimmedLabel, amount: amount))
+    }
+    summaryItems.append(PKPaymentSummaryItem(label: merchantName, amount: amount, type: .final))
+    request.paymentSummaryItems = summaryItems
 
     self.paymentResolve = resolve
     self.paymentReject = reject

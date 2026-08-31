@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, TouchableOpacity, Image, ActivityIndicator, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +13,7 @@ import { isComingSoonTier } from '@/lib/coming-soon-tiers';
 import { formatDisplayUserName } from '@/lib/profile-validation';
 import { agentLog } from '@/lib/agent-debug-log';
 import { useMembershipUiReady } from '@/lib/use-membership-ui-ready';
+import { ApplePayDiscoverCard } from '@/components/ApplePayDiscoverCard';
 
 type Package = {
   tier: 'silver' | 'gold' | 'diamond' | 'elite';
@@ -251,6 +252,21 @@ export default function SubscriptionScreen() {
     };
   };
 
+  const openApplePayCheckout = () => {
+    if (isGuest || !firebaseUser) {
+      router.push('/login');
+      return;
+    }
+    const checkoutTier: Package['tier'] = 'gold';
+    const totalPrice = getTotalPrice(checkoutTier);
+    const q = new URLSearchParams({
+      tier: checkoutTier,
+      duration: String(selectedDuration),
+      price: String(totalPrice),
+    });
+    router.push(`/payment?${q.toString()}` as any);
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -297,6 +313,8 @@ export default function SubscriptionScreen() {
         <Text style={styles.visitNotice}>
           Membership includes one visit per day for the remainder of your chosen subscription package.
         </Text>
+
+        {Platform.OS === 'ios' ? <ApplePayDiscoverCard onPress={openApplePayCheckout} /> : null}
 
         <View style={styles.durationsContainer}>
           {DURATIONS.map((duration) => (

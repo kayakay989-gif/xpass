@@ -25,7 +25,7 @@ import {
   toAmmanDateString,
 } from '@/lib/jordan-time';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { app } from '@/lib/firebase';
+import { app, auth } from '@/lib/firebase';
 import {
   Shield,
   Users,
@@ -685,6 +685,7 @@ export default function AdminDashboardScreen() {
   const [stats, setStats] = useState<any>(null);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [userStatusFilter, setUserStatusFilter] = useState<'active' | 'inactive'>('active');
   const [checkInsStartDateFilter, setCheckInsStartDateFilter] = useState<Date | null>(null);
@@ -977,36 +978,63 @@ export default function AdminDashboardScreen() {
     }
   };
 
-  // Load data from Firestore directly
-  const loadData = async () => {
+  // Load data from Firestore + admin APIs. Wait for Firebase Auth restoration
+  // (normal browsers persist the session in IndexedDB; incognito usually has a
+  // fresh login). One failed source must not wipe the others.
+  const loadData = useCallback(async () => {
     try {
       setIsLoadingData(true);
-      
-      // Load all data in parallel
-      const [gymsData, usersData, checkInsData, subscriptionsData] = await Promise.all([
+      setLoadError(null);
+
+      if (auth.currentUser) {
+        await auth.currentUser.getIdToken().catch(() => null);
+      }
+
+      const [gymsResult, usersResult, checkInsResult, subscriptionsResult] = await Promise.allSettled([
         firestoreGyms.getAll(),
         trpcUtils.admin.getAllUsers.fetch(),
         firestoreCheckIns.getAll(),
         firestoreSubscriptions.getAll(),
       ]);
 
+      const gymsData = gymsResult.status === 'fulfilled' ? gymsResult.value : [];
+      const usersData = usersResult.status === 'fulfilled' ? usersResult.value : [];
+      const checkInsData = checkInsResult.status === 'fulfilled' ? checkInsResult.value : [];
+      const subscriptionsData =
+        subscriptionsResult.status === 'fulfilled' ? subscriptionsResult.value : [];
+
+      const failures = [
+        gymsResult.status === 'rejected' ? 'gyms' : null,
+        usersResult.status === 'rejected' ? 'users' : null,
+        checkInsResult.status === 'rejected' ? 'check-ins' : null,
+        subscriptionsResult.status === 'rejected' ? 'subscriptions' : null,
+      ].filter(Boolean);
+
+      if (failures.length > 0) {
+        console.error('[Admin] Partial data load failure:', {
+          failures,
+          gyms: gymsResult.status === 'rejected' ? gymsResult.reason : null,
+          users: usersResult.status === 'rejected' ? usersResult.reason : null,
+          checkIns: checkInsResult.status === 'rejected' ? checkInsResult.reason : null,
+          subscriptions:
+            subscriptionsResult.status === 'rejected' ? subscriptionsResult.reason : null,
+        });
+        setLoadError(`Could not load ${failures.join(', ')}. Refresh the page or try again.`);
+      }
+
       setGyms(gymsData);
-      
-      // Users already include active subscription from admin.getAllUsers
       setUsers(usersData);
-      
       setCheckIns(checkInsData);
       setSubscriptions(subscriptionsData);
 
-      // Calculate stats
       const todayCheckIns = checkInsData.filter((ci: any) =>
         isSameAmmanCalendarDay(new Date(ci.timestamp), new Date())
       );
-
       const activeSubs = subscriptionsData.filter((sub: any) => sub.isActive);
-
-      // Calculate revenue (sum of all subscription total prices)
-      const totalRevenue = subscriptionsData.reduce((sum: number, sub: any) => sum + (sub.totalPrice || 0), 0);
+      const totalRevenue = subscriptionsData.reduce(
+        (sum: number, sub: any) => sum + (sub.totalPrice || 0),
+        0
+      );
 
       setStats({
         totalUsers: usersData.length,
@@ -1018,12 +1046,12 @@ export default function AdminDashboardScreen() {
       });
     } catch (error) {
       console.error('[Admin] Error loading data:', error);
-      Alert.alert('Error', 'Failed to load data from Firestore');
+      setLoadError('Failed to load admin data. Refresh the page or open a private window and sign in again.');
     } finally {
       setIsLoadingData(false);
       setIsRefreshing(false);
     }
-  };
+  }, [trpcUtils]);
 
   // Load spotlight images for admin panel and normalize positions in memory
   const loadSpotlightImages = useCallback(async () => {
@@ -1053,11 +1081,12 @@ export default function AdminDashboardScreen() {
     }
   }, []);
 
-  // Load data on mount and when refreshing
   useEffect(() => {
-    loadData();
-    loadSpotlightImages();
-  }, []);
+    if (isAuthLoading || isCheckingAdmin) return;
+    if (!isAuthenticated || !isAdmin) return;
+    void loadData();
+    void loadSpotlightImages();
+  }, [isAuthLoading, isCheckingAdmin, isAuthenticated, isAdmin, loadData, loadSpotlightImages]);
 
   const onRefresh = async () => {
     setIsRefreshing(true);
@@ -2351,6 +2380,21 @@ export default function AdminDashboardScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {loadError ? (
+        <View style={styles.loadErrorBanner}>
+          <Text style={styles.loadErrorText}>{loadError}</Text>
+          <TouchableOpacity
+            onPress={() => {
+              setIsRefreshing(true);
+              void loadData();
+            }}
+            style={styles.loadErrorRetry}
+          >
+            <Text style={styles.loadErrorRetryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <ScrollView
         style={styles.scrollView}
@@ -4950,6 +4994,36 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#EFEFEF',
+  },
+  loadErrorBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 12,
+  },
+  loadErrorText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#991B1B',
+    lineHeight: 18,
+  },
+  loadErrorRetry: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#DC2626',
+    borderRadius: 8,
+  },
+  loadErrorRetryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700' as const,
   },
   brandRow: {
     flexDirection: 'row' as const,

@@ -220,6 +220,24 @@ export default function ProfileScreen() {
 
             <View style={styles.divider} />
 
+            {Platform.OS === 'ios' ? (
+              <>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => router.push('/(tabs)/subscription')}
+                  accessibilityLabel="Apple Pay"
+                >
+                  <CreditCard size={20} color={Colors.text} />
+                  <View style={styles.menuContent}>
+                    <Text style={styles.menuTitle}>Apple Pay</Text>
+                    <Text style={styles.menuSubtitle}>Pay for a membership with Apple Pay</Text>
+                  </View>
+                  <ChevronRight size={20} color={Colors.textSecondary} />
+                </TouchableOpacity>
+                <View style={styles.divider} />
+              </>
+            ) : null}
+
             <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/refer-friend')}>
               <Gift size={20} color={Colors.text} />
               <View style={styles.menuContent}>

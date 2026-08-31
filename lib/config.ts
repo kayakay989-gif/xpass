@@ -57,7 +57,7 @@ export const config = {
   // All values are env-driven; wallet buttons stay hidden until the native
   // modules report availability, so the stable card flow is never affected.
   wallet: {
-    merchantName: env.EXPO_PUBLIC_WALLET_MERCHANT_NAME || 'Xpass',
+    merchantName: env.EXPO_PUBLIC_WALLET_MERCHANT_NAME || 'Xpass Jo',
     // Apple Pay merchant identifier, e.g. "merchant.com.xpass.app".
     // NOTE: this is NOT the App ID (com.xpass.app). It must be a Merchant ID
     // created under Apple Developer > Identifiers > Merchant IDs, with an

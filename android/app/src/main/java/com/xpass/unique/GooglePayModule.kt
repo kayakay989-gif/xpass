@@ -55,7 +55,7 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
     }
 
     private fun readTotalPrice(config: ReadableMap): String {
-        if (!config.hasKey("totalPrice") || config.isNull("totalPrice")) return "0.000"
+        if (!config.hasKey("totalPrice") || config.isNull("totalPrice")) return "0.00"
         val raw = try {
             when (config.getType("totalPrice")) {
                 ReadableType.Number -> config.getDouble("totalPrice")
@@ -65,8 +65,10 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
         } catch (_: Exception) {
             0.0
         }
-        // JOD uses 3 decimal places (fils). Sending 2 digits can make MPGS charge 10x too little.
-        return String.format(Locale.US, "%.3f", raw)
+        // Google Pay PaymentDataRequest.totalPrice must match ^[0-9]+(\.[0-9][0-9])?$
+        // Three decimals (JOD fils) cause ERROR_CODE_DEVELOPER_ERROR (10). MPGS still
+        // receives the 3-decimal amount from the backend charge, not this sheet value.
+        return String.format(Locale.US, "%.2f", raw)
     }
 
     private fun allowedNetworksJson(allowedNetworks: ReadableArray?): JSONArray {
@@ -168,9 +170,8 @@ class GooglePayModule(reactContext: ReactApplicationContext) :
                     JSONObject()
                         .put("totalPrice", totalPrice)
                         .put("totalPriceStatus", "FINAL")
-                        .put("checkoutOption", "COMPLETE_IMMEDIATE_PURCHASE")
-                        .put("currencyCode", currency ?: "JOD")
-                        .put("countryCode", country ?: "JO")
+                        .put("currencyCode", (currency ?: "JOD").uppercase(Locale.US))
+                        .put("countryCode", (country ?: "JO").uppercase(Locale.US))
                 )
 
             val request = PaymentDataRequest.fromJson(paymentDataRequestJson.toString())

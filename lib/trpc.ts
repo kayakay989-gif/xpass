@@ -132,7 +132,8 @@ export const trpcClient = trpc.createClient({
           // No noisy request logging in production
           
           // Render cold starts + gym owner lookup can exceed 14s on mobile Safari.
-          const REQUEST_TIMEOUT_MS = isGymOwnerLogin ? 60_000 : 14_000;
+          const isAdminRoute = urlString.includes('admin.');
+          const REQUEST_TIMEOUT_MS = isGymOwnerLogin || isAdminRoute ? 60_000 : 14_000;
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
           let response: Response;
