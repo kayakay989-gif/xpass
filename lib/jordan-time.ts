@@ -110,6 +110,12 @@ export function getPreviousAmmanDayStart(now: Date = new Date()): Date {
   return startOfAmmanDay(addAmmanCalendarDays(toAmmanDateString(now), -1));
 }
 
+/** Daily credit cutover: 12:01 AM Jordan time (not 1:00 AM). */
+export function isAmmanCreditCutoverReached(now: Date = new Date()): boolean {
+  const p = ammanDateParts(now);
+  return p.hour > 0 || p.minute >= 1;
+}
+
 /** End of the Jordan calendar day that is `durationMonths` after start (in Amman). */
 export function computeSubscriptionEndDate(startDate: Date, durationMonths: number): Date {
   const [y, m, d] = toAmmanDateString(startDate).split('-').map(Number);

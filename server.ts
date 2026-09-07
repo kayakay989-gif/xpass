@@ -13,7 +13,7 @@ if (fs.existsSync('.env.local')) {
 import app from './backend/hono';
 import { applyDailyMissedCheckInCreditDeduction } from './backend/lib/credits';
 import { runSubscriptionExpiryEmailJob } from './backend/lib/subscription-expiry-emails';
-import { ammanDayKey } from './lib/jordan-time';
+import { ammanDayKey, isAmmanCreditCutoverReached } from './lib/jordan-time';
 
 const port = Number(process.env.PORT || 3000);
 
@@ -29,6 +29,7 @@ serve({
 let lastCreditsRunDayKey = '';
 const maybeRunDailyCreditsJob = async () => {
   const now = new Date();
+  if (!isAmmanCreditCutoverReached(now)) return;
   const dayKey = ammanDayKey(now);
   if (lastCreditsRunDayKey === dayKey) return;
   try {
@@ -43,7 +44,7 @@ const maybeRunDailyCreditsJob = async () => {
 void maybeRunDailyCreditsJob();
 setInterval(() => {
   void maybeRunDailyCreditsJob();
-}, 60 * 60 * 1000);
+}, 60 * 1000);
 
 const runExpiryEmails = async () => {
   try {

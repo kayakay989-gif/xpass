@@ -2,7 +2,7 @@
   "expo": {
     "name": "Xpass",
     "slug": "xpass-subscription-app",
-    "version": "1.0.19",
+    "version": "1.0.21",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "74",
+      "buildNumber": "75",
       "entitlements": {
         "com.apple.developer.in-app-payments": [
           "merchant.com.xpass.app"

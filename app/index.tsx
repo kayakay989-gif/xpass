@@ -9,7 +9,7 @@ import Colors from '@/constants/colors';
  */
 export default function Index() {
   const router = useRouter();
-  const { bootstrapNavigationReady, firebaseUser, isGuest, isAdmin, isProfileComplete } = useAuth();
+  const { bootstrapNavigationReady, firebaseUser, isGuest, isAdmin, isProfileComplete, user } = useAuth();
 
   useLayoutEffect(() => {
     if (!bootstrapNavigationReady) return;
