@@ -125,24 +125,22 @@ const formatPaymentSource = (method?: string | null): string => {
   }
 };
 
-export default adminProcedure
-  .input(
-    z.object({
-      range: z
-        .enum([
-          "THIS_MONTH",
-          "LAST_MONTH",
-          "LAST_3_MONTHS",
-          "LAST_12_MONTHS",
-          "ALL_TIME",
-          "CUSTOM",
-        ])
-        .default("ALL_TIME"),
-      startDate: z.string().datetime().nullable().optional(),
-      endDate: z.string().datetime().nullable().optional(),
-    })
-  )
-  .query(async ({ input }) => {
+export const revenueSummaryInput = z.object({
+  range: z
+    .enum([
+      "THIS_MONTH",
+      "LAST_MONTH",
+      "LAST_3_MONTHS",
+      "LAST_12_MONTHS",
+      "ALL_TIME",
+      "CUSTOM",
+    ])
+    .default("ALL_TIME"),
+  startDate: z.string().datetime().nullable().optional(),
+  endDate: z.string().datetime().nullable().optional(),
+});
+
+export async function loadAdminRevenueSummary(input: z.infer<typeof revenueSummaryInput>) {
     const { range } = input;
     const customStart = input.startDate ? new Date(input.startDate) : null;
     const customEnd = input.endDate ? new Date(input.endDate) : null;
@@ -314,4 +312,8 @@ export default adminProcedure
         })),
       },
     };
-  });
+}
+
+export default adminProcedure
+  .input(revenueSummaryInput)
+  .query(({ input }) => loadAdminRevenueSummary(input));
