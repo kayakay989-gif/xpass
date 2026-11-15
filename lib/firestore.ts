@@ -480,6 +480,7 @@ export const firestoreGymOwners = {
       email: data.email,
       name: data.name,
       createdAt: timestampToDate(data.createdAt),
+      passwordIsCustom: data.passwordIsCustom === true,
     };
   },
 

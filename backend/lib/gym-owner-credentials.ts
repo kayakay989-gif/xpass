@@ -40,6 +40,7 @@ export async function applyCanonicalGymOwnerCredentials(
       usernameNormalized: normalizeGymOwnerUsername(username),
       passwordHash: hashPassword(password),
       password: admin.firestore.FieldValue.delete(),
+      passwordIsCustom: false,
     },
     { merge: true }
   );

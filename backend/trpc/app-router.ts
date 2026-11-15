@@ -27,11 +27,14 @@ import adminGetAllGyms from "./routes/admin/getAllGyms/route";
 import adminCreateGym from "./routes/admin/createGym/route";
 import adminCreateGymOwner from "./routes/admin/createGymOwner/route";
 import adminResetGymOwnerPassword from "./routes/admin/resetGymOwnerPassword/route";
+import adminUpdateGymOwnerCredentials from "./routes/admin/updateGymOwnerCredentials/route";
+import adminExportUsers from "./routes/admin/exportUsers/route";
 import adminDeleteGym from "./routes/admin/deleteGym/route";
 import adminGetStats from "./routes/admin/getStats/route";
 import adminPayoutsGetAll from "./routes/admin/payouts/getAll/route";
 import adminPayoutsMarkPaid from "./routes/admin/payouts/markPaid/route";
 import adminRevenueGetSummary from "./routes/admin/revenue/getSummary/route";
+import adminRevenueExportReport from "./routes/admin/revenue/exportReport/route";
 import { registerProcedure } from "./routes/auth/register/route";
 import { loginProcedure } from "./routes/auth/login/route";
 import { googleLoginProcedure } from "./routes/auth/googleLogin/route";
@@ -90,6 +93,7 @@ const adminPayoutsRouter = createTRPCRouter({
 
 const adminRevenueRouter = createTRPCRouter({
   getSummary: adminRevenueGetSummary,
+  exportReport: adminRevenueExportReport,
 });
 
 const adminRouter = createTRPCRouter({
@@ -99,6 +103,8 @@ const adminRouter = createTRPCRouter({
   createGym: adminCreateGym,
   createGymOwner: adminCreateGymOwner,
   resetGymOwnerPassword: adminResetGymOwnerPassword,
+  updateGymOwnerCredentials: adminUpdateGymOwnerCredentials,
+  exportUsers: adminExportUsers,
   deleteGym: adminDeleteGym,
   getStats: adminGetStats,
   payouts: adminPayoutsRouter,

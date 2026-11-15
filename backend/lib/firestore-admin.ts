@@ -531,6 +531,7 @@ function mapGymOwnerDoc(doc: admin.firestore.QueryDocumentSnapshot): GymOwner {
     email: data.email,
     name: data.name,
     createdAt: timestampToDate(data.createdAt),
+    passwordIsCustom: data.passwordIsCustom === true,
   };
 }
 
@@ -756,23 +757,24 @@ export const firestorePayments = {
   },
 };
 
+function mapCouponDoc(id: string, data: any): Coupon {
+  return {
+    id,
+    code: data.code || '',
+    discountPercent: data.discountPercent || 0,
+    isActive: !!data.isActive,
+    createdAt: timestampToDate(data.createdAt),
+    usageLimit: data.usageLimit ?? null,
+    usedCount: data.usedCount || 0,
+    expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
+  };
+}
+
 // Coupons collection
 export const firestoreCoupons = {
   async getAll(): Promise<Coupon[]> {
     const snapshot = await adminDb.collection('coupons').orderBy('createdAt', 'desc').get();
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        code: data.code || '',
-        discountPercent: data.discountPercent || 0,
-        isActive: !!data.isActive,
-        createdAt: timestampToDate(data.createdAt),
-        usageLimit: data.usageLimit ?? null,
-        usedCount: data.usedCount || 0,
-        expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
-      };
-    });
+    return snapshot.docs.map((doc) => mapCouponDoc(doc.id, doc.data()));
   },
 
   async getAllPaginated(limit: number = 20, offset: number = 0): Promise<{ coupons: Coupon[]; total: number; hasMore: boolean }> {
@@ -799,19 +801,7 @@ export const firestoreCoupons = {
     
     const snapshot = await query.limit(limit).get();
     
-    const coupons = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        code: data.code || '',
-        discountPercent: data.discountPercent || 0,
-        isActive: !!data.isActive,
-        createdAt: timestampToDate(data.createdAt),
-        usageLimit: data.usageLimit ?? null,
-        usedCount: data.usedCount || 0,
-        expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
-      };
-    });
+    const coupons = snapshot.docs.map((doc) => mapCouponDoc(doc.id, doc.data()));
 
     return {
       coupons,
@@ -831,17 +821,7 @@ export const firestoreCoupons = {
     if (snapshot.empty) return null;
     
     const doc = snapshot.docs[0];
-    const data = doc.data();
-    return {
-      id: doc.id,
-      code: data.code || '',
-      discountPercent: data.discountPercent || 0,
-      isActive: !!data.isActive,
-      createdAt: timestampToDate(data.createdAt),
-      usageLimit: data.usageLimit ?? null,
-      usedCount: data.usedCount || 0,
-      expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
-    };
+    return mapCouponDoc(doc.id, doc.data());
   },
 
   async getById(couponId: string): Promise<Coupon | null> {
@@ -850,17 +830,7 @@ export const firestoreCoupons = {
     
     const data = doc.data();
     if (!data) return null;
-    
-    return {
-      id: doc.id,
-      code: data.code || '',
-      discountPercent: data.discountPercent || 0,
-      isActive: !!data.isActive,
-      createdAt: timestampToDate(data.createdAt),
-      usageLimit: data.usageLimit ?? null,
-      usedCount: data.usedCount || 0,
-      expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : null,
-    };
+    return mapCouponDoc(doc.id, data);
   },
 
   async create(coupon: Coupon): Promise<void> {

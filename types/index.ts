@@ -145,6 +145,8 @@ export interface GymOwner {
   email?: string;
   name?: string;
   createdAt: Date;
+  /** True after an admin sets a password that is not the standard gym_ pattern. */
+  passwordIsCustom?: boolean;
 }
 
 export interface Coupon {

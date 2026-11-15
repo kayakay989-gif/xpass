@@ -624,6 +624,12 @@ export default function AdminDashboardScreen() {
     username: string;
     password: string;
   } | null>(null);
+  const [editingGymPasswordIsCustom, setEditingGymPasswordIsCustom] = useState(false);
+  const [isEditingGymUsername, setIsEditingGymUsername] = useState(false);
+  const [usernameDraft, setUsernameDraft] = useState('');
+  const [isChangingGymPassword, setIsChangingGymPassword] = useState(false);
+  const [gymPasswordDraft, setGymPasswordDraft] = useState('');
+  const [gymPasswordConfirm, setGymPasswordConfirm] = useState('');
   const [gymCreationStep, setGymCreationStep] = useState<'details' | 'pricing' | 'review'>('details');
   const [newGym, setNewGym] = useState({
     name: '',
@@ -662,6 +668,9 @@ export default function AdminDashboardScreen() {
   const [isCreatingGym, setIsCreatingGym] = useState(false);
   const createGymOwnerMutation = trpc.admin.createGymOwner.useMutation();
   const resetGymOwnerPasswordMutation = trpc.admin.resetGymOwnerPassword.useMutation();
+  const updateGymCredentialsMutation = trpc.admin.updateGymOwnerCredentials.useMutation();
+  const exportUsersMutation = trpc.admin.exportUsers.useMutation();
+  const exportRevenueMutation = trpc.admin.revenue.exportReport.useMutation();
   const [isUploadingGymImages, setIsUploadingGymImages] = useState(false);
   const [gymImagePreviewUrl, setGymImagePreviewUrl] = useState<string | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -1282,6 +1291,12 @@ export default function AdminDashboardScreen() {
     setEditingGymId(null);
     setEditingGymOwnerId(null);
     setEditingGymCredentials(null);
+    setEditingGymPasswordIsCustom(false);
+    setIsEditingGymUsername(false);
+    setUsernameDraft('');
+    setIsChangingGymPassword(false);
+    setGymPasswordDraft('');
+    setGymPasswordConfirm('');
     setTempLocation({
       latitude: 31.963158,
       longitude: 35.930359,
@@ -1392,13 +1407,20 @@ export default function AdminDashboardScreen() {
           username: owner.username || '',
           password: buildGymOwnerDefaultPassword(gym.id),
         });
+        setEditingGymPasswordIsCustom(owner.passwordIsCustom === true);
       } else {
         // If no owner record, reconstruct credentials from gym ID pattern
         setEditingGymCredentials({
           username: buildGymOwnerUsername(gym.id, gym.name || ''),
           password: buildGymOwnerDefaultPassword(gym.id),
         });
+        setEditingGymPasswordIsCustom(false);
       }
+      setIsEditingGymUsername(false);
+      setUsernameDraft('');
+      setIsChangingGymPassword(false);
+      setGymPasswordDraft('');
+      setGymPasswordConfirm('');
 
       setShowAddGymModal(true);
     } catch (e) {
@@ -1726,6 +1748,93 @@ export default function AdminDashboardScreen() {
       Alert.alert('Copied!', 'Credentials copied to clipboard');
     } catch (error) {
       console.error('Failed to copy:', error);
+    }
+  };
+
+  const downloadExcelFile = (filename: string, base64: string) => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      notify('Download', 'Excel download is available in the web admin panel.');
+      return;
+    }
+    const binary = window.atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleExportUsers = async () => {
+    try {
+      const result = await exportUsersMutation.mutateAsync({
+        search: searchQuery,
+        status: userStatusFilter,
+      });
+      downloadExcelFile(result.filename, result.base64);
+    } catch (error: any) {
+      notify('Export failed', error?.message || 'Could not export users.');
+    }
+  };
+
+  const handleExportRevenue = async () => {
+    try {
+      const result = await exportRevenueMutation.mutateAsync({
+        range: revenueRange,
+        startDate: revenueStartDate ? revenueStartDate.toISOString() : null,
+        endDate: revenueEndDate ? revenueEndDate.toISOString() : null,
+      });
+      downloadExcelFile(result.filename, result.base64);
+    } catch (error: any) {
+      notify('Export failed', error?.message || 'Could not export the revenue report.');
+    }
+  };
+
+  const saveGymUsername = async () => {
+    if (!editingGymId) return;
+    try {
+      const result = await updateGymCredentialsMutation.mutateAsync({
+        gymId: editingGymId,
+        username: usernameDraft,
+      });
+      setEditingGymCredentials((current) =>
+        current ? { ...current, username: result.username } : current
+      );
+      setIsEditingGymUsername(false);
+      notify('Username updated', 'The gym can now sign in with the new username.');
+    } catch (error: any) {
+      notify('Could not update username', error?.message || 'Please try again.');
+    }
+  };
+
+  const saveGymPassword = async () => {
+    if (!editingGymId) return;
+    if (gymPasswordDraft !== gymPasswordConfirm) {
+      notify('Passwords do not match', 'Enter the same password in both fields.');
+      return;
+    }
+    try {
+      await updateGymCredentialsMutation.mutateAsync({
+        gymId: editingGymId,
+        newPassword: gymPasswordDraft,
+        confirmPassword: gymPasswordConfirm,
+      });
+      setEditingGymPasswordIsCustom(true);
+      setIsChangingGymPassword(false);
+      setGymPasswordDraft('');
+      setGymPasswordConfirm('');
+      notify('Password updated', 'The previous password no longer works. Share the new password with the gym.');
+    } catch (error: any) {
+      notify('Could not update password', error?.message || 'Please try again.');
     }
   };
 
@@ -2555,6 +2664,25 @@ export default function AdminDashboardScreen() {
               </TouchableOpacity>
             </View>
 
+            <TouchableOpacity
+              style={styles.exportButton}
+              activeOpacity={0.85}
+              onPress={() => void handleExportUsers()}
+              disabled={exportUsersMutation.isPending}
+            >
+              {exportUsersMutation.isPending ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Download size={18} color="#FFFFFF" />
+                  <Text style={styles.exportButtonText}>Download Excel</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.credentialHint}>
+              Exports every subscriber matching the current search and Active or Inactive filter.
+            </Text>
+
             {filteredUsers.map((user: any) => {
               const subscription = user.subscription;
               const now = new Date();
@@ -3325,6 +3453,25 @@ export default function AdminDashboardScreen() {
                 </View>
               </View>
             )}
+
+            <TouchableOpacity
+              style={styles.exportButton}
+              activeOpacity={0.85}
+              onPress={() => void handleExportRevenue()}
+              disabled={exportRevenueMutation.isPending}
+            >
+              {exportRevenueMutation.isPending ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Download size={18} color="#FFFFFF" />
+                  <Text style={styles.exportButtonText}>Download Revenue Report</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.credentialHint}>
+              Uses the selected period above. Choose This Month, Last Month, or Custom for a specific month.
+            </Text>
 
             <View style={styles.statsGrid2x2}>
               <View style={styles.statCardMinimal}>
@@ -4295,33 +4442,132 @@ export default function AdminDashboardScreen() {
                     
                     <View style={styles.credentialItem}>
                       <Text style={styles.credentialLabel}>Username:</Text>
-                      <View style={styles.credentialValueContainer}>
-                        <Text style={styles.credentialValue}>{editingGymCredentials.username}</Text>
-                        <TouchableOpacity
-                          style={styles.copyButton}
-                          onPress={() => copyToClipboard(editingGymCredentials.username)}
-                        >
-                          <Copy size={16} color="#4F46E5" />
-                        </TouchableOpacity>
-                      </View>
+                      {isEditingGymUsername ? (
+                        <View style={{ flex: 1 }}>
+                          <TextInput
+                            style={styles.input}
+                            value={usernameDraft}
+                            onChangeText={setUsernameDraft}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                          />
+                          <View style={styles.credentialActionRow}>
+                            <TouchableOpacity
+                              style={styles.resetPasswordButton}
+                              onPress={() => void saveGymUsername()}
+                              disabled={updateGymCredentialsMutation.isPending}
+                            >
+                              {updateGymCredentialsMutation.isPending ? (
+                                <ActivityIndicator color="#4338CA" />
+                              ) : (
+                                <Text style={styles.resetPasswordButtonText}>Save</Text>
+                              )}
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.resetPasswordButton}
+                              onPress={() => setIsEditingGymUsername(false)}
+                            >
+                              <Text style={styles.resetPasswordButtonText}>Cancel</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={styles.credentialValueContainer}>
+                          <Text style={styles.credentialValue}>{editingGymCredentials.username}</Text>
+                          <TouchableOpacity
+                            style={styles.copyButton}
+                            onPress={() => {
+                              setUsernameDraft(editingGymCredentials.username);
+                              setIsEditingGymUsername(true);
+                            }}
+                          >
+                            <Edit size={16} color="#4F46E5" />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.copyButton}
+                            onPress={() => copyToClipboard(editingGymCredentials.username)}
+                          >
+                            <Copy size={16} color="#4F46E5" />
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
 
                     <View style={styles.credentialItem}>
                       <Text style={styles.credentialLabel}>Password:</Text>
-                      <View style={styles.credentialValueContainer}>
-                        <Text style={styles.credentialValue}>{editingGymCredentials.password}</Text>
-                        <TouchableOpacity
-                          style={styles.copyButton}
-                          onPress={() => copyToClipboard(editingGymCredentials.password)}
-                        >
-                          <Copy size={16} color="#4F46E5" />
-                        </TouchableOpacity>
-                      </View>
+                      {editingGymPasswordIsCustom ? (
+                        <Text style={styles.credentialValue}>Custom password is set</Text>
+                      ) : (
+                        <View style={styles.credentialValueContainer}>
+                          <Text style={styles.credentialValue}>{editingGymCredentials.password}</Text>
+                          <TouchableOpacity
+                            style={styles.copyButton}
+                            onPress={() => copyToClipboard(editingGymCredentials.password)}
+                          >
+                            <Copy size={16} color="#4F46E5" />
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
 
                     <Text style={styles.credentialHint}>
-                      Password is gym_ plus the first 8 characters of the Gym ID (not the short code at the end of the username).
+                      {editingGymPasswordIsCustom
+                        ? 'A custom password is saved as a hash. It cannot be displayed. Use Change Password to set another one, or Sync login password to restore the standard gym password.'
+                        : 'Password is gym_ plus the first 8 characters of the Gym ID (not the short code at the end of the username).'}
                     </Text>
+
+                    {isChangingGymPassword ? (
+                      <View>
+                        <TextInput
+                          style={styles.input}
+                          value={gymPasswordDraft}
+                          onChangeText={setGymPasswordDraft}
+                          placeholder="New password"
+                          secureTextEntry
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        <TextInput
+                          style={styles.input}
+                          value={gymPasswordConfirm}
+                          onChangeText={setGymPasswordConfirm}
+                          placeholder="Confirm new password"
+                          secureTextEntry
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        <View style={styles.credentialActionRow}>
+                          <TouchableOpacity
+                            style={styles.resetPasswordButton}
+                            onPress={() => void saveGymPassword()}
+                            disabled={updateGymCredentialsMutation.isPending}
+                          >
+                            {updateGymCredentialsMutation.isPending ? (
+                              <ActivityIndicator color="#4338CA" />
+                            ) : (
+                              <Text style={styles.resetPasswordButtonText}>Save password</Text>
+                            )}
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.resetPasswordButton}
+                            onPress={() => {
+                              setIsChangingGymPassword(false);
+                              setGymPasswordDraft('');
+                              setGymPasswordConfirm('');
+                            }}
+                          >
+                            <Text style={styles.resetPasswordButtonText}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.resetPasswordButton}
+                        onPress={() => setIsChangingGymPassword(true)}
+                      >
+                        <Text style={styles.resetPasswordButtonText}>Change password</Text>
+                      </TouchableOpacity>
+                    )}
 
                     <TouchableOpacity
                       style={styles.resetPasswordButton}
@@ -4335,6 +4581,10 @@ export default function AdminDashboardScreen() {
                             username: result.username,
                             password: result.password,
                           });
+                          setEditingGymPasswordIsCustom(false);
+                          setIsChangingGymPassword(false);
+                          setGymPasswordDraft('');
+                          setGymPasswordConfirm('');
                           Alert.alert(
                             'Password synced',
                             `Share these credentials with the gym owner:\n\nUsername: ${result.username}\nPassword: ${result.password}`
@@ -6397,6 +6647,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700' as const,
     color: '#4338CA',
+  },
+  credentialActionRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+    marginBottom: 8,
+  },
+  exportButton: {
+    marginTop: 12,
+    marginBottom: 8,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    flexDirection: 'row' as const,
+    gap: 8,
+    alignSelf: 'flex-start' as const,
+  },
+  exportButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#FFFFFF',
   },
   copyAllButton: {
     flexDirection: 'row' as const,
