@@ -1,6 +1,12 @@
 # Keep EAS upload small and avoid locked Gradle caches on Windows (EBUSY during tarball)
 xpass-test-build.tar.gz
 *.tar.gz
+*.apk
+*.aab
+*.ipa
+*.zip
+build-65-extract/
+release-restored-v1.0.21-50/
 logcat-*.txt
 dist/
 artifacts/

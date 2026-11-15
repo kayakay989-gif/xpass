@@ -1,4 +1,5 @@
 import { View, StyleSheet, Text, Platform } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import Colors from '@/constants/colors';
 import { config } from '@/lib/config';
@@ -50,17 +51,81 @@ function parseCoord(value: unknown): number | null {
   return null;
 }
 
-function normalizeGymForMap(gym: any): (any & { latitude: number; longitude: number }) | null {
+type MapGym = any & { id: string; latitude: number; longitude: number };
+
+function normalizeGymForMap(gym: any): MapGym | null {
   const lat = parseCoord(gym?.latitude);
   const lng = parseCoord(gym?.longitude);
   if (lat == null || lng == null || !isValidCoordinate(lat, lng)) return null;
-  return { ...gym, latitude: lat, longitude: lng };
+  const rawId = gym?.id != null ? String(gym.id).trim() : '';
+  const id = rawId.length > 0 ? rawId : `${lat.toFixed(5)},${lng.toFixed(5)},${gym?.name ?? ''}`;
+  return { ...gym, id, latitude: lat, longitude: lng };
+}
+
+/**
+ * The home screen re-sorts gyms whenever GPS updates. iOS MapKit treats that
+ * reorder as remove-and-insert, so pins vanish and a different subset returns.
+ * The list keeps its distance order. The map keeps one pin per gym in id order.
+ */
+function prepareMapGyms(gyms: any[]): MapGym[] {
+  if (!Array.isArray(gyms) || gyms.length === 0) return [];
+  const seen = new Set<string>();
+  const pins: MapGym[] = [];
+  for (const gym of gyms) {
+    const pin = normalizeGymForMap(gym);
+    if (!pin || seen.has(pin.id)) continue;
+    seen.add(pin.id);
+    pins.push(pin);
+  }
+  pins.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return pins;
+}
+
+function pinSignature(pins: MapGym[]): string {
+  return pins
+    .map((gym) => `${gym.id}\t${gym.latitude}\t${gym.longitude}\t${gym.name ?? ''}\t${gym.address ?? ''}`)
+    .join('\n');
 }
 
 export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }: MapViewComponentProps) {
+  const onPressRef = useRef(onMarkerPress);
+  onPressRef.current = onMarkerPress;
+  // iOS drops annotations inserted before the map view has a frame, then a later
+  // render brings back a different subset.
+  const [mapReady, setMapReady] = useState(Platform.OS !== 'ios');
   const mappableGyms = Array.isArray(gyms)
-    ? (gyms.map(normalizeGymForMap).filter(Boolean) as (any & { latitude: number; longitude: number })[])
+    ? (gyms.map(normalizeGymForMap).filter(Boolean) as MapGym[])
     : [];
+  const pins = prepareMapGyms(gyms);
+  const signature = pinSignature(pins);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return undefined;
+    const timer = setTimeout(() => setMapReady(true), 700);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const markers = useMemo(() => {
+    if (!Marker) return null;
+    return pins.map((gym) => (
+      <Marker
+        key={gym.id}
+        identifier={gym.id}
+        coordinate={{
+          latitude: gym.latitude,
+          longitude: gym.longitude,
+        }}
+        title={typeof gym.name === 'string' ? gym.name : undefined}
+        description={typeof gym.address === 'string' ? gym.address : undefined}
+        // Balloon markers on iOS hide overlapping pins, then show another subset
+        // after the map moves. Legacy pins stay where they were placed.
+        {...(Platform.OS === 'ios' ? { useLegacyPinView: true, tracksViewChanges: false } : {})}
+        onCalloutPress={() => onPressRef.current?.(gym)}
+      />
+    ));
+    // A new gym array with the same pins must not rebuild native markers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
 
   // If maps are not available (Expo Go), show fallback
   if (!MapView || !Marker) {
@@ -125,19 +190,9 @@ export default function MapViewComponent({ gyms, initialRegion, onMarkerPress }:
         loadingEnabled
         // Avoid Fabric reparenting glitches when the map sits inside a ScrollView.
         removeClippedSubviews={false}
+        onMapReady={() => setMapReady(true)}
       >
-        {mappableGyms.map((gym) => (
-          <Marker
-            key={gym.id}
-            coordinate={{
-              latitude: gym.latitude,
-              longitude: gym.longitude,
-            }}
-            title={gym.name}
-            description={gym.address}
-            onCalloutPress={() => onMarkerPress?.(gym)}
-          />
-        ))}
+        {mapReady ? markers : null}
       </MapView>
     </View>
   );
