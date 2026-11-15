@@ -22,7 +22,7 @@
       "usesAppleSignIn": true,
       "googleServicesFile": "./GoogleService-Info.plist",
       "bundleIdentifier": "com.xpass.app",
-      "buildNumber": "81",
+      "buildNumber": "82",
       "entitlements": {
         "com.apple.developer.in-app-payments": [
           "merchant.com.xpass.app"
